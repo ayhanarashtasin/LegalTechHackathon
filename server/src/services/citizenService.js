@@ -31,9 +31,10 @@ export async function getCitizenCases(actor) {
   const applications = await Application.find(query).sort({ createdAt: -1 }).lean()
 
   const enrichedCases = await Promise.all(applications.map(async (app) => {
-    const [caseRecord, activeAssignment, changeRequests, mediation, facts] = await Promise.all([
+    const [applicant, caseRecord, activeAssignment, changeRequests, mediation, facts] = await Promise.all([
+      Person.findById(app.applicantPersonId).select('displayName').lean(),
       Case.findOne({ applicationId: app.applicationId }).lean(),
-      LawyerAssignment.findOne({ applicationId: app.applicationId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).populate('lawyerUserId', 'displayName username phone').lean(),
+      LawyerAssignment.findOne({ applicationId: app.applicationId, active: true, status: 'ACCEPTED' }).populate('lawyerUserId', 'displayName').lean(),
       LawyerChangeRequest.find({ applicationId: app.applicationId }).sort({ createdAt: -1 }).lean(),
       Mediation.findOne({ applicationId: app.applicationId }).sort({ createdAt: -1 }).lean(),
       CaseFact.find({ applicationId: app.applicationId }).lean(),
@@ -42,24 +43,22 @@ export async function getCitizenCases(actor) {
     return {
       applicationId: app.applicationId,
       caseId: app.caseId,
-      applicantName: app.applicantName,
+      applicantName: applicant?.displayName || 'Applicant',
       status: app.status,
       reviewState: app.reviewState,
       intakeChannel: app.channel || 'WEBSITE',
       createdAt: app.createdAt,
-      submittedAt: app.submittedAt,
-      priority: app.priority,
+      submittedAt: app.createdAt,
+      priority: app.priorityDecision,
       caseRecord: caseRecord ? {
-        caseNumber: caseRecord.caseNumber,
+        caseNumber: caseRecord.caseId,
         status: caseRecord.status,
         nextHearingAt: caseRecord.nextHearingAt,
         nextAction: caseRecord.nextAction,
-        courtName: caseRecord.courtName,
       } : null,
       lawyer: activeAssignment ? {
         assignmentId: activeAssignment._id,
         lawyerName: activeAssignment.lawyerUserId?.displayName || 'Panel Lawyer',
-        lawyerUsername: activeAssignment.lawyerUserId?.username,
         status: activeAssignment.status,
         appointedAt: activeAssignment.createdAt,
       } : null,
@@ -89,7 +88,11 @@ export async function requestCitizenLawyerChange(applicationId, { reason }, acto
   }
 
   return mongoose.connection.transaction(async (session) => {
-    const application = await Application.findOne({ applicationId }).session(session)
+    const owner = await User.findById(actor.userId).select('personId').session(session).lean()
+    const ownership = owner?.personId
+      ? { $or: [{ citizenUserId: actor.userId }, { applicantPersonId: owner.personId }] }
+      : { citizenUserId: actor.userId }
+    const application = await Application.findOne({ applicationId, ...ownership }).session(session)
     if (!application) {
       throw new HttpError(404, 'NOT_FOUND', 'Application record not found.')
     }
@@ -101,16 +104,16 @@ export async function requestCitizenLawyerChange(applicationId, { reason }, acto
     const activeAssignment = await LawyerAssignment.findOne({
       applicationId,
       active: true,
-      status: { $in: ['PENDING', 'ACCEPTED'] }
+      status: 'ACCEPTED'
     }).session(session)
 
     if (!activeAssignment) {
       throw new HttpError(409, 'NO_ACTIVE_LAWYER', 'There is no active lawyer assigned to this case.')
     }
 
-    const existingOpen = await LawyerChangeRequest.findOne({ applicationId, status: 'OPEN' }).session(session)
-    if (existingOpen) {
-      throw new HttpError(409, 'REQUEST_ALREADY_OPEN', 'A lawyer change request is already waiting for DLAO review.')
+    const existingRequest = await LawyerChangeRequest.findOne({ applicationId, status: { $in: ['OPEN', 'APPROVED'] } }).session(session)
+    if (existingRequest) {
+      throw new HttpError(409, 'REQUEST_IN_PROGRESS', 'A lawyer change request is already under review or awaiting replacement.')
     }
 
     const [changeRequest] = await LawyerChangeRequest.create([{
@@ -128,7 +131,7 @@ export async function requestCitizenLawyerChange(applicationId, { reason }, acto
       kind: 'LAWYER_CHANGE_REVIEW',
       title: 'Review citizen lawyer-change request (Portal)',
       ownerRole: 'DLAO_OFFICER',
-      nextAction: `Citizen requested new lawyer. Reason: "${reason.trim().slice(0, 100)}". Review and approve/decline reassignment.`,
+      nextAction: 'Review the recorded citizen request and safe-contact profile; approve or decline separately from any replacement offer.',
     }], { session })
 
     await auditApplication(
@@ -222,7 +225,7 @@ export async function submitDigitalApplication(input, actor) {
       channel: 'WEB',
       submittedByUserId: actor.userId,
       citizenUserId: actor.userId.toString(),
-      auditSequence: 1,
+      auditSequence: 0,
     }], { session })
 
     await auditApplication(
@@ -259,9 +262,10 @@ export async function getCitizenProfile(actor) {
   }
 
   // Find their latest application to extract preferred safe contact and district
-  const latestApp = await Application.findOne({
-    $or: [{ citizenUserId: actor.userId }, { applicantPersonId: user.personId }],
-  }).sort({ createdAt: -1 }).lean()
+  const latestQuery = user.personId
+    ? { $or: [{ citizenUserId: actor.userId }, { applicantPersonId: user.personId }] }
+    : { citizenUserId: actor.userId }
+  const latestApp = await Application.findOne(latestQuery).sort({ createdAt: -1 }).lean()
 
   let safeProfile = null
   let districtFact = null

@@ -191,6 +191,7 @@ export default function CitizenDashboard({ session }) {
           <div className="cases-list-stack">
             {cases.map((c) => {
               const pendingChangeReq = c.changeRequests?.find(cr => cr.status === 'OPEN')
+              const approvedChangeReq = c.changeRequests?.find(cr => cr.status === 'APPROVED')
               const pastChangeReqs = c.changeRequests?.filter(cr => cr.status !== 'OPEN') || []
               const isAccepted = c.status === 'ACCEPTED'
 
@@ -257,7 +258,7 @@ export default function CitizenDashboard({ session }) {
                     <div className="bento-box">
                       <div className="bento-head-between">
                         <h4 className="bento-title">{bi('Appointed Legal Counsel', 'নিযুক্ত আইনজীবী')}</h4>
-                        {isAccepted && c.lawyer && !pendingChangeReq && (
+                        {isAccepted && c.lawyer && !pendingChangeReq && !approvedChangeReq && (
                           <button
                             type="button"
                             className="text-action-link"
@@ -293,15 +294,25 @@ export default function CitizenDashboard({ session }) {
                             </div>
                           )}
 
+                          {approvedChangeReq && (
+                            <div className="pending-reassignment-notice" role="status">
+                              <div>
+                                <strong>{bi('Change approved; replacement pending', 'বদলের অনুরোধ অনুমোদিত; নতুন আইনজীবীর অপেক্ষায়')}</strong>
+                                <p>{bi('The current lawyer remains assigned until a replacement accepts.', 'নতুন আইনজীবী দায়িত্ব না নেওয়া পর্যন্ত বর্তমান আইনজীবী নিযুক্ত থাকবেন।')}</p>
+                              </div>
+                            </div>
+                          )}
+
                           {pastChangeReqs.length > 0 && (
                             <details className="past-requests-details">
                               <summary>{bi('View Past Change Requests', 'পূর্ববর্তী অনুরোধের বিবরণ')} ({pastChangeReqs.length})</summary>
                               <ul className="past-requests-list">
                                 {pastChangeReqs.map(pr => (
-                                  <li key={pr._id}>
+                                  <li key={pr.id}>
                                     <span className="pr-date">{new Date(pr.createdAt).toLocaleDateString()}</span>
                                     <span className={`pr-status ${pr.status.toLowerCase()}`}>{pr.status}</span>
                                     <p className="pr-reason">&ldquo;{pr.reason}&rdquo;</p>
+                                    {pr.reviewReason && <p className="pr-reason">{bi('Officer review: ', 'কর্মকর্তার পর্যালোচনা: ')}{pr.reviewReason}</p>}
                                   </li>
                                 ))}
                               </ul>

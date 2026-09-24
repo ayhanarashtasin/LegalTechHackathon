@@ -80,6 +80,12 @@ export function validateLawyerChangeRequest(request, _response, next) {
   next()
 }
 
+export function validateCitizenLawyerChangeRequest(request, _response, next) {
+  const value = body(request, ['reason'])
+  value.reason = text(value.reason, 'Applicant request', 5, 1000)
+  next()
+}
+
 export function validateChangeReview(request, _response, next) {
   const value = body(request, ['decision', 'reason'])
   if (!['APPROVE', 'DECLINE'].includes(value.decision)) fail('Review decision is invalid.')

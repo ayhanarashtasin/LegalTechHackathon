@@ -29,7 +29,7 @@ export async function getLawyerManagement(applicationId, actor) {
     LawyerAssignment.find({ applicationId }).sort({ createdAt: -1 }).populate('lawyerUserId', 'displayName').lean(),
     LawyerChangeRequest.find({ applicationId }).sort({ createdAt: -1 }).lean(),
     LawyerUpdate.find({ applicationId }).sort({ dueAt: 1 }).lean(),
-    LawyerPaymentEvent.find({ applicationId }).sort({ createdAt: -1 }).select('assignmentId stage status reason createdAt').lean(),
+    LawyerPaymentEvent.find({ applicationId }).sort({ createdAt: -1, _id: -1 }).select('assignmentId stage status reason createdAt').lean(),
     RoleAssignment.find({ role: 'PANEL_LAWYER', officeCode: application.officeCode, active: true }).populate('userId', 'displayName active').lean(),
   ])
   const lawyerIds = [...new Set([
@@ -39,7 +39,13 @@ export async function getLawyerManagement(applicationId, actor) {
   const holds = await PanelLawyerHold.find({ lawyerUserId: { $in: lawyerIds } }).lean()
   const holdByLawyer = new Map(holds.map((hold) => [hold.lawyerUserId.toString(), hold]))
   const paymentByAssignment = new Map()
-  for (const payment of payments) if (!paymentByAssignment.has(payment.assignmentId.toString())) paymentByAssignment.set(payment.assignmentId.toString(), payment)
+  const paymentsByAssignment = new Map()
+  for (const payment of payments) {
+    const assignmentId = payment.assignmentId.toString()
+    if (!paymentByAssignment.has(assignmentId)) paymentByAssignment.set(assignmentId, payment)
+    if (!paymentsByAssignment.has(assignmentId)) paymentsByAssignment.set(assignmentId, [])
+    paymentsByAssignment.get(assignmentId).push(payment)
+  }
   return {
     applicationId, caseId: caseRecord.caseId,
     casePlan: { nextHearingAt: caseRecord.nextHearingAt ?? null, nextAction: caseRecord.nextAction ?? '' },
@@ -56,7 +62,8 @@ export async function getLawyerManagement(applicationId, actor) {
       return { id: assignment._id, lawyerUserId: assignment.lawyerUserId?._id ?? null, lawyerName: assignment.lawyerUserId?.displayName ?? 'Unavailable',
         status: assignment.status, active: assignment.active, changeRequestId: assignment.changeRequestId ?? null,
         hold: hold ? { newAssignmentHold: hold.newAssignmentHold, reviewState: hold.reviewState, reviewerRole: hold.reviewerRole, triggeredAt: hold.triggeredAt, reviewReason: hold.reviewReason ?? null } : null,
-        payment: paymentByAssignment.get(assignment._id.toString()) ?? null }
+        payment: paymentByAssignment.get(assignment._id.toString()) ?? null,
+        paymentHistory: paymentsByAssignment.get(assignment._id.toString()) ?? [] }
     }),
     updates: updates.map(({ _id, assignmentId, sequence, dueAt, instruction, status, missedAt, submittedAt, report, nextAction }) => ({ id: _id, assignmentId, sequence, dueAt, instruction, status, missedAt, submittedAt, report, nextAction })),
     changeRequests: requests.map(({ _id, channel, reason, status, reviewReason, reviewedAt, createdAt }) => ({ id: _id, channel, reason, status, reviewReason, reviewedAt, createdAt })),
@@ -288,7 +295,7 @@ export async function requestLawyerChange(applicationId, input, actor) {
     const application = await Application.findOne({ applicationId }).session(session)
     if (!application?.caseId || application.status !== 'ACCEPTED') throw new HttpError(409, 'CASE_REQUIRED', 'A lawyer-change request needs an accepted Case.')
     if (!await LawyerAssignment.exists({ applicationId, active: true, status: 'ACCEPTED' }).session(session)) throw new HttpError(409, 'NO_ACTIVE_LAWYER', 'No active panel-lawyer assignment is recorded for this Case.')
-    if (await LawyerChangeRequest.exists({ applicationId, status: 'OPEN' }).session(session)) throw new HttpError(409, 'REQUEST_ALREADY_OPEN', 'A lawyer-change request is already waiting for human review.')
+    if (await LawyerChangeRequest.exists({ applicationId, status: { $in: ['OPEN', 'APPROVED'] } }).session(session)) throw new HttpError(409, 'REQUEST_IN_PROGRESS', 'A lawyer-change request is already under review or awaiting replacement.')
     await auditApplication(application, session, 'APPLICANT_LAWYER_CHANGE_REQUESTED', { contactChannel: input.contactChannel, status: 'OPEN' }, input.reason, actor.userId, 'HELPLINE_AGENT')
     const [changeRequest] = await LawyerChangeRequest.create([{
       applicationId, caseId: application.caseId, channel: input.contactChannel, reason: input.reason, status: 'OPEN', recordedByUserId: actor.userId,

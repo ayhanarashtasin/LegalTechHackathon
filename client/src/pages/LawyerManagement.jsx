@@ -7,6 +7,7 @@ const localDate = (value) => {
   const date = new Date(value)
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
+const paymentStages = ['CASE_PREPARATION', 'HEARING_ATTENDANCE', 'CLAIM_REVIEW', 'RECONCILIATION']
 
 export default function LawyerManagement({ applicationId, token, onChanged }) {
   const [data, setData] = useState(null)
@@ -156,11 +157,21 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
 
       {paymentAssignments.length > 0 && <div className="block"><h3 id="payment-title"><Bi en="Payment status" bn="পেমেন্টের অবস্থা" /></h3>
         <p className="muted"><Bi en="Status record only. No money moves here." bn="এখানে শুধু পেমেন্টের অবস্থা নথিভুক্ত হয়; টাকা লেনদেন হয় না।" /></p>
-        <ul className="plain-list">{paymentAssignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong> {item.payment ? <><Term code={item.payment.stage} /> · <Badge code={item.payment.status} /></> : <span className="muted">{bi('Nothing recorded', 'কিছু লেখা নেই')}</span>}{item.payment && <p><small>{item.payment.reason}</small></p>}</div></li>)}</ul>
+        <ul className="plain-list">{paymentAssignments.map((item) => <li key={item.id}>
+          <strong>{item.lawyerName}</strong> <Badge code={item.status} />
+          <ul className="plain-list">{paymentStages.map((stage) => {
+            const latest = item.paymentHistory?.find((entry) => entry.stage === stage)
+            return <li key={stage}><Term code={stage} />: {latest ? <><Badge code={latest.status} /> <small>{when(latest.createdAt)} · {latest.reason}</small></> : <span className="muted">{bi('Not recorded', 'নথিভুক্ত নয়')}</span>}</li>
+          })}</ul>
+          {item.paymentHistory?.length > 0 && <details>
+            <summary>{bi('Status history', 'অবস্থার ইতিহাস')} ({num(item.paymentHistory.length)})</summary>
+            <ol className="timeline compact">{item.paymentHistory.map((entry) => <li key={entry._id}><Term code={entry.stage} /> · <Badge code={entry.status} /> · {when(entry.createdAt)}<p>{entry.reason}</p></li>)}</ol>
+          </details>}
+        </li>)}</ul>
         <AddForm en="Record payment status" bn="পেমেন্টের অবস্থা লিখুন">
           <form onSubmit={recordPayment} className="form-stack inline-form">
             <label htmlFor="payment-assignment"><Bi en="Lawyer" bn="আইনজীবী" /></label><select id="payment-assignment" value={paymentAssignmentId || paymentAssignments[0].id} onChange={(event) => setPaymentAssignmentId(event.target.value)}>{paymentAssignments.map((item) => <option key={item.id} value={item.id}>{item.lawyerName} · {say(item.status)}</option>)}</select>
-            <label htmlFor="payment-stage"><Bi en="Work stage" bn="কাজের ধাপ" /></label><select id="payment-stage" value={paymentStage} onChange={(event) => setPaymentStage(event.target.value)}>{['CASE_PREPARATION', 'HEARING_ATTENDANCE', 'CLAIM_REVIEW', 'RECONCILIATION'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+            <label htmlFor="payment-stage"><Bi en="Work stage" bn="কাজের ধাপ" /></label><select id="payment-stage" value={paymentStage} onChange={(event) => setPaymentStage(event.target.value)}>{paymentStages.map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
             <label htmlFor="payment-status"><Bi en="Status" bn="অবস্থা" /></label><select id="payment-status" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>{['SUBMITTED', 'UNDER_REVIEW', 'RECONCILED', 'PAYMENT_RECORDED', 'DISPUTED', 'NOT_RECORDED'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
             <label htmlFor="payment-reason"><Bi en="Note" bn="নোট" /></label><textarea id="payment-reason" value={paymentReason} onChange={(event) => setPaymentReason(event.target.value)} minLength="10" maxLength="500" required />
             <button type="submit" disabled={busy}><Bi en="Save payment status" bn="অবস্থা সংরক্ষণ" /></button>

@@ -143,6 +143,13 @@ test('Step 9: status, missed updates, temporary hold, separate human reassignmen
   } })
   assert.equal(payment.status, 201)
   assert.equal(payment.data.moneyMoved, false)
+  const secondPayment = await request(`/api/lawyers/assignments/${oldAssignment.id}/payment-status`, { method: 'POST', token: officer.token, body: {
+    stage: 'RECONCILIATION', status: 'RECONCILED', reason: 'Human officer recorded a separate reconciliation stage.',
+  } })
+  assert.equal(secondPayment.status, 201)
+  const paymentView = await request(`/api/lawyers/applications/${applicationId}`, { token: officer.token })
+  const oldPaymentHistory = paymentView.data.assignments.find(({ id }) => id === oldAssignment.id).paymentHistory
+  assert.deepEqual(oldPaymentHistory.map(({ stage }) => stage), ['RECONCILIATION', 'HEARING_ATTENDANCE'])
 
   const second = await acceptedApplication('Fictional second case')
   const assign = (body) => request(`/api/lawyers/applications/${second.applicationId}/assignments`, { method: 'POST', token: officer.token, body })
@@ -162,4 +169,146 @@ test('Step 9: status, missed updates, temporary hold, separate human reassignmen
   const serialized = JSON.stringify(trail.data.events).toLowerCase()
   assert.equal(serialized.includes('guilty'), false)
   assert.equal(serialized.includes('misconduct established'), false)
+})
+
+test('T1 citizen portal: owner request, human replacement, stage history, and audit', async () => {
+  const officer = await actor('test9.portal.officer', 'DLAO_OFFICER')
+  const lawyer = await actor('test9.portal.lawyer', 'PANEL_LAWYER')
+  const replacement = await actor('test9.portal.replacement', 'PANEL_LAWYER')
+  const register = (username) => request('/api/auth/register', { method: 'POST', body: {
+    username, password: 'fictional-test-password', name: 'Fictional Citizen Malek',
+  } })
+  const owner = await register('test9.portal.owner')
+  const other = await register('test9.portal.other')
+  assert.equal(owner.status, 201)
+  assert.equal(other.status, 201)
+  const submitted = await request('/api/citizen/applications', { method: 'POST', token: owner.data.token, body: {
+    applicantName: 'Fictional Abdul Malek', problem: 'The appointed panel lawyer has not responded about the hearing.',
+    district: 'Barguna', urgent: false, identityDocument: 'NONE', contactPhone: '',
+  } })
+  assert.equal(submitted.status, 201)
+  const { applicationId } = submitted.data
+  const casePath = `/api/citizen/cases/${applicationId}/lawyer-change`
+  const ownCases = await request('/api/citizen/cases', { token: owner.data.token })
+  assert.equal(ownCases.data.cases[0].applicantName, 'Fictional Abdul Malek')
+  assert.equal(ownCases.data.cases[0].intakeChannel, 'WEB')
+  assert.equal((await request('/api/citizen/cases', { token: other.data.token })).data.cases.length, 0)
+  assert.equal((await request(`/api/applications/${applicationId}/audit`, { token: officer.token })).data.valid, true)
+
+  assert.equal((await request(`/api/applications/${applicationId}/review`, { method: 'POST', token: officer.token, body: {
+    reviewState: 'READY_FOR_DECISION', reason: 'Fictional citizen application reviewed by the DLAO officer.',
+  } })).status, 200)
+  const accepted = await request(`/api/applications/${applicationId}/accept`, { method: 'POST', token: officer.token, body: {
+    reason: 'Fictional citizen application accepted after human review.',
+  } })
+  assert.equal(accepted.status, 200)
+  const offer = await request(`/api/lawyers/applications/${applicationId}/assignments`, { method: 'POST', token: officer.token, body: {
+    lawyerUserId: lawyer.user.id, reason: 'DLAO offers the first fictional panel assignment.',
+  } })
+  assert.equal(offer.status, 201)
+  assert.equal((await request(casePath, { method: 'POST', token: owner.data.token, body: { reason: 'A pending offer is not representation.' } })).data.error.code, 'NO_ACTIVE_LAWYER')
+  assert.equal((await request(`/api/lawyers/assignments/${offer.data.assignmentId}/respond`, { method: 'POST', token: lawyer.token, body: {
+    decision: 'ACCEPT', reason: 'Fictional lawyer accepts the panel assignment.',
+  } })).status, 200)
+  assert.equal((await request(casePath, { method: 'POST', token: other.data.token, body: {
+    reason: 'I must not change another citizen case.',
+  } })).status, 404)
+  assert.equal((await request(casePath, { method: 'POST', token: owner.data.token, body: {
+    reason: 'x', unexpected: true,
+  } })).status, 400)
+  assert.equal((await request('/api/citizen/cases/APP-bad/lawyer-change', { method: 'POST', token: owner.data.token, body: {
+    reason: 'The lawyer has not responded.',
+  } })).status, 400)
+  assert.equal(await models.LawyerChangeRequest.countDocuments({ applicationId }), 0)
+
+  const change = await request(casePath, { method: 'POST', token: owner.data.token, body: {
+    reason: 'The assigned lawyer missed two hearings and is unreachable.',
+  } })
+  assert.equal(change.status, 201)
+  assert.equal(change.data.status, 'OPEN')
+  assert.equal(await models.Task.countDocuments({ applicationId, kind: 'LAWYER_CHANGE_REVIEW', status: 'OPEN' }), 1)
+  assert.equal((await request(casePath, { method: 'POST', token: owner.data.token, body: {
+    reason: 'This request is already in progress.',
+  } })).data.error.code, 'REQUEST_IN_PROGRESS')
+  const review = await request(`/api/lawyers/applications/${applicationId}/change-requests/${change.data.requestId}/review`, { method: 'POST', token: officer.token, body: {
+    decision: 'APPROVE', reason: 'DLAO approved a separate replacement offer after case review.',
+  } })
+  assert.equal(review.data.reassignmentRequired, true)
+  assert.equal((await request(casePath, { method: 'POST', token: owner.data.token, body: {
+    reason: 'The approved request still awaits a replacement.',
+  } })).data.error.code, 'REQUEST_IN_PROGRESS')
+  const reviewedCases = await request('/api/citizen/cases', { token: owner.data.token })
+  assert.equal(reviewedCases.data.cases[0].changeRequests[0].status, 'APPROVED')
+  assert.equal(reviewedCases.data.cases[0].lawyer.lawyerName, lawyer.user.displayName)
+
+  const replacementOffer = await request(`/api/lawyers/applications/${applicationId}/assignments`, { method: 'POST', token: officer.token, body: {
+    lawyerUserId: replacement.user.id, changeRequestId: change.data.requestId,
+    reason: 'DLAO separately offers the replacement after approval.',
+  } })
+  assert.equal(replacementOffer.status, 201)
+  assert.equal((await request(`/api/lawyers/assignments/${replacementOffer.data.assignmentId}/respond`, { method: 'POST', token: replacement.token, body: {
+    decision: 'ACCEPT', reason: 'Fictional replacement accepts the case.',
+  } })).status, 200)
+  assert.equal((await models.LawyerAssignment.findById(offer.data.assignmentId)).status, 'REASSIGNED')
+  const completedCases = await request('/api/citizen/cases', { token: owner.data.token })
+  assert.equal(completedCases.data.cases[0].changeRequests[0].status, 'COMPLETED')
+  assert.equal(completedCases.data.cases[0].lawyer.lawyerName, replacement.user.displayName)
+  assert.equal(completedCases.data.cases[0].caseRecord.caseNumber, accepted.data.caseId)
+
+  for (const [stage, status, reason] of [
+    ['CASE_PREPARATION', 'SUBMITTED', 'Fictional preparation claim submitted for review.'],
+    ['CASE_PREPARATION', 'UNDER_REVIEW', 'Fictional preparation claim under human review.'],
+    ['RECONCILIATION', 'RECONCILED', 'Fictional old assignment reconciliation recorded.'],
+  ]) {
+    const payment = await request(`/api/lawyers/assignments/${offer.data.assignmentId}/payment-status`, { method: 'POST', token: officer.token, body: { stage, status, reason } })
+    assert.equal(payment.status, 201)
+    assert.equal(payment.data.moneyMoved, false)
+  }
+  const management = await request(`/api/lawyers/applications/${applicationId}`, { token: officer.token })
+  const history = management.data.assignments.find(({ id }) => id === offer.data.assignmentId).paymentHistory
+  assert.deepEqual(history.map(({ stage }) => stage), ['RECONCILIATION', 'CASE_PREPARATION', 'CASE_PREPARATION'])
+  assert.equal((await request(`/api/applications/${applicationId}/audit`, { token: officer.token })).data.valid, true)
+})
+
+test('T1 threshold needs two consecutive missed mandatory updates', async () => {
+  const officer = await actor('test9.threshold.officer', 'DLAO_OFFICER')
+  const helpline = await actor('test9.threshold.helpline', 'HELPLINE_AGENT')
+  const lawyer = await actor('test9.threshold.lawyer', 'PANEL_LAWYER')
+  const submitted = await request('/api/applications', { method: 'POST', token: helpline.token, body: { applicantName: 'Fictional threshold case' } })
+  const { applicationId } = submitted.data
+  await request(`/api/applications/${applicationId}/review`, { method: 'POST', token: officer.token, body: {
+    reviewState: 'READY_FOR_DECISION', reason: 'Fictional case checked by the DLAO officer.',
+  } })
+  await request(`/api/applications/${applicationId}/accept`, { method: 'POST', token: officer.token, body: {
+    reason: 'Fictional case accepted by the DLAO officer.',
+  } })
+  const offer = await request(`/api/lawyers/applications/${applicationId}/assignments`, { method: 'POST', token: officer.token, body: {
+    lawyerUserId: lawyer.user.id, reason: 'Fictional threshold assignment offered by DLAO.',
+  } })
+  assert.equal(offer.status, 201)
+  const assignmentId = offer.data.assignmentId
+  assert.equal((await request(`/api/lawyers/assignments/${assignmentId}/respond`, { method: 'POST', token: lawyer.token, body: {
+    decision: 'ACCEPT', reason: 'Fictional lawyer accepts this threshold case.',
+  } })).status, 200)
+  const schedule = async (offset) => {
+    const result = await request(`/api/lawyers/applications/${applicationId}/update-schedules`, { method: 'POST', token: officer.token, body: {
+      assignmentId, dueAt: new Date(Date.now() + offset).toISOString(), instruction: 'Provide the required fictional progress report.',
+    } })
+    assert.equal(result.status, 201)
+    return result.data.id
+  }
+  await schedule(30000)
+  assert.equal(await sweepOverdueLawyerUpdates(new Date(Date.now() + 60000)), 1)
+  assert.equal(await models.PanelLawyerHold.countDocuments({ lawyerUserId: lawyer.user.id }), 0)
+  const onTimeId = await schedule(120000)
+  const onTime = await request(`/api/lawyers/assignments/${assignmentId}/updates/${onTimeId}`, { method: 'POST', token: lawyer.token, body: {
+    report: 'The fictional file has been reviewed on time.', nextAction: 'Officer will confirm the next safe step.',
+  } })
+  assert.equal(onTime.data.status, 'SUBMITTED_ON_TIME')
+  await schedule(180000)
+  assert.equal(await sweepOverdueLawyerUpdates(new Date(Date.now() + 240000)), 1)
+  assert.equal(await models.PanelLawyerHold.countDocuments({ lawyerUserId: lawyer.user.id }), 0)
+  await schedule(300000)
+  assert.equal(await sweepOverdueLawyerUpdates(new Date(Date.now() + 360000)), 1)
+  assert.equal((await models.PanelLawyerHold.findOne({ lawyerUserId: lawyer.user.id })).newAssignmentHold, true)
 })

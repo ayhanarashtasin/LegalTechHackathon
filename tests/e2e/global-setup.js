@@ -18,6 +18,13 @@ export default async function globalSetup() {
     await models.RoleAssignment.create({ userId: user._id, role, officeCode: role === 'RECEIVING_DLAO' ? 'JHENAIDAH-DEMO' : 'DEMO' })
     actors[role] = { username, password }
   }
+  const secondLawyer = { username: 'e2e.panel_lawyer_alt', password: randomBytes(24).toString('base64url') }
+  const secondLawyerUser = await models.User.create({
+    username: secondLawyer.username, displayName: 'Fictional second panel lawyer',
+    passwordHash: await hashPassword(secondLawyer.password),
+  })
+  await models.RoleAssignment.create({ userId: secondLawyerUser._id, role: 'PANEL_LAWYER', officeCode: 'DEMO' })
+  actors.PANEL_LAWYER_ALT = secondLawyer
   process.env.E2E_ACTORS = JSON.stringify(actors)
   return async () => {
     if (mongoose.connection.name !== databaseName || !testDatabase.test(databaseName)) throw new Error('Refusing to remove a non-test database.')
