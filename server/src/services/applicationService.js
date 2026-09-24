@@ -892,7 +892,10 @@ export async function getCase(caseId, actor) {
     && await LawyerAssignment.findOne({ caseId, lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).lean()
   if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This case is not assigned to this user.')
   if (assignment.status === 'PENDING') return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: 'PENDING' }
-  const documents = await Document.find({ applicationId: record.applicationId, sensitivity: 'STANDARD' }).sort({ createdAt: 1 }).limit(20).select('label currentVersion').lean()
+  const [appRecord, documents] = await Promise.all([
+    Application.findOne({ applicationId: record.applicationId }).populate('applicantPersonId', 'name').lean(),
+    Document.find({ applicationId: record.applicationId, sensitivity: 'STANDARD' }).sort({ createdAt: 1 }).limit(20).select('label currentVersion').lean(),
+  ])
   // ponytail: first 20 standard documents for the demo; add paging when case files grow beyond the prototype.
   const versions = await DocumentVersion.find({ applicationId: record.applicationId, documentId: { $in: documents.map(({ _id }) => _id) } })
     .sort({ version: -1 }).select('+textContent version label qualityState contentHash documentId').lean()
@@ -903,6 +906,10 @@ export async function getCase(caseId, actor) {
     LawyerPaymentEvent.findOne({ assignmentId: assignment._id }).sort({ createdAt: -1 }).select('stage status reason createdAt').lean(),
   ])
   return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: assignment.status,
+    applicantName: appRecord?.applicantPersonId?.name ?? null,
+    legalNeed: appRecord?.legalNeed ?? null,
+    complaintType: appRecord?.complaintType ?? null,
+    vulnerability: appRecord?.vulnerability ?? [],
     nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null, updates,
     payment: payment ?? null, documents: documents.map((document) => ({ id: document._id, label: document.label, currentVersion: document.currentVersion, version: latest.get(document._id.toString()) ?? null })) }
 }
