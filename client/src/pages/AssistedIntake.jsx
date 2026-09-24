@@ -26,6 +26,7 @@ export default function AssistedIntake({ session }) {
   const [form, setForm] = useState(blank)
   const [draftId, setDraftId] = useState(emptyDraft)
   const [mode, setMode] = useState('CREATE')
+  const [intakeTask, setIntakeTask] = useState('NEW')
   const [applicationId, setApplicationId] = useState('')
   const [baseVersion, setBaseVersion] = useState(null)
   const [startedAt, setStartedAt] = useState(() => new Date().toISOString())
@@ -59,6 +60,7 @@ export default function AssistedIntake({ session }) {
     setForm(blank())
     setDraftId(emptyDraft())
     setMode('CREATE')
+    setIntakeTask('NEW')
     setApplicationId('')
     setBaseVersion(null)
     setStartedAt(new Date().toISOString())
@@ -150,6 +152,7 @@ export default function AssistedIntake({ session }) {
     try {
       const record = await api(`/api/assisted/${applicationId.trim().toUpperCase()}`, { token: session.token })
       setMode('REVISION')
+      setIntakeTask('CORRECTION')
       setApplicationId(record.applicationId)
       setBaseVersion(record.version)
       setDraftId(emptyDraft())
@@ -193,50 +196,116 @@ export default function AssistedIntake({ session }) {
   }
 
   const item = (name) => bi(name, itemsBn[name] || name)
+  const queuedCount = drafts.filter((row) => row.status === 'QUEUED').length
 
   return <section aria-labelledby="assisted-title">
     <Link to="/">← {bi('Workspace', 'কর্মক্ষেত্র')}</Link>
     <p className="eyebrow">{bi('UDC assisted access · fictional data only', 'ইউডিসি সহায়তা · শুধু কাল্পনিক তথ্য')}</p>
     <h1 id="assisted-title">{bi('Assisted intake and offline drafts', 'সহায়তায় আবেদন ও অফলাইন খসড়া')}</h1>
-    <p className="safety-note"><strong>{bi('Legal aid is free.', 'আইনি সহায়তা বিনামূল্যে।')}</strong> {bi("No UDC worker may charge for this. The applicant's words, the translation, and the typist are recorded separately; an officer checks them later.", 'কোনো ইউডিসি কর্মী এর জন্য টাকা নিতে পারবেন না। আবেদনকারীর কথা, অনুবাদ ও টাইপিস্ট আলাদাভাবে লেখা হয়; পরে একজন কর্মকর্তা যাচাই করেন।')}</p>
-    <p role="status">{bi(`Connection: ${online ? 'online' : 'offline'}`, `সংযোগ: ${online ? 'অনলাইন' : 'অফলাইন'}`)} · {saving ? bi('saving encrypted draft…', 'খসড়া সংরক্ষণ হচ্ছে…') : bi('local draft ready', 'খসড়া প্রস্তুত')}</p>
-    <p className="muted">{bi('A passphrase encrypts drafts on this device and is never sent. A lost passphrase cannot be recovered. Signing out clears local drafts.', 'পাসফ্রেজ দিয়ে এই ডিভাইসে খসড়া সুরক্ষিত থাকে; পাসফ্রেজ কোথাও পাঠানো হয় না। ভুলে গেলে খসড়া আর খোলা যাবে না। সাইন আউট করলে ডিভাইসে রাখা খসড়া মুছে যাবে।')}</p>
-    <div className="inline-form form-stack"><label htmlFor="draft-passphrase">{bi('Local draft passphrase', 'খসড়ার পাসফ্রেজ')}</label><input id="draft-passphrase" name="draftPassphrase" type="password" minLength="8" autoComplete="off" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} /><button type="button" className="secondary-button" onClick={() => syncQueued()}>{bi('Sync now', 'এখন সিঙ্ক করুন')}</button><button type="button" className="secondary-button" onClick={verifyIntegrity}>{bi('Verify local integrity', 'খসড়া যাচাই করুন')}</button></div>
+    <div className={online ? 'connection-banner connected' : 'connection-banner disconnected'} role="status" aria-live="polite">
+      <strong>{online ? bi('Internet connected', 'ইন্টারনেট সংযুক্ত') : bi('No internet connection', 'ইন্টারনেট সংযোগ নেই')}</strong>
+      <span>{saving ? bi('Saving a protected copy on this device…', 'এই ডিভাইসে সুরক্ষিত কপি রাখা হচ্ছে…') : online ? bi('Saved applications can be sent to the server.', 'সংরক্ষিত আবেদন সার্ভারে পাঠানো যাবে।') : bi('Continue working. The application stays on this device until you reconnect.', 'কাজ চালিয়ে যান। সংযোগ ফিরে না আসা পর্যন্ত আবেদনটি এই ডিভাইসেই থাকবে।')}</span>
+    </div>
+    <p className="safety-note"><strong>{bi('Legal aid is free.', 'আইনি সহায়তা বিনামূল্যে।')}</strong> {bi("No UDC worker may charge for this. The applicant's original words, Bangla translation, and the typist are recorded separately; an officer checks them later.", 'কোনো ইউডিসি কর্মী এর জন্য টাকা নিতে পারবেন না। আবেদনকারীর মূল কথা, বাংলা অনুবাদ ও টাইপিস্ট আলাদাভাবে লেখা হয়; পরে একজন কর্মকর্তা যাচাই করেন।')}</p>
     {error && <p role="alert" className="error">{error}</p>}
-    {notice && <p role="status" className="success">{notice}</p>}
-    {receipt?.lookupCode && <p className="safety-note">{bi(`Application ${receipt.applicationId} · lookup code shown once:`, `আবেদন ${receipt.applicationId} · কোড একবারই দেখানো হচ্ছে:`)} <code>{receipt.lookupCode}</code>. {bi('Share only by an agreed safe route.', 'শুধু সম্মত নিরাপদ পথে জানান।')}</p>}
+    {notice && <p role="status" aria-live="polite" className="success">{notice}</p>}
+    {receipt?.lookupCode && <p className="safety-note">{bi('Application', 'আবেদন')} {receipt.applicationId} · {bi('one-time lookup code:', 'একবার ব্যবহারযোগ্য কোড:')} <code>{receipt.lookupCode}</code>. {bi('Share only by an agreed safe route.', 'শুধু সম্মত নিরাপদ পথে জানান।')}</p>}
 
-    <section className="card" aria-labelledby="drafts-title"><h2 id="drafts-title">{bi('Local encrypted drafts and queue', 'এই ডিভাইসে রাখা সুরক্ষিত খসড়া')}</h2><p className="muted">{bi('Only temporary IDs and states show until you unlock a draft. Synced copies are deleted.', 'খসড়া না খোলা পর্যন্ত শুধু অস্থায়ী নম্বর ও অবস্থা দেখা যাবে। সার্ভারে পাঠানো হলে ডিভাইসের কপি মুছে যাবে।')}</p>{drafts.length === 0 ? <p>{bi('No local drafts.', 'এই ডিভাইসে এই ডিভাইসে এই ডিভাইসে কোনো খসড়া নেই।')}</p> : <ul className="plain-list">{drafts.map((row) => <li key={row.id}><span>{row.id} · {say(row.status)}</span><button type="button" className="secondary-button" onClick={() => openLocal(row.id)}>{bi('Unlock / verify', 'খুলে যাচাই করুন')}</button></li>)}</ul>}</section>
+    <div className="assisted-workspace">
+      <aside className="card draft-workspace" aria-labelledby="drafts-title">
+        <h2 id="drafts-title">{bi('Saved drafts and sync', 'সংরক্ষিত খসড়া ও সিঙ্ক')}</h2>
+        <p className="muted">{bi('Applications save on this device first. When the internet returns, send waiting applications to the server.', 'আবেদন আগে এই ডিভাইসে সংরক্ষিত হয়। ইন্টারনেট ফিরলে অপেক্ষমাণ আবেদন সার্ভারে পাঠান।')}</p>
+        <div className="draft-counts" aria-label={bi('Draft counts', 'খসড়ার হিসাব')}>
+          <div><strong>{drafts.length}</strong><span>{bi('Saved here', 'এখানে সংরক্ষিত')}</span></div>
+          <div><strong>{queuedCount}</strong><span>{bi('Waiting to send', 'পাঠানোর অপেক্ষায়')}</span></div>
+        </div>
+        <div className="form-stack passphrase-field">
+          <label htmlFor="draft-passphrase">{bi('Device passphrase', 'ডিভাইসের পাসফ্রেজ')}</label>
+          <input id="draft-passphrase" name="draftPassphrase" type="password" minLength="8" autoComplete="off" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} aria-describedby="passphrase-help" />
+          <p id="passphrase-help" className="muted">{bi('Use the same passphrase to open, check, or send drafts. Use at least 8 characters. It is never sent to the server. If forgotten, drafts cannot be recovered; signing out clears them.', 'খসড়া খুলতে, যাচাই করতে বা পাঠাতে একই পাসফ্রেজ ব্যবহার করুন। কমপক্ষে ৮ অক্ষর দিন। এটি সার্ভারে পাঠানো হয় না। ভুলে গেলে খসড়া ফেরত পাওয়া যাবে না; সাইন আউট করলে মুছে যাবে।')}</p>
+        </div>
+        <div className="draft-actions">
+          <button type="button" onClick={() => syncQueued()} disabled={!online || passphrase.length < 8 || queuedCount === 0}>{bi('Send waiting applications', 'অপেক্ষমাণ আবেদন পাঠান')}</button>
+          <button type="button" className="secondary-button" onClick={verifyIntegrity} disabled={passphrase.length < 8 || drafts.length === 0}>{bi('Check saved drafts', 'সংরক্ষিত খসড়া যাচাই করুন')}</button>
+        </div>
+        {!online && <p className="muted">{bi('Sending pauses while offline. Your saved drafts stay on this device.', 'অফলাইনে আবেদন পাঠানো বন্ধ থাকে। সংরক্ষিত খসড়া এই ডিভাইসে থাকে।')}</p>}
+        {drafts.length === 0
+          ? <p className="empty-state">{bi('No saved drafts yet. Start an intake to create one.', 'এখনও কোনো খসড়া নেই। আবেদন শুরু করলে খসড়া তৈরি হবে।')}</p>
+          : <ul className="plain-list draft-list">{drafts.map((row) => <li key={row.id}>
+            <div className="draft-row-copy"><code>{row.id}</code><span>{row.status === 'QUEUED' ? bi('Waiting to send', 'পাঠানোর অপেক্ষায়') : row.status === 'CONFLICT' ? bi('Needs review', 'যাচাই দরকার') : bi('Draft saved', 'খসড়া সংরক্ষিত')}</span></div>
+            <button type="button" className="secondary-button" onClick={() => openLocal(row.id)}>{row.status === 'CONFLICT' ? bi('Review conflict', 'অমিল যাচাই') : row.status === 'QUEUED' ? bi('Check queued application', 'অপেক্ষমাণ আবেদন যাচাই') : bi('Open saved draft', 'সংরক্ষিত খসড়া খুলুন')}</button>
+          </li>)}</ul>}
+      </aside>
 
-    <section className="card" aria-labelledby="revision-title"><h2 id="revision-title">{bi('Limited correction after submission', 'জমার পর সীমিত সংশোধন')}</h2><p className="muted">{bi('Only your own pending assisted intake, within the demo window. A DLAO takes over after review.', 'শুধু আপনার নিজের অপেক্ষমাণ আবেদন, ডেমো সময়সীমার মধ্যে। পর্যালোচনার পর ডিএলএও দায়িত্ব নেন।')}</p><form onSubmit={openRevision} className="form-stack inline-form"><label htmlFor="assisted-id">{bi('Application ID', 'আবেদন নম্বর')}</label><input id="assisted-id" name="applicationId" autoComplete="off" value={applicationId} onChange={(event) => setApplicationId(event.target.value)} required /><button type="submit" className="secondary-button">{bi('Open limited correction', 'সীমিত সংশোধন খুলুন')}</button></form></section>
+      <section className="card intake-workspace" aria-labelledby="form-title">
+        <div className="intake-heading">
+          <div><h2 id="form-title">{bi('Assisted intake', 'সহায়তায় আবেদন')}</h2><p className="muted">{bi('Choose what you need to do.', 'আপনি কী করতে চান তা বেছে নিন।')}</p></div>
+          <div className="intake-choices" role="group" aria-label={bi('Choose an intake task', 'আবেদনের কাজ বেছে নিন')}>
+            <button type="button" className={intakeTask === 'NEW' ? 'task-choice' : 'task-choice secondary-button'} aria-pressed={intakeTask === 'NEW'} onClick={() => setIntakeTask('NEW')} disabled={mode === 'REVISION'}>{bi('Start a new application', 'নতুন আবেদন শুরু করুন')}</button>
+            <button type="button" className={intakeTask === 'CORRECTION' ? 'task-choice' : 'task-choice secondary-button'} aria-pressed={intakeTask === 'CORRECTION'} onClick={() => setIntakeTask('CORRECTION')}>{bi('Correct an application', 'আবেদন সংশোধন করুন')}</button>
+          </div>
+          {mode === 'REVISION' && <p className="muted">{bi('Save or queue this correction before starting another application.', 'নতুন আবেদন শুরুর আগে এই সংশোধন সংরক্ষণ বা পাঠান।')}</p>}
+        </div>
 
-    {conflict && <section className="card safety-card" aria-labelledby="conflict-title"><h2 id="conflict-title">{bi('Human conflict review', 'দুই সংস্করণের অমিল যাচাই')}</h2><p>{bi('The server changed after the local edit began. Neither version was overwritten.', 'এই ডিভাইসে সম্পাদনা শুরু করার পর সার্ভারের তথ্য বদলেছে। কোনো সংস্করণ মুছে যায়নি।')}</p><div className="dashboard-actions"><div><h3>{bi(`Server version ${conflict.serverVersion}`, `সার্ভারের সংস্করণ ${num(conflict.serverVersion)}`)}</h3><p><strong>{bi('Original:', 'মূল:')}</strong> {conflict.server.originalStatement}</p><p><strong>{bi('Translation:', 'অনুবাদ:')}</strong> {conflict.server.translatedStatement}</p></div><div><h3>{bi('Local queued version', 'এই ডিভাইসে রাখা সংস্করণ')}</h3><p><strong>{bi('Original:', 'মূল:')}</strong> {conflict.local.originalStatement}</p><p><strong>{bi('Translation:', 'অনুবাদ:')}</strong> {conflict.local.translatedStatement}</p></div></div><label htmlFor="resolution-reason">{bi('Reason for human choice', 'এই সংস্করণ রাখার কারণ')}</label><textarea id="resolution-reason" name="resolutionReason" autoComplete="off" value={resolutionReason} onChange={(event) => setResolutionReason(event.target.value)} minLength="10" maxLength="500" required /><div className="choice-row"><button type="button" onClick={() => resolve('SERVER')} disabled={resolutionReason.trim().length < 10}>{bi('Keep server version', 'সার্ভারের সংস্করণ রাখুন')}</button><button type="button" className="secondary-button" onClick={() => resolve('LOCAL')} disabled={resolutionReason.trim().length < 10}>{bi('Apply local as new revision', 'এই ডিভাইসের তথ্য নতুন সংস্করণ হিসেবে রাখুন')}</button></div></section>}
+        {conflict && <section className="assisted-conflict safety-card" aria-labelledby="conflict-title">
+          <h3 id="conflict-title">{bi('Review the two versions', 'দুটি সংস্করণ যাচাই করুন')}</h3>
+          <p>{bi('The server changed while this draft was being edited. Neither version was replaced. A staff member must choose and give a reason.', 'এই খসড়া সম্পাদনার সময় সার্ভারের তথ্য বদলেছে। কোনো সংস্করণ মুছে যায়নি। একজন কর্মীকে কারণসহ একটি সংস্করণ বেছে নিতে হবে।')}</p>
+          <div className="conflict-versions">
+            <div><h4>{bi('Server version', 'সার্ভারের সংস্করণ')} {num(conflict.serverVersion)}</h4><p><strong>{bi('Original words:', 'মূল বক্তব্য:')}</strong> {conflict.server.originalStatement}</p><p><strong>{bi('Bangla translation:', 'বাংলা অনুবাদ:')}</strong> {conflict.server.translatedStatement}</p></div>
+            <div><h4>{bi('Saved device version', 'ডিভাইসে সংরক্ষিত সংস্করণ')}</h4><p><strong>{bi('Original words:', 'মূল বক্তব্য:')}</strong> {conflict.local.originalStatement}</p><p><strong>{bi('Bangla translation:', 'বাংলা অনুবাদ:')}</strong> {conflict.local.translatedStatement}</p></div>
+          </div>
+          <label htmlFor="resolution-reason">{bi('Why are you choosing this version?', 'এই সংস্করণ বেছে নেওয়ার কারণ')}</label>
+          <textarea id="resolution-reason" name="resolutionReason" autoComplete="off" value={resolutionReason} onChange={(event) => setResolutionReason(event.target.value)} minLength="10" maxLength="500" required />
+          <div className="choice-row"><button type="button" onClick={() => resolve('SERVER')} disabled={resolutionReason.trim().length < 10}>{bi('Keep server version', 'সার্ভারের সংস্করণ রাখুন')}</button><button type="button" className="secondary-button" onClick={() => resolve('LOCAL')} disabled={resolutionReason.trim().length < 10}>{bi('Save device version as a new correction', 'ডিভাইসের সংস্করণ নতুন সংশোধন হিসেবে রাখুন')}</button></div>
+        </section>}
 
-    <section className="card" aria-labelledby="form-title"><h2 id="form-title">{mode === 'CREATE' ? bi('New assisted application', 'সহায়তায় নতুন আবেদন') : bi(`Correct ${applicationId} from version ${baseVersion}`, `${applicationId} সংশোধন (সংস্করণ ${num(baseVersion)} থেকে)`)}</h2>
-      {mode === 'CREATE' && <button type="button" className="secondary-button" onClick={loadExample}>{bi('Load fictional Nuching example', 'কাল্পনিক নুচিং উদাহরণ লোড করুন')}</button>}
-      <form onSubmit={queue} className="form-stack">
-        {mode === 'CREATE' && <>
-          <label htmlFor="applicant-name">{bi('Applicant name', 'আবেদনকারীর নাম')}</label><input id="applicant-name" name="applicantName" autoComplete="off" value={form.applicantName} onChange={(event) => change('applicantName', event.target.value)} minLength="2" maxLength="120" required />
-          <p className="muted">{bi(`Helper: ${session.user.displayName} (signed-in UDC worker). Translator and typist may be different people.`, `সহায়তাকারী: ${session.user.displayName} (সাইন ইন করা ইউডিসি কর্মী)। অনুবাদক ও টাইপিস্ট ভিন্ন হতে পারেন।`)}</p>
-          <label htmlFor="translator-name">{bi('Translator name', 'অনুবাদকের নাম')}</label><input id="translator-name" name="translatorName" autoComplete="off" value={form.translatorName} onChange={(event) => change('translatorName', event.target.value)} minLength="2" maxLength="120" required />
-          <label htmlFor="typist-name">{bi('Typist name', 'টাইপিস্টের নাম')}</label><input id="typist-name" name="typistName" autoComplete="off" value={form.typistName} onChange={(event) => change('typistName', event.target.value)} minLength="2" maxLength="120" required />
-          <label htmlFor="helper-phone">{bi('Helper phone (optional; never applicant contact)', 'সহায়তাকারীর ফোন (ঐচ্ছিক; আবেদনকারীর যোগাযোগ নয়)')}</label><input id="helper-phone" name="helperPhone" type="tel" autoComplete="off" value={form.helperPhone} onChange={(event) => change('helperPhone', event.target.value)} />
-          <label htmlFor="original-language">{bi('Original language', 'মূল ভাষা')}</label><input id="original-language" name="originalLanguage" autoComplete="off" value={form.originalLanguage} onChange={(event) => change('originalLanguage', event.target.value)} minLength="2" maxLength="60" required />
-          <label htmlFor="case-type">{bi('Case type for document checklist', 'নথির তালিকার জন্য মামলার ধরন')}</label><select id="case-type" name="caseType" autoComplete="off" value={form.caseType} onChange={(event) => change('caseType', event.target.value)}>{Object.keys(checklist).map((type) => <option key={type} value={type}>{say(type)}</option>)}</select>
-          <p>{bi('Checklist to discuss (not an eligibility decision):', 'কোন নথি লাগতে পারে, তা নিয়ে কথা বলুন। এটি যোগ্যতার সিদ্ধান্ত নয়:')} {checklist[form.caseType].map(item).join(' · ')}.</p>
+        {intakeTask === 'CORRECTION' && mode === 'CREATE' && <div className="correction-lookup">
+          <h3>{bi('Find the application to correct', 'সংশোধনের জন্য আবেদনটি খুঁজুন')}</h3>
+          <p className="muted">{bi('Enter the Application ID. You can correct your own pending assisted application within the demo window.', 'আবেদন নম্বর দিন। ডেমোর নির্ধারিত সময়ে নিজের জমা দেওয়া অপেক্ষমাণ আবেদন সংশোধন করা যাবে।')}</p>
+          <form onSubmit={openRevision} className="form-stack correction-form">
+            <label htmlFor="assisted-id">{bi('Application ID', 'আবেদন নম্বর')}</label>
+            <input id="assisted-id" name="applicationId" autoComplete="off" value={applicationId} onChange={(event) => setApplicationId(event.target.value)} required />
+            <button type="submit">{bi('Load application to correct', 'সংশোধনের জন্য আবেদন খুলুন')}</button>
+          </form>
+        </div>}
+
+        {(intakeTask === 'NEW' || mode === 'REVISION') && <>
+          <div className="form-intro">
+            <h3>{mode === 'CREATE' ? bi('Record the applicant’s words and translation', 'আবেদনকারীর বক্তব্য ও অনুবাদ লিখুন') : <>{bi('Correct', 'সংশোধন করুন')} {applicationId} · {bi('version', 'সংস্করণ')} {num(baseVersion)}</>}</h3>
+            {mode === 'REVISION' && <p className="muted">{bi('Only the statements and read-back confirmations can be corrected here.', 'এখানে শুধু বক্তব্য ও পড়ে শোনানোর পর নিশ্চিতকরণ সংশোধন করা যাবে।')}</p>}
+          </div>
+          {mode === 'CREATE' && <button type="button" className="secondary-button example-button" onClick={loadExample}>{bi('Fill with fictional Nuching example', 'কাল্পনিক নুচিং উদাহরণ বসান')}</button>}
+          <form onSubmit={queue} className="form-stack intake-form">
+            {mode === 'CREATE' && <fieldset className="intake-step form-stack">
+              <legend>{bi('1. People and language', '১. ব্যক্তি ও ভাষা')}</legend>
+              <label htmlFor="applicant-name">{bi('Applicant / original speaker name', 'আবেদনকারী / মূল বক্তার নাম')}</label><input id="applicant-name" name="applicantName" autoComplete="off" value={form.applicantName} onChange={(event) => change('applicantName', event.target.value)} minLength="2" maxLength="120" required />
+              <p className="muted">{bi('UDC helper:', 'ইউডিসি সহায়তাকারী:')} <strong>{session.user.displayName}</strong>. {bi('The translator and typist may be different people.', 'অনুবাদক ও টাইপিস্ট ভিন্ন ব্যক্তি হতে পারেন।')}</p>
+              <label htmlFor="translator-name">{bi('Translator', 'অনুবাদক')}</label><input id="translator-name" name="translatorName" autoComplete="off" value={form.translatorName} onChange={(event) => change('translatorName', event.target.value)} minLength="2" maxLength="120" required />
+              <label htmlFor="typist-name">{bi('Person typing this form', 'যিনি এই ফর্ম টাইপ করছেন')}</label><input id="typist-name" name="typistName" autoComplete="off" value={form.typistName} onChange={(event) => change('typistName', event.target.value)} minLength="2" maxLength="120" required />
+              <p className="muted">{bi('The applicant speaks; the translator explains in Bangla; the typist enters the form. These roles are saved separately.', 'আবেদনকারী বলেন; অনুবাদক বাংলায় বোঝান; টাইপিস্ট ফর্ম লেখেন। এই পরিচয়গুলো আলাদাভাবে সংরক্ষিত হয়।')}</p>
+              <label htmlFor="helper-phone">{bi('UDC helper phone (optional; not applicant contact)', 'ইউডিসি সহায়তাকারীর ফোন (ঐচ্ছিক; আবেদনকারীর যোগাযোগ নয়)')}</label><input id="helper-phone" name="helperPhone" type="tel" autoComplete="off" value={form.helperPhone} onChange={(event) => change('helperPhone', event.target.value)} />
+              <label htmlFor="original-language">{bi('Language the applicant spoke', 'আবেদনকারী যে ভাষায় বলেছেন')}</label><input id="original-language" name="originalLanguage" autoComplete="off" value={form.originalLanguage} onChange={(event) => change('originalLanguage', event.target.value)} minLength="2" maxLength="60" required />
+              <label htmlFor="case-type">{bi('Matter type', 'মামলার ধরন')}</label><select id="case-type" name="caseType" autoComplete="off" value={form.caseType} onChange={(event) => change('caseType', event.target.value)}>{Object.keys(checklist).map((type) => <option key={type} value={type}>{say(type)}</option>)}</select>
+              <p>{bi('Possible documents to discuss (not an eligibility decision):', 'যে নথি নিয়ে কথা বলতে পারেন (এটি যোগ্যতার সিদ্ধান্ত নয়):')} {checklist[form.caseType].map(item).join(' · ')}.</p>
+            </fieldset>}
+            <fieldset className="intake-step form-stack">
+              <legend>{mode === 'CREATE' ? bi('2. Original words and Bangla translation', '২. মূল বক্তব্য ও বাংলা অনুবাদ') : bi('1. Original words and Bangla translation', '১. মূল বক্তব্য ও বাংলা অনুবাদ')}</legend>
+              <label htmlFor="original-statement">{bi('Original words, as spoken (do not translate here)', 'মূল বক্তব্য (যেভাবে বলা হয়েছে; এখানে অনুবাদ করবেন না)')} <span>({form.originalLanguage})</span></label><textarea id="original-statement" name="originalStatement" autoComplete="off" value={form.originalStatement} onChange={(event) => change('originalStatement', event.target.value)} minLength="5" maxLength="4000" required />
+              <label htmlFor="translated-statement">{bi('Bangla translation typed by the operator', 'অপারেটরের টাইপ করা বাংলা অনুবাদ')}</label><textarea id="translated-statement" name="translatedStatement" autoComplete="off" value={form.translatedStatement} onChange={(event) => change('translatedStatement', event.target.value)} minLength="5" maxLength="4000" required />
+              <label className="checkbox-label" htmlFor="original-confirmed"><input id="original-confirmed" name="originalConfirmed" type="checkbox" checked={form.originalConfirmed} onChange={(event) => change('originalConfirmed', event.target.checked)} />{bi('Applicant confirmed the original words after they were read back', 'পড়ে শোনানোর পর আবেদনকারী মূল বক্তব্য নিশ্চিত করেছেন')}</label>
+              <label className="checkbox-label" htmlFor="translation-confirmed"><input id="translation-confirmed" name="translationConfirmed" type="checkbox" checked={form.translationConfirmed} onChange={(event) => change('translationConfirmed', event.target.checked)} />{bi('Applicant confirmed the Bangla translation after it was read back', 'পড়ে শোনানোর পর আবেদনকারী বাংলা অনুবাদ নিশ্চিত করেছেন')}</label>
+            </fieldset>
+            {mode === 'CREATE' && <fieldset className="intake-step form-stack">
+              <legend>{bi('3. Consent and safe contact', '৩. সম্মতি ও নিরাপদ যোগাযোগ')}</legend>
+              <label htmlFor="consent-attestation">{bi('What was said to obtain oral consent?', 'মৌখিক সম্মতি নিতে কী বলা হয়েছিল?')}</label><textarea id="consent-attestation" name="consentAttestation" autoComplete="off" value={form.consentAttestation} onChange={(event) => change('consentAttestation', event.target.value)} minLength="10" maxLength="500" required />
+              <label htmlFor="contact-channel">{bi('How is it safe to contact the applicant?', 'আবেদনকারীর সঙ্গে যোগাযোগের নিরাপদ উপায়')}</label><select id="contact-channel" name="contactChannel" autoComplete="off" value={form.contactChannel} onChange={(event) => change('contactChannel', event.target.value)}><option value="IN_PERSON">{bi('In person; do not use helper phone', 'সরাসরি; সহায়তাকারীর ফোন ব্যবহার করবেন না')}</option><option value="PHONE">{bi("Applicant's own safe phone", 'আবেদনকারীর নিজের নিরাপদ ফোন')}</option></select>
+              {form.contactChannel === 'PHONE' && <><label htmlFor="applicant-phone">{bi("Applicant's own safe phone", 'আবেদনকারীর নিজের নিরাপদ ফোন')}</label><input id="applicant-phone" name="applicantPhone" type="tel" autoComplete="off" value={form.contactValue} onChange={(event) => change('contactValue', event.target.value)} required /></>}
+              <label htmlFor="safe-time">{bi('Safe time (optional)', 'নিরাপদ সময় (ঐচ্ছিক)')}</label><input id="safe-time" name="safeTime" autoComplete="off" value={form.safeTime} onChange={(event) => change('safeTime', event.target.value)} maxLength="100" />
+            </fieldset>}
+            <button type="submit">{mode === 'CREATE' ? online ? bi('Save and send application', 'আবেদন সংরক্ষণ করে পাঠান') : bi('Save application on this device', 'এই ডিভাইসে আবেদন সংরক্ষণ করুন') : online ? bi('Save and send correction', 'সংশোধন সংরক্ষণ করে পাঠান') : bi('Save correction on this device', 'এই ডিভাইসে সংশোধন সংরক্ষণ করুন')}</button>
+          </form>
         </>}
-        <label htmlFor="original-statement">{bi(`Original statement (${form.originalLanguage}; as supplied, not a translation)`, `মূল বক্তব্য (${form.originalLanguage}; যেমন বলা হয়েছে, অনুবাদ নয়)`)}</label><textarea id="original-statement" name="originalStatement" autoComplete="off" value={form.originalStatement} onChange={(event) => change('originalStatement', event.target.value)} minLength="5" maxLength="4000" required />
-        <label htmlFor="translated-statement">{bi('Translated / typed Bangla statement', 'বাংলায় অনুবাদ করে লেখা বক্তব্য')}</label><textarea id="translated-statement" name="translatedStatement" autoComplete="off" value={form.translatedStatement} onChange={(event) => change('translatedStatement', event.target.value)} minLength="5" maxLength="4000" required />
-        <label className="checkbox-label" htmlFor="original-confirmed"><input id="original-confirmed" name="originalConfirmed" type="checkbox" checked={form.originalConfirmed} onChange={(event) => change('originalConfirmed', event.target.checked)} />{bi('Applicant orally confirmed the original statement after read-back', 'পড়ে শোনানোর পর আবেদনকারী মুখে মূল বক্তব্য নিশ্চিত করেছেন')}</label>
-        <label className="checkbox-label" htmlFor="translation-confirmed"><input id="translation-confirmed" name="translationConfirmed" type="checkbox" checked={form.translationConfirmed} onChange={(event) => change('translationConfirmed', event.target.checked)} />{bi('Applicant orally confirmed the translation after read-back', 'পড়ে শোনানোর পর আবেদনকারী মুখে অনুবাদ নিশ্চিত করেছেন')}</label>
-        {mode === 'CREATE' && <>
-          <label htmlFor="consent-attestation">{bi('Oral consent statement', 'মৌখিক সম্মতির বিবরণ')}</label><textarea id="consent-attestation" name="consentAttestation" autoComplete="off" value={form.consentAttestation} onChange={(event) => change('consentAttestation', event.target.value)} minLength="10" maxLength="500" required />
-          <label htmlFor="contact-channel">{bi('Safe applicant contact', 'আবেদনকারীর নিরাপদ যোগাযোগ')}</label><select id="contact-channel" name="contactChannel" autoComplete="off" value={form.contactChannel} onChange={(event) => change('contactChannel', event.target.value)}><option value="IN_PERSON">{bi('In person; do not use helper phone', 'সরাসরি; সহায়তাকারীর ফোন ব্যবহার করবেন না')}</option><option value="PHONE">{bi("Applicant's own safe phone", 'আবেদনকারীর নিজের নিরাপদ ফোন')}</option></select>
-          {form.contactChannel === 'PHONE' && <><label htmlFor="applicant-phone">{bi("Applicant's own safe phone", 'আবেদনকারীর নিজের নিরাপদ ফোন')}</label><input id="applicant-phone" name="applicantPhone" type="tel" autoComplete="off" value={form.contactValue} onChange={(event) => change('contactValue', event.target.value)} required /></>}
-          <label htmlFor="safe-time">{bi('Safe time (optional)', 'নিরাপদ সময় (ঐচ্ছিক)')}</label><input id="safe-time" name="safeTime" autoComplete="off" value={form.safeTime} onChange={(event) => change('safeTime', event.target.value)} maxLength="100" />
-        </>}
-        <button type="submit">{mode === 'CREATE' ? bi('Queue encrypted application', 'আবেদনটি সুরক্ষিতভাবে পাঠানোর জন্য রাখুন') : bi('Queue encrypted correction', 'সংশোধনটি সুরক্ষিতভাবে পাঠানোর জন্য রাখুন')}</button>
-      </form>
-    </section>
+      </section>
+    </div>
   </section>
 }
