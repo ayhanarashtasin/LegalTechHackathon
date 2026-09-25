@@ -1096,25 +1096,18 @@ export async function trackApplicationStatus(identifier, lookupCode) {
   }
   for (const id of ids) lookupFailures.delete(id)
 
-  const [person, caseRecord, facts, rawAssignment, mediation] = await Promise.all([
-    application.applicantPersonId
-      ? Person.findById(application.applicantPersonId).select('displayName identityStatus').lean()
-      : null,
+  // The code holder may be reading on a shared screen or listening on a shared phone (Malek's number is a shop's), so
+  // the public result carries progress only: never the applicant's name, the legal matter, or the lawyer's name.
+  // Signed-in staff see those on the record itself.
+  const [caseRecord, facts, rawAssignment, mediation] = await Promise.all([
     application.caseId
       ? Case.findOne({ caseId: application.caseId }).lean()
       : null,
-    CaseFact.find({
-      applicationId: application.applicationId,
-      field: { $in: ['complaint.type', 'complaint.legal_need', 'safety.urgent', 'triage.case_category'] },
-    }).sort({ revision: -1 }).lean(),
+    CaseFact.find({ applicationId: application.applicationId, field: 'safety.urgent' }).sort({ revision: -1 }).lean(),
     application.caseId
-      ? LawyerAssignment.findOne({ caseId: application.caseId, active: true })
-          .populate('lawyerUserId', 'displayName username')
-          .lean()
+      ? LawyerAssignment.findOne({ caseId: application.caseId, active: true }).select('status createdAt acceptedAt').lean()
       : null,
-    Mediation.findOne({ applicationId: application.applicationId })
-      .populate('mediatorUserId', 'displayName')
-      .lean(),
+    Mediation.findOne({ applicationId: application.applicationId }).select('status').lean(),
   ])
 
   const factMap = latestValues(facts)
@@ -1124,7 +1117,6 @@ export async function trackApplicationStatus(identifier, lookupCode) {
   if (rawAssignment) {
     lawyer = {
       status: rawAssignment.status,
-      lawyerName: rawAssignment.lawyerUserId?.displayName || 'Panel Lawyer',
       assignedAt: rawAssignment.createdAt,
       acceptedAt: rawAssignment.acceptedAt || null,
     }
@@ -1188,13 +1180,13 @@ export async function trackApplicationStatus(identifier, lookupCode) {
       titleBn: 'আইনজীবী নিয়োগ / মধ্যস্থতা',
       description: lawyer
         ? (lawyer.status === 'ACCEPTED'
-            ? `Panel Lawyer ${lawyer.lawyerName} assigned and representation accepted.`
-            : `Panel Lawyer ${lawyer.lawyerName} nominated (acceptance pending).`)
+            ? 'A panel lawyer accepted representation.'
+            : 'A panel lawyer was nominated; acceptance is pending.')
         : (mediation ? 'Assigned to Alternative Dispute Resolution (Mediation).' : 'Appointing panel advocate or mediation officer.'),
       descriptionBn: lawyer
         ? (lawyer.status === 'ACCEPTED'
-            ? `প্যানেল আইনজীবী ${lawyer.lawyerName} দায়িত্ব গ্রহণ করেছেন।`
-            : `প্যানেল আইনজীবী ${lawyer.lawyerName} কে দায়িত্ব দেওয়া হয়েছে।`)
+            ? 'একজন প্যানেল আইনজীবী দায়িত্ব গ্রহণ করেছেন।'
+            : 'একজন প্যানেল আইনজীবী মনোনীত হয়েছেন; সম্মতি প্রক্রিয়াধীন।')
         : (mediation ? 'আপস-মীমাংসা ও মধ্যস্থতায় পাঠানো হয়েছে।' : 'প্যানেল আইনজীবী নিয়োগ প্রক্রিয়াধীন।'),
       status: currentPhase > 4 ? 'COMPLETED' : (currentPhase === 4 ? 'CURRENT' : 'UPCOMING'),
       date: lawyer?.acceptedAt || lawyer?.assignedAt || null,
@@ -1247,8 +1239,8 @@ export async function trackApplicationStatus(identifier, lookupCode) {
       type: 'LAWYER',
       title: lawyer.status === 'ACCEPTED' ? 'Panel Lawyer Accepted Representation' : 'Panel Lawyer Nominated',
       titleBn: lawyer.status === 'ACCEPTED' ? 'প্যানেল আইনজীবী দায়িত্ব গ্রহণ করেছেন' : 'প্যানেল আইনজীবী মনোনীত হয়েছেন',
-      description: `Advocate ${lawyer.lawyerName} assigned to provide legal aid representation.`,
-      descriptionBn: `আইনি সহায়তার জন্য অ্যাডভোকেট ${lawyer.lawyerName} কে দায়িত্ব অর্পণ করা হয়েছে।`,
+      description: 'A panel lawyer was assigned to provide legal aid representation.',
+      descriptionBn: 'আইনি সহায়তার জন্য একজন প্যানেল আইনজীবীকে দায়িত্ব দেওয়া হয়েছে।',
     })
   }
 
@@ -1294,9 +1286,7 @@ export async function trackApplicationStatus(identifier, lookupCode) {
     currentPhase,
     isUrgent,
     priorityDecision: application.priorityDecision || 'ROUTINE',
-    applicantName: person?.displayName || 'Applicant',
     officeCode: application.officeCode,
-    legalNeed: factMap['complaint.legal_need'] || factMap['complaint.type'] || 'Legal Assistance',
     channel: application.channel,
     submittedAt: application.createdAt,
     acceptedAt: application.acceptedAt || null,

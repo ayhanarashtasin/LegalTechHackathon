@@ -73,8 +73,9 @@ The home page's **Track Application & Case Progress** card has **Ask by Voice / 
 
 1. `welcome` — বলুন, আপনি কী জানতে চান? The caller answers in their own words. Status words (অবস্থা by consonant outline, খবর, আপডেট, শুনানি, …) are matched in the browser; only when none match does the model (`openai/gpt-oss-120b`) say whether it is a status request. Anything short of its clear yes plays `confirmStatus`; "no" ends with `onlyStatus`.
 2. `askNumber`, then `confirmNumber` — the number is read back as digit words and confirmed with yes/no. A number said in the first sentence after "নম্বর" is read back without asking again.
-3. `askPin` — never read back or shown. `pinAgain` plays when six digits were not heard; `notFound` when the ID and PIN do not match.
-4. The status sentence (below), then the call ends. `tryHelpline` ends it after three failed tries or a locked ID; `unavailable` when the lookup fails.
+3. `privateCheck` — before the PIN is said and the status heard aloud: "are you somewhere no one else can hear?" It is asked as a positive question, since in Bangla "না, কেউ নেই" (no, nobody is here) to "nobody can hear, right?" would read as a no. Only a clear yes goes on; "no", or no clear answer after three tries, plays `notPrivate` and ends the call without a word about the case. The phone may be shared: Malek's number is a shop's.
+4. `askPin` — never read back or shown. `pinAgain` plays when six digits were not heard; `notFound` when the ID and PIN do not match.
+5. The status sentence (below), then the call ends. `tryHelpline` ends it after three failed tries or a locked ID; `unavailable` when the lookup fails.
 
 The number and PIN can also be **typed** during the call: focusing the box stops listening for that turn. Each turn's transcript is shown as **আপনি বললেন: …**, except the PIN's.
 

@@ -24,10 +24,15 @@ test('the Track card asks by voice, listens after the first prompt, and stops cl
 })
 
 test('a caller asks in their own words, types the number and PIN, sees what was heard, and hears the status', async ({ page }) => {
-  test.setTimeout(90000) // the opening and yes/no turns wait for the fake microphone's pause or 12-second limit
-  const texts = { welcome: 'বলুন, আপনি কী জানতে চান?', askNumber: 'আপনার আবেদন নম্বরটি বলুন।', confirmNumber: 'আপনি বলেছেন ছয়। ঠিক থাকলে হ্যাঁ বলুন।', askPin: 'এবার পিন বলুন।' }
+  test.setTimeout(120000) // the opening and yes/no turns wait for the fake microphone's pause or 12-second limit
+  const texts = { welcome: 'বলুন, আপনি কী জানতে চান?', askNumber: 'আপনার আবেদন নম্বরটি বলুন।', confirmNumber: 'আপনি বলেছেন ছয়। ঠিক থাকলে হ্যাঁ বলুন।', privateCheck: 'অন্য কেউ শুনতে পাবে না তো?', askPin: 'এবার পিন বলুন।' }
   const lookups = []
-  await page.route('**/api/voice/prompts', (route) => route.fulfill({ json: { text: texts[route.request().postDataJSON().key] ?? '…', audio: null } }))
+  const promptKeys = []
+  await page.route('**/api/voice/prompts', (route) => {
+    const { key } = route.request().postDataJSON()
+    promptKeys.push(key)
+    return route.fulfill({ json: { text: texts[key] ?? '…', audio: null } })
+  })
   await page.route('**/api/voice/transcripts**', (route) => route.fulfill({ json: { text: route.request().url().includes('hint=yesNo') ? 'হ্যাঁ।' : 'আমার কেসটার কী হলো একটু বলেন' } }))
   await page.route('**/api/voice/requests', (route) => route.fulfill({ json: { wantsStatus: true } }))
   await page.route('**/api/voice/status', async (route) => {
@@ -51,8 +56,9 @@ test('a caller asks in their own words, types the number and PIN, sees what was 
   await card.getByRole('button', { name: 'OK' }).click()
   await expect(card.getByLabel('Application ID or Case ID')).toHaveValue('6')
 
-  // "হ্যাঁ" to the read-back, then the PIN is typed and never shown as heard.
-  await card.getByLabel('Or type the PIN').fill('482915', { timeout: 20000 })
+  // "হ্যাঁ" to the read-back and to the privacy question, then the PIN is typed and never shown as heard.
+  await card.getByLabel('Or type the PIN').fill('482915', { timeout: 40000 })
+  expect(promptKeys.slice(-2)).toEqual(['privateCheck', 'askPin'])
   await expect(card.getByLabel('Or type the PIN')).toHaveAttribute('type', 'password')
   await card.getByRole('button', { name: 'OK' }).click()
   await expect(card.getByText('আপনার মামলায় একজন প্যানেল আইনজীবী দায়িত্ব নিয়েছেন।').first()).toBeVisible()

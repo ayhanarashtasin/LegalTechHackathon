@@ -357,29 +357,20 @@ export default function CitizenCaseTracker() {
             </div>
           </div>
 
-          {/* Key Case Details Grid */}
+          {/* Key Case Details Grid: progress only. The screen may be shared, so the applicant's name, the legal
+              matter, and the lawyer's name are not sent here; staff see them on the record. */}
           <div className="tracker-details-grid">
-            <div className="tracker-detail-card">
-              <span className="detail-label">{bi('Applicant Name', 'আবেদনকারীর নাম')}</span>
-              <span className="detail-value">{result.applicantName}</span>
-            </div>
-
-            <div className="tracker-detail-card">
-              <span className="detail-label">{bi('Legal Need / Matter', 'আইনি সমস্যা')}</span>
-              <span className="detail-value">{result.legalNeed}</span>
-            </div>
-
             <div className="tracker-detail-card">
               <span className="detail-label">{bi('Assigned Legal Office', 'দায়িত্বপ্রাপ্ত অফিস')}</span>
               <span className="detail-value">{result.officeCode} DLAO</span>
             </div>
 
             <div className="tracker-detail-card">
-              <span className="detail-label">{bi('Assigned Counsel', 'নিয়োজিত আইনজীবী')}</span>
+              <span className="detail-label">{bi('Panel Lawyer', 'প্যানেল আইনজীবী')}</span>
               <span className="detail-value">
                 {result.lawyer
-                  ? `${result.lawyer.lawyerName} (${result.lawyer.status === 'ACCEPTED' ? bi('Accepted', 'দায়িত্বপ্রাপ্ত') : bi('Pending Acceptance', 'প্রক্রিয়াধীন')})`
-                  : bi('Pending Assignment', 'নিয়োগ প্রক্রিয়াধীন')}
+                  ? result.lawyer.status === 'ACCEPTED' ? bi('Assigned and accepted', 'দায়িত্বপ্রাপ্ত') : bi('Pending acceptance', 'সম্মতি প্রক্রিয়াধীন')
+                  : bi('Pending assignment', 'নিয়োগ প্রক্রিয়াধীন')}
               </span>
             </div>
           </div>

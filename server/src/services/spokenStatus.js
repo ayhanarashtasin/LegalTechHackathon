@@ -87,6 +87,10 @@ const PROMPTS = {
   welcome: 'বলুন, আপনি কী জানতে চান?',
   confirmStatus: 'আপনি কি আপনার মামলার অবস্থা জানতে চান? হ্যাঁ বা না বলুন।',
   askNumber: 'আপনার আবেদন নম্বর বা মামলা নম্বরটি একটি একটি সংখ্যা করে বলুন।',
+  // Asked before the PIN: on a shared phone a bystander must hear neither the PIN nor the status. Asked as a positive
+  // question, since "না, কেউ নেই" (no, nobody is here) to "nobody can hear, right?" would read as a "no".
+  privateCheck: 'এরপর আপনার পিন বলতে হবে, আর আপনার মামলার তথ্য শোনানো হবে। আপনি কি এমন জায়গায় আছেন, যেখানে অন্য কেউ শুনতে পাবে না? হ্যাঁ বা না বলুন।',
+  notPrivate: 'ঠিক আছে, এখন কিছু জানানো হবে না। নিরিবিলি জায়গা থেকে পরে আবার চেষ্টা করুন।',
   askPin: 'এবার আপনার ছয় সংখ্যার পিনটি একটি একটি সংখ্যা করে বলুন।',
   pinAgain: 'দুঃখিত, ছয়টি সংখ্যা পাইনি। পিনের ছয়টি সংখ্যা একটি একটি করে আবার বলুন।',
   notHeard: 'দুঃখিত, বুঝতে পারিনি। আরেকবার বলুন।',

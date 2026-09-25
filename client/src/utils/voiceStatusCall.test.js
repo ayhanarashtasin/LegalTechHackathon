@@ -29,11 +29,11 @@ function fakeCall(replies, outcomes = [], wantsStatus = undefined) {
 }
 
 test('the model reads the opening only when no status word matched, and only its clear yes skips the question', async () => {
-  const matched = fakeCall(['আমার কেসের অবস্থা জানতে চাই', 'তিন নয়', 'হ্যাঁ', '482915'], [], true)
+  const matched = fakeCall(['আমার কেসের অবস্থা জানতে চাই', 'তিন নয়', 'হ্যাঁ', 'হ্যাঁ', '482915'], [], true)
   await runStatusCall(matched.io)
   expect(matched.modelRead).toEqual([])
 
-  const ownWords = fakeCall(['আমার কেসটার কী হলো একটু বলেন', 'তিন নয়', 'হ্যাঁ', '482915'], [], true)
+  const ownWords = fakeCall(['আমার কেসটার কী হলো একটু বলেন', 'তিন নয়', 'হ্যাঁ', 'হ্যাঁ', '482915'], [], true)
   await runStatusCall(ownWords.io)
   expect(ownWords.modelRead).toEqual(['আমার কেসটার কী হলো একটু বলেন'])
   expect(ownWords.log.slice(0, 2)).toEqual(['welcome', 'askNumber'])
@@ -46,9 +46,9 @@ test('the model reads the opening only when no status word matched, and only its
 })
 
 test('Whisper is primed for yes/no and digit turns, not for the caller\'s own words', async () => {
-  const { io, hints } = fakeCall(['কী বলব', 'হ্যাঁ।', 'শূন্য, শুন্য, ছয়।', 'হ্যাঁ।', 'এক, দুই, তিন, চার, পাঁচ, ছয়।'])
+  const { io, hints } = fakeCall(['কী বলব', 'হ্যাঁ।', 'শূন্য, শুন্য, ছয়।', 'হ্যাঁ।', 'হ্যাঁ।', 'এক, দুই, তিন, চার, পাঁচ, ছয়।'])
   await runStatusCall(io)
-  expect(hints).toEqual(['none', 'yesNo', 'number', 'yesNo', 'number'])
+  expect(hints).toEqual(['none', 'yesNo', 'number', 'yesNo', 'yesNo', 'number'])
 })
 
 test('the answers Whisper actually returned for a short হ্যাঁ, না, and অবস্থা are understood', () => {
@@ -64,15 +64,15 @@ test('the answers Whisper actually returned for a short হ্যাঁ, না,
 })
 
 test('Malek asks in his own words, confirms his number, gives his PIN, and hears the status', async () => {
-  const { io, log } = fakeCall(['আমার কেসের অবস্থা জানতে চাই', 'শূন্য শূন্য শূন্য শূন্য শূন্য ছয়', 'হ্যাঁ', 'এক দুই তিন চার পাঁচ ছয়'])
+  const { io, log } = fakeCall(['আমার কেসের অবস্থা জানতে চাই', 'শূন্য শূন্য শূন্য শূন্য শূন্য ছয়', 'হ্যাঁ', 'হ্যাঁ', 'এক দুই তিন চার পাঁচ ছয়'])
   await runStatusCall(io)
-  expect(log).toEqual(['welcome', 'askNumber', 'show:000006', 'confirmNumber:000006', 'askPin', 'lookup:000006/123456'])
+  expect(log).toEqual(['welcome', 'askNumber', 'show:000006', 'confirmNumber:000006', 'privateCheck', 'askPin', 'lookup:000006/123456'])
 })
 
 test('a number said in the first sentence is read back without asking for it again', async () => {
-  const { io, log } = fakeCall(['আমার কেস নম্বর শূন্য শূন্য তিন নয়, অবস্থা জানতে চাই', 'জি', '৪৮২৯১৫'])
+  const { io, log } = fakeCall(['আমার কেস নম্বর শূন্য শূন্য তিন নয়, অবস্থা জানতে চাই', 'জি', 'জি', '৪৮২৯১৫'])
   await runStatusCall(io)
-  expect(log).toEqual(['welcome', 'show:0039', 'confirmNumber:0039', 'askPin', 'lookup:0039/482915'])
+  expect(log).toEqual(['welcome', 'show:0039', 'confirmNumber:0039', 'privateCheck', 'askPin', 'lookup:0039/482915'])
 })
 
 test('an unclear request is asked about, and a "no" ends with where else to call', async () => {
@@ -82,22 +82,32 @@ test('an unclear request is asked about, and a "no" ends with where else to call
 })
 
 test('a number the caller says is wrong is asked for again', async () => {
-  const { io, log } = fakeCall(['অবস্থা জানতে চাই', 'শূন্য শূন্য তিন আট', 'না, ভুল', 'শূন্য শূন্য তিন নয়', 'হ্যাঁ', '482915'])
+  const { io, log } = fakeCall(['অবস্থা জানতে চাই', 'শূন্য শূন্য তিন আট', 'না, ভুল', 'শূন্য শূন্য তিন নয়', 'হ্যাঁ', 'হ্যাঁ', '482915'])
   await runStatusCall(io)
-  expect(log).toEqual(['welcome', 'askNumber', 'show:0038', 'confirmNumber:0038', 'askNumber', 'show:0039', 'confirmNumber:0039', 'askPin', 'lookup:0039/482915'])
+  expect(log).toEqual(['welcome', 'askNumber', 'show:0038', 'confirmNumber:0038', 'askNumber', 'show:0039', 'confirmNumber:0039', 'privateCheck', 'askPin', 'lookup:0039/482915'])
 })
 
 test('a PIN is asked again after "not found", and three misses send the caller to 16699', async () => {
-  const { io, log } = fakeCall(['খবর জানতে চাই', 'তিন নয়', 'হ্যাঁ', '111111', '222222', '333333'], ['NOT_FOUND', 'NOT_FOUND', 'NOT_FOUND'])
+  const { io, log } = fakeCall(['খবর জানতে চাই', 'তিন নয়', 'হ্যাঁ', 'হ্যাঁ', '111111', '222222', '333333'], ['NOT_FOUND', 'NOT_FOUND', 'NOT_FOUND'])
   await runStatusCall(io)
-  expect(log.slice(3)).toEqual(['confirmNumber:39', 'askPin', 'lookup:39/111111', 'notFound+askPin', 'lookup:39/222222', 'notFound+askPin', 'lookup:39/333333', 'end:tryHelpline'])
+  expect(log.slice(3)).toEqual(['confirmNumber:39', 'privateCheck', 'askPin', 'lookup:39/111111', 'notFound+askPin', 'lookup:39/222222', 'notFound+askPin', 'lookup:39/333333', 'end:tryHelpline'])
 })
 
 test('a PIN short of six digits gets its own retry, and English digit words count', async () => {
   // Whisper heard "আট" as "আর" (five digits); the caller then reads the PIN out in English.
-  const { io, log } = fakeCall(['অবস্থা', 'তিন নয়', 'হ্যাঁ', 'আমার পিন নম্বর হলো চার, আর, দুই, নয়, এক, পাঁচ।', 'ফোর এইট টু নাইন ওয়ান ফাইভ'])
+  const { io, log } = fakeCall(['অবস্থা', 'তিন নয়', 'হ্যাঁ', 'হ্যাঁ', 'আমার পিন নম্বর হলো চার, আর, দুই, নয়, এক, পাঁচ।', 'ফোর এইট টু নাইন ওয়ান ফাইভ'])
   await runStatusCall(io)
-  expect(log.slice(4)).toEqual(['askPin', 'pinAgain', 'lookup:39/482915'])
+  expect(log.slice(4)).toEqual(['privateCheck', 'askPin', 'pinAgain', 'lookup:39/482915'])
+})
+
+test('on a phone others can hear, neither the PIN is asked nor the status spoken', async () => {
+  // "না", or no clear answer three times, ends the call before the PIN and says nothing about the case.
+  for (const replies of [['অবস্থা', 'তিন নয়', 'হ্যাঁ', 'না, দোকানে আছি'], ['অবস্থা', 'তিন নয়', 'হ্যাঁ', '', 'হুম্ম কী', '']]) {
+    const { io, log } = fakeCall(replies)
+    await runStatusCall(io)
+    expect(log.at(-1)).toBe('end:notPrivate')
+    expect(log.some((line) => line.startsWith('lookup:') || line.includes('askPin'))).toBe(false)
+  }
 })
 
 test('English digit words in Bangla script are digits, by exact spelling only', () => {
@@ -110,7 +120,7 @@ test('English digit words in Bangla script are digits, by exact spelling only', 
 
 test('a locked ID or an unavailable service ends the call at once', async () => {
   for (const [outcome, ending] of [['LOCKED', 'end:tryHelpline'], ['UNAVAILABLE', 'end:unavailable']]) {
-    const { io, log } = fakeCall(['অবস্থা', 'তিন নয়', 'হ্যাঁ', '482915'], [outcome])
+    const { io, log } = fakeCall(['অবস্থা', 'তিন নয়', 'হ্যাঁ', 'হ্যাঁ', '482915'], [outcome])
     await runStatusCall(io)
     expect(log.at(-1)).toBe(ending)
     expect(log.filter((line) => line.startsWith('lookup:'))).toHaveLength(1)

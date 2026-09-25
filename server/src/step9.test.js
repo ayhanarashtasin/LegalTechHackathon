@@ -87,6 +87,12 @@ test('Step 9: status, missed updates, temporary hold, separate human reassignmen
   assert.equal((await request(`/api/lawyers/assignments/${offered.data.assignmentId}/respond`, { method: 'POST', token: lawyer.token, body: {
     decision: 'ACCEPT', reason: 'I accept this fictional panel-lawyer assignment.',
   } })).data.status, 'ACCEPTED')
+  // The public tracker says a lawyer accepted, never who, whose case it is, or what it is about: the code holder may
+  // be on a shared phone or screen.
+  const tracked = await request('/api/applications/track', { method: 'POST', body: { identifier: caseId, lookupCode } })
+  assert.equal(tracked.data.lawyer.status, 'ACCEPTED')
+  for (const hidden of [lawyer.user.displayName, 'Fictional Malek Step 9']) assert.equal(JSON.stringify(tracked.data).includes(hidden), false, hidden)
+  for (const field of ['applicantName', 'legalNeed']) assert.equal(field in tracked.data, false, field)
 
   for (const offset of [30000, 31000]) {
     const scheduled = await request(`/api/lawyers/applications/${applicationId}/update-schedules`, { method: 'POST', token: officer.token, body: {

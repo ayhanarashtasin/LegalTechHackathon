@@ -523,6 +523,7 @@ test('public case tracking shows progress only to the holder of the record looku
   assert.equal(tracked.data.applicationId, applicationId)
   assert.equal(tracked.data.currentPhase, 2)
   assert.equal('lookupCodeHash' in tracked.data, false)
+  assert.equal(JSON.stringify(tracked.data).includes('Fictional Tracking Applicant'), false)
   assert.equal((await track(String(Number(applicationId.slice(-6))), lookupCode.toUpperCase())).data.applicationId, applicationId)
   await request(`/api/applications/${applicationId}/review`, { method: 'POST', token: officer.token, body: { reviewState: 'READY_FOR_DECISION', reason: 'Officer reviewed the fictional tracking record.' } })
   const accepted = await request(`/api/applications/${applicationId}/accept`, { method: 'POST', token: officer.token, body: { reason: 'Officer accepted the fictional tracking record.' } })

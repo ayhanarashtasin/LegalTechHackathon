@@ -854,7 +854,7 @@ thead th { font-size: .8rem; color: #4e5751; }
 /* Key Details Bento Grid */
 .tracker-details-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.85rem;
   margin-bottom: 1.75rem;
 }

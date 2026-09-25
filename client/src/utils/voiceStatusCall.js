@@ -69,6 +69,10 @@ export async function runStatusCall(io) {
   }
   if (!confirmed) return io.finish({ key: 'tryHelpline' })
 
+  // The PIN is about to be said and the status heard aloud, and the phone may be shared (Malek's is a shop's). Only a
+  // clear yes goes on; "no" or no clear answer ends the call without a word about the case.
+  if (await ask(io, [{ key: 'privateCheck' }], YES_NO) !== true) return io.finish({ key: 'notPrivate' })
+
   let lead = []
   for (let tries = 0; tries < MAX_TRIES; tries += 1) {
     const pin = await ask(io, [{ key: 'askPin' }], PIN, lead)
