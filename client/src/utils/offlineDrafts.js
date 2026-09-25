@@ -117,5 +117,8 @@ export function resumeOfflineDrafts() { signedOut = false }
 export async function clearOfflineDrafts() {
   signedOut = true
   sessionEpoch += 1
-  await operation('readwrite', (store) => store.clear())
+  await Promise.all([
+    operation('readwrite', (store) => store.clear()),
+    operation('readwrite', (store) => store.clear(), SIGNATURE_STORE),
+  ])
 }

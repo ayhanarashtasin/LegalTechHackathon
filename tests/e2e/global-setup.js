@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto'
-import mongoose from 'mongoose'
-import * as models from '../../server/src/models/index.js'
+import { createRequire } from 'node:module'
 import { hashPassword } from '../../server/src/utils/password.js'
 import { roleNames, testDatabase } from './support.js'
 
 // Creates one fictional account per role for all specs; the returned function drops the throwaway database.
 export default async function globalSetup() {
+  // Playwright's ESM loader on Node 22 can fail while importing Mongoose's CJS graph.
+  const mongoose = createRequire(import.meta.url)('mongoose')
+  const models = await import('../../server/src/models/index.js')
   const databaseName = process.env.MONGODB_DB
   if (!testDatabase.test(databaseName || '')) throw new Error('Refusing to run E2E against a non-test database.')
   await mongoose.connect(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/dlas', { dbName: databaseName, serverSelectionTimeoutMS: 10000 })

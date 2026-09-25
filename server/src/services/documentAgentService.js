@@ -20,6 +20,15 @@ async function officerApplication(applicationId, actor, session) {
   return application
 }
 
+async function readableBriefingApplication(applicationId, actor) {
+  const application = await Application.findOne({ applicationId }).select('officeCode').lean()
+  if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
+  if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)) {
+    throw new HttpError(403, 'FORBIDDEN', 'This office cannot read the document briefing.')
+  }
+  return application
+}
+
 async function latestDocuments(applicationId) {
   const documents = await Document.find({ applicationId, sensitivity: 'STANDARD' }).select('label checklistItem currentVersion').lean()
   const versions = await DocumentVersion.find({ documentId: { $in: documents.map((item) => item._id) } }).sort({ version: -1 }).select('+textContent').lean()
@@ -28,46 +37,82 @@ async function latestDocuments(applicationId) {
   return documents.map((document) => ({ document, version: latest.get(document._id.toString()) })).filter(({ version }) => version)
 }
 
+const normalized = (value) => value.trim().replace(/\s+/g, ' ')
+
+// A model may select quotations, but cannot supply an unsupported factual point or a source it was not given.
+export function supportedPoints(suggested, citations) {
+  if (!Array.isArray(suggested) || suggested.length < 1 || suggested.length > 6) return null
+  const sources = new Map(citations.map((citation) => [citation.sourceId, citation]))
+  const points = suggested.map(({ text, sourceId }) => ({ text: typeof text === 'string' ? normalized(text) : '', sourceId }))
+  if (points.some(({ text, sourceId }) => !text || text.length > 180 || !sources.has(sourceId) || !normalized(sources.get(sourceId).excerpt).includes(text))) return null
+  return points
+}
+
 export async function proposeBriefing(applicationId, actor) {
   const application = await officerApplication(applicationId, actor)
   const assistance = await AssistanceRecord.findOne({ applicationId }).select('caseType').lean()
   if (!assistance) throw new HttpError(409, 'CASE_TYPE_REQUIRED', 'A recorded assisted case type is required for this checklist.')
   const items = documentChecklist[assistance.caseType]
+  if (!items) throw new HttpError(409, 'CASE_TYPE_REQUIRED', 'The recorded case type has no approved demo checklist.')
   const documents = await latestDocuments(applicationId)
-  const missing = items.filter((item) => !documents.some(({ document }) => document.checklistItem === item))
+  const checklist = items.map((item) => {
+    const matched = documents.filter(({ document }) => document.checklistItem === item)
+    const readable = matched.some(({ version }) => version.qualityState === 'READABLE' && version.textContent?.trim())
+    return { item, status: !matched.length ? 'MISSING' : readable ? 'PRESENT_FOR_REVIEW' : 'UNCERTAIN', documentLabels: matched.map(({ document }) => document.label) }
+  })
+  const missing = checklist.filter(({ status }) => status === 'MISSING').map(({ item }) => item)
+  const uncertain = checklist.filter(({ status }) => status === 'UNCERTAIN').map(({ item }) => item)
   const unreadable = documents.filter(({ version }) => version.qualityState !== 'READABLE' || !version.textContent).map(({ document }) => document.label)
+  const limitedSources = documents.filter(({ version }) => version.qualityState === 'READABLE' && version.textContent
+    && (version.textContent.split(/\r?\n/).filter((line) => line.trim()).length > 12 || version.textContent.split(/\r?\n/).some((line) => line.trim().length > 240)))
+    .map(({ document }) => document.label)
   const citations = documents.filter(({ version }) => version.qualityState === 'READABLE' && version.textContent).flatMap(({ document, version }) =>
     version.textContent.split(/\r?\n/).map((line, index) => ({ line: index + 1, excerpt: line.trim().slice(0, 240) }))
-      .filter(({ excerpt }) => excerpt).slice(0, 2).map(({ line, excerpt }) => ({ documentVersionId: version._id, label: document.label, line, excerpt })))
-  let summary = `Provisional inventory: ${citations.length} cited excerpt${citations.length === 1 ? '' : 's'} from readable fictional documents. ${missing.length} checklist item${missing.length === 1 ? '' : 's'} missing; ${unreadable.length} unreadable or unverified document${unreadable.length === 1 ? '' : 's'}. No legal conclusion is made.`
+      .filter(({ excerpt }) => excerpt).slice(0, 12).map(({ line, excerpt }) => ({ documentId: document._id, documentVersionId: version._id, label: document.label, version: version.version, line, excerpt })))
+    .map((citation, index) => ({ ...citation, sourceId: `S${index + 1}` }))
+  const firstByDocument = new Map()
+  for (const citation of citations) if (!firstByDocument.has(citation.documentVersionId.toString())) firstByDocument.set(citation.documentVersionId.toString(), citation)
+  let points = [...firstByDocument.values()].slice(0, 6).map(({ excerpt, sourceId }) => ({ text: excerpt.slice(0, 180), sourceId }))
   let model = 'deterministic-mock'
   if (citations.length) {
     try {
       const suggested = await summarizeDocuments(citations)
-      if (suggested) { summary = suggested; model = `groq:${extractionModel()}` }
+      const supported = supportedPoints(suggested, citations)
+      if (supported) { points = supported; model = `groq:${extractionModel()}` }
     } catch { /* Preserve the cited deterministic inventory when AI is unavailable. */ }
   }
+  const summary = `Provisional briefing: ${points.length} cited point${points.length === 1 ? '' : 's'} from readable documents. ${missing.length} checklist item${missing.length === 1 ? '' : 's'} missing; ${uncertain.length} uncertain; ${unreadable.length} unreadable or unverified document${unreadable.length === 1 ? '' : 's'}. ${limitedSources.length ? `${limitedSources.length} source${limitedSources.length === 1 ? '' : 's'} exceeded the excerpt limit. ` : ''}Officer verification is required.`
   return mongoose.connection.transaction(async (session) => {
     const current = await officerApplication(applicationId, actor, session)
     if (current.version !== application.version) throw new HttpError(409, 'CONFLICT', 'The record changed while the briefing was prepared. Regenerate it.')
     const updated = await Application.findOneAndUpdate({ applicationId, version: current.version }, { $inc: { version: 1, auditSequence: 1 } }, { returnDocument: 'after', session })
     if (!updated) throw new HttpError(409, 'CONFLICT', 'The record changed. Regenerate the briefing.')
     const briefing = await DocumentBriefing.findOneAndUpdate({ applicationId }, { $set: {
-      caseType: assistance.caseType, sourceVersion: updated.version, status: 'PROPOSED', model, summary, citations, missing, unreadable,
+      caseType: assistance.caseType, sourceVersion: updated.version, status: 'PROPOSED', model, summary, points, citations, checklist, missing, uncertain, unreadable, limitedSources,
       approvedByUserId: null, approvedAt: null,
     } }, { upsert: true, returnDocument: 'after', session })
     await appendAudit({ applicationId, caseId: current.caseId, sequence: updated.auditSequence,
       action: 'DOCUMENT_BRIEFING_PROPOSED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
-      newState: { briefingId: briefing.id, status: 'PROPOSED', model, citationVersionIds: citations.map((item) => item.documentVersionId.toString()), missing, unreadable },
+      newState: { briefingId: briefing.id, status: 'PROPOSED', model, citationVersionIds: citations.map((item) => item.documentVersionId.toString()), pointSourceIds: points.map((point) => point.sourceId), missing, uncertain, unreadable, limitedSources },
     }, session)
     return briefing
   })
 }
 
 export async function getBriefing(applicationId, actor) {
-  await officerApplication(applicationId, actor)
+  await readableBriefingApplication(applicationId, actor)
   const briefing = await DocumentBriefing.findOne({ applicationId }).lean()
   return briefing ?? { applicationId, status: 'NOT_GENERATED' }
+}
+
+export async function getDocumentSource(documentId, versionNumber, actor) {
+  const document = await Document.findById(documentId).select('applicationId sensitivity currentVersion').lean()
+  if (!document) throw new HttpError(404, 'NOT_FOUND', 'Document not found.')
+  await officerApplication(document.applicationId, actor)
+  if (document.sensitivity !== 'STANDARD') throw new HttpError(403, 'FORBIDDEN', 'This document is outside the standard briefing.')
+  const version = await DocumentVersion.findOne({ documentId, version: versionNumber }).select('+textContent filename qualityState version').lean()
+  if (!version || version.qualityState !== 'READABLE' || !version.textContent) throw new HttpError(404, 'NOT_FOUND', 'Readable source text is unavailable.')
+  return { documentId, version: version.version, filename: version.filename, textContent: version.textContent, currentVersion: document.currentVersion }
 }
 
 export async function approveBriefing(applicationId, reason, actor) {

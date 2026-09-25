@@ -28,21 +28,9 @@ export default function AuthModal({
   const [officerUsername, setOfficerUsername] = useState(OFFICER_ROLES[0].id)
   const [officerPassword, setOfficerPassword] = useState('1234')
 
-  // Citizen sign-in state (auto-fills from registration if available)
-  const [citizenLoginId, setCitizenLoginId] = useState(() => {
-    try {
-      return localStorage.getItem('dlas_registered_login_id') || ''
-    } catch {
-      return ''
-    }
-  })
-  const [citizenLoginPassword, setCitizenLoginPassword] = useState(() => {
-    try {
-      return localStorage.getItem('dlas_registered_login_pwd') || ''
-    } catch {
-      return ''
-    }
-  })
+  // Keep a new registration's sign-in details only in this open modal.
+  const [citizenLoginId, setCitizenLoginId] = useState('')
+  const [citizenLoginPassword, setCitizenLoginPassword] = useState('')
 
   // Citizen sign-up state
   const [regName, setRegName] = useState('')
@@ -126,12 +114,6 @@ export default function AuthModal({
 
     const cleanIdentifier = regIdentifier.trim()
     const cleanPassword = regPassword
-    try {
-      localStorage.setItem('dlas_registered_login_id', cleanIdentifier)
-      localStorage.setItem('dlas_registered_login_pwd', cleanPassword)
-    } catch {
-      // storage unavailable
-    }
     setCitizenLoginId(cleanIdentifier)
     setCitizenLoginPassword(cleanPassword)
 
@@ -147,8 +129,8 @@ export default function AuthModal({
   }
 
   function handleSwitchToSignIn() {
-    const savedId = (typeof localStorage !== 'undefined' && localStorage.getItem('dlas_registered_login_id')) || regIdentifier.trim() || ''
-    const savedPwd = (typeof localStorage !== 'undefined' && localStorage.getItem('dlas_registered_login_pwd')) || regPassword || ''
+    const savedId = regIdentifier.trim() || citizenLoginId
+    const savedPwd = regPassword || citizenLoginPassword
     if (savedId) setCitizenLoginId(savedId)
     if (savedPwd) setCitizenLoginPassword(savedPwd)
     if (onSwitchMode) onSwitchMode('signin')

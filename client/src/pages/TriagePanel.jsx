@@ -69,6 +69,13 @@ export default function TriagePanel({ applicationId, token }) {
         <ul>{component.reasons.map((item, index) => <li key={`${component.name}-reason-${index}`}>{tr(item)}</li>)}</ul>
         <small className="muted"><Bi en="Uncertainty" bn="যা নিশ্চিত নয়" />: {tr(component.uncertainty)}{component.evidenceRefs.length ? <> · <Bi en="Sources" bn="উৎস" />: {component.evidenceRefs.map((ref) => <code key={ref}>{ref} </code>)}</> : null}</small>
       </article>)}</div>
+      {latest.routingReview && <section className="mini-card" aria-label={bi('Routing and jurisdiction review', 'অফিস নির্বাচন ও এখতিয়ার পর্যালোচনা')}>
+        <h3><Bi en="Routing and jurisdiction review" bn="অফিস নির্বাচন ও এখতিয়ার পর্যালোচনা" /></h3>
+        <p><Badge code={latest.routingReview.status} /></p>
+        <p>{tr(latest.routingReview.reason)}</p>
+        <p className="muted"><Bi en="Officer review required. Triage does not decide jurisdiction or change the route." bn="কর্মকর্তার পর্যালোচনা দরকার। প্রাথমিক পর্যালোচনা এখতিয়ার নির্ধারণ বা অফিস পরিবর্তন করে না।" /></p>
+        <small className="muted"><Bi en="Sources" bn="উৎস" />: {latest.routingReview.evidenceRefs.map((ref) => <code key={ref}>{ref} </code>)}</small>
+      </section>}
       {latest.status === 'PENDING_HUMAN_REVIEW' ? <form className="form-stack inline-form" onSubmit={decide}>
         <h3><Bi en="Your decision" bn="আপনার সিদ্ধান্ত" /></h3>
         <label htmlFor="triage-final-category"><Bi en="Case type" bn="মামলার ধরন" /></label>

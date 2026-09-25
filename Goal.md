@@ -1296,6 +1296,8 @@ Return:
 - differing attributes
 - human-review status
 
+Same-office case-support staff may view a redacted candidate ranking to route a concern to an officer. Only DLAO officers may see field-level comparison values or record a review decision; the ranking is not calibrated confidence.
+
 Use 10-15 fictional records including:
 - genuine duplicate candidates
 - at least two similar-but-different traps

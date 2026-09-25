@@ -17,17 +17,18 @@ const newLookupCode = () => randomBytes(12).toString('hex')
 const lookupHash = (code) => createHash('sha256').update(code).digest('hex')
 
 // Demo rules only (urgency criteria await law-team approval); the officer's priorityDecision stays the final priority.
-export function urgencyReasons({ urgentFact, aiSensitive, restrictedEvidence }) {
+export function urgencyReasons({ urgentFact, aiSensitive, safetyNeedsReview, restrictedEvidence }) {
   return [
     urgentFact && `An urgent fact is recorded (safety.urgent revision ${urgentFact.revision}, ${urgentFact.sourceType.replaceAll('_', ' ').toLowerCase()}).`,
     aiSensitive && 'AI flagged possible violence or danger in the intake words.',
+    safetyNeedsReview && 'The voice safety answer needs human verification before anyone relies on a no-risk response.',
     restrictedEvidence && `${restrictedEvidence} restricted sensitive-evidence item${restrictedEvidence === 1 ? ' is' : 's are'} on file.`,
   ].filter(Boolean)
 }
 
 // What an officer weighs first. Each signal comes from a recorded fact or event; none is a judgement made here.
-function vulnerabilities({ urgent, representative, nidKnown, aiSensitive }) {
-  return [urgent && 'SAFETY_RISK', representative && 'REPRESENTATIVE_CALLER', nidKnown === 'NO' && 'NID_UNKNOWN', aiSensitive && 'AI_FLAGGED_DANGER'].filter(Boolean)
+function vulnerabilities({ urgent, representative, nidKnown, aiSensitive, safetyNeedsReview }) {
+  return [urgent && 'SAFETY_RISK', safetyNeedsReview && 'SAFETY_UNVERIFIED', representative && 'REPRESENTATIVE_CALLER', nidKnown === 'NO' && 'NID_UNKNOWN', aiSensitive && 'AI_FLAGGED_DANGER'].filter(Boolean)
 }
 const latestValues = (facts) => { const values = {}; for (const fact of facts) values[fact.field] ??= fact.value; return values }
 
@@ -108,12 +109,13 @@ const voiceChannelUser = () => User.findOneAndUpdate(
 const newVoicePin = () => String(randomInt(0, 1_000_000)).padStart(6, '0')
 
 // Sentences for the officer's first task; each is translated on the Bangla screen.
-function voiceReviewSteps({ representative, answers, aiSensitive }) {
+function voiceReviewSteps({ representative, answers, aiSensitive, safetyNeedsReview }) {
   return [
     representative ? 'Reported by a representative: authority and applicant confirmation are pending.' : 'Reported by the applicant by voice.',
     answers.nid ? 'NID number given by the caller; verify it before relying on it.' : 'Identity is incomplete.',
     answers.nidKnown === false && 'NID not known: the caller was advised to verify identity at the nearest UDC.',
-    answers.urgent && 'The caller reported a current threat, violence, or safety risk; decide priority first.',
+    answers.urgent === true && 'The caller reported a current threat, violence, or safety risk; decide priority first.',
+    safetyNeedsReview && 'Safety was unclear or a spoken no was inferred: review the transcript/recording and verify safety with the caller through the safe-contact route before treating this as no risk.',
     'Contact only through the active safe-contact profile with neutral wording. No SMS or voicemail.',
     aiSensitive && 'AI flagged possible violence or danger in the caller’s words; a human must judge it.',
   ].filter(Boolean).join(' ')
@@ -126,6 +128,7 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
   const applicationId = await nextRecordId('APP')
   const lookupCode = newVoicePin()
   const advice = mode === 'ADVICE'
+  const safetyNeedsReview = !advice && (answers.urgent === 'UNKNOWN' || (answers.urgent === false && (confirmation === 'VOICE' || aiFields.includes('urgent'))))
   // Outside the transaction: a slow or failed model call never blocks or loses the submission.
   const outline = advice ? null : await outlineComplaint(answers.problem).catch(() => null)
   return mongoose.connection.transaction(async (session) => {
@@ -180,15 +183,20 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
       ? [['advice.topic', 'adviceTopic', answers.adviceTopic]]
       : [['complaint.summary', 'problem', answers.problem], ['location.district', 'district', answers.district],
         ['identity.nid_known', 'nidKnown', answers.nidKnown ? 'YES' : 'NO'], ...(answers.nid ? [['identity.nid', 'nid', answers.nid]] : []),
-        ['safety.urgent', 'urgent', answers.urgent ? 'YES' : 'NO'], ['contact.preference', 'contactChannel', answers.contactChannel]]
+        ['safety.urgent', 'urgent', answers.urgent === 'UNKNOWN' ? 'UNKNOWN' : answers.urgent ? 'YES' : 'NO'], ['contact.preference', 'contactChannel', answers.contactChannel]]
     // Representative reports are never applicant-confirmed here; only the applicant can confirm them later.
     const applicantConfirmed = !advice && !representative
-    const callerFacts = factValues.map(([field, answerField, value]) => ({
-      applicationId, field, value, sourceType, sourcePersonId: advice ? undefined : caller._id,
-      captureMethod: 'VOICE', aiInferred: aiFields.includes(answerField),
-      callerConfirmed: true, applicantConfirmed, confirmedByPersonId: applicantConfirmed ? applicant._id : undefined,
-      revision: 1, recordedByUserId,
-    }))
+    const callerFacts = factValues.map(([field, answerField, value]) => {
+      const unansweredSafety = field === 'safety.urgent' && value === 'UNKNOWN'
+      return {
+        applicationId, field, value, sourceType: unansweredSafety ? 'UNKNOWN_OR_UNVERIFIED' : sourceType,
+        sourcePersonId: advice || unansweredSafety ? undefined : caller._id,
+        captureMethod: 'VOICE', aiInferred: aiFields.includes(answerField),
+        callerConfirmed: !unansweredSafety, applicantConfirmed: !unansweredSafety && applicantConfirmed,
+        confirmedByPersonId: !unansweredSafety && applicantConfirmed ? applicant._id : undefined,
+        revision: 1, recordedByUserId,
+      }
+    })
     // The model's outline of the account: unverified suggestions, never confirmed by anyone.
     const outlineFacts = Object.entries(outline ? { 'incident.what': outline.what, 'incident.when': outline.when, 'incident.where': outline.where,
       'incident.who': outline.who, 'complaint.type': outline.type, 'complaint.legal_need': outline.legalNeed } : {})
@@ -208,7 +216,7 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
     const [task] = await Task.create([advice
       ? { applicationId, kind: 'ADVICE_CALLBACK', ownerRole: 'HELPLINE_AGENT', title: 'Call back with legal information',
         nextAction: 'Call back only on the recorded safe number at the safe time. Give legal information; if formal legal aid is needed, record the applicant details for DLAO review.' }
-      : { applicationId, kind: 'INTAKE_REVIEW', ownerRole: 'DLAO_OFFICER', title: 'Review 16699 voice intake', nextAction: voiceReviewSteps({ representative, answers, aiSensitive }) },
+      : { applicationId, kind: 'INTAKE_REVIEW', ownerRole: 'DLAO_OFFICER', title: 'Review 16699 voice intake', nextAction: voiceReviewSteps({ representative, answers, aiSensitive, safetyNeedsReview }) },
     ], { session })
     const aiAssisted = aiFields.length > 0 || Boolean(transcript) || outlineFacts.length > 0
     const [storedTranscript] = transcript ? await VoiceTranscript.create([{ applicationId, turns: transcript, transcribedBy: speechModel() }], { session }) : []
@@ -216,7 +224,7 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
       {
         action: 'APPLICATION_SUBMITTED',
         // Records that AI assisted and which answers it extracted; no model reasoning, and never the NID itself.
-        newState: { status: 'SUBMITTED', applicantPersonId: applicant.id, mode, service: advice ? 'ADVICE' : 'COMPLAINT', callerRole: answers.callerRole ?? 'NOT_COLLECTED', nidProvided: Boolean(answers.nid), contactRoute: advice ? 'PHONE' : answers.contactChannel, correctedFields, aiAssisted, aiSensitive, aiModels: aiAssisted ? { speechToText: speechModel(), extraction: extractionModel() } : null, aiFields, confirmation },
+        newState: { status: 'SUBMITTED', applicantPersonId: applicant.id, mode, service: advice ? 'ADVICE' : 'COMPLAINT', callerRole: answers.callerRole ?? 'NOT_COLLECTED', nidProvided: Boolean(answers.nid), contactRoute: advice ? 'PHONE' : answers.contactChannel, correctedFields, aiAssisted, aiSensitive, safetyNeedsReview, aiModels: aiAssisted ? { speechToText: speechModel(), extraction: extractionModel() } : null, aiFields, confirmation },
         reason: 'Caller confirmed the read-back and submitted through the 16699 voice simulation.',
       },
       ...(representation ? [{ action: 'REPRESENTATION_RECORDED', newState: { representationId: representation.id, authorityStatus: 'PENDING' } }] : []),
@@ -575,7 +583,7 @@ export async function getApplication(applicationId, actor) {
     AssistanceRecord.findOne({ applicationId }).populate('helperPersonId', 'displayName').populate('translatorPersonId', 'displayName').populate('typistPersonId', 'displayName').lean(),
     ConsentRecord.findOne({ applicationId, scope: 'ASSISTED_INTAKE' }).sort({ revision: -1 }).select('state').lean(),
     CaseFact.findOne({ applicationId, field: 'safety.urgent' }).sort({ revision: -1 }).select('value revision sourceType').lean(),
-    AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive').lean(),
+    AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive newState.safetyNeedsReview').lean(),
     Document.countDocuments({ applicationId, sensitivity: 'RESTRICTED' }),
     CaseFact.find({ applicationId, field: { $in: ['complaint.type', 'complaint.legal_need', 'identity.nid_known'] } }).sort({ revision: -1 }).select('field value').lean(),
   ])
@@ -585,11 +593,11 @@ export async function getApplication(applicationId, actor) {
     reviewState: application.reviewState, priorityDecision: application.priorityDecision ?? null, version: application.version, channel: application.channel,
     officeCode: application.officeCode, applicantName: person?.displayName ?? 'Unavailable',
     identityStatus: person?.identityStatus ?? 'INCOMPLETE', nextTask,
-    urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, restrictedEvidence }),
+    urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview, restrictedEvidence }),
     service: application.service ?? 'COMPLAINT',
     // AI suggestions from the caller's own account; the officer confirms or ignores them.
     complaintType: summary['complaint.type'] ?? null, legalNeed: summary['complaint.legal_need'] ?? null,
-    vulnerability: vulnerabilities({ urgent: urgentFact?.value === 'YES', representative: Boolean(representation), nidKnown: summary['identity.nid_known'], aiSensitive: submitted?.newState?.aiSensitive }),
+    vulnerability: vulnerabilities({ urgent: urgentFact?.value === 'YES', representative: Boolean(representation), nidKnown: summary['identity.nid_known'], aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview }),
     representation: representation ? {
       representativeName: representation.representativePersonId?.displayName ?? 'Unavailable',
       relationship: representation.relationship, authorityStatus: representation.authorityStatus,
@@ -624,7 +632,7 @@ export async function listWorkspace(role, actor) {
       Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName identityStatus').lean(),
       Task.find({ applicationId: { $in: ids }, status: 'OPEN' }).select('applicationId kind dueAt createdAt nextAction').lean(),
       CaseFact.find({ applicationId: { $in: ids }, field: 'safety.urgent' }).sort({ revision: -1 }).select('applicationId value revision sourceType').lean(),
-      AuditEvent.find({ applicationId: { $in: ids }, action: 'APPLICATION_SUBMITTED' }).select('applicationId newState.aiSensitive').lean(),
+      AuditEvent.find({ applicationId: { $in: ids }, action: 'APPLICATION_SUBMITTED' }).select('applicationId newState.aiSensitive newState.safetyNeedsReview').lean(),
       Document.find({ applicationId: { $in: ids }, sensitivity: 'RESTRICTED' }).select('applicationId').lean(),
       Referral.find({ applicationId: { $in: ids }, status: { $in: ['SENT', 'ACKNOWLEDGED'] } }).select('applicationId status dueAt receivingOfficeCode').lean(),
       LawyerUpdate.find({ applicationId: { $in: ids }, $or: [{ status: 'MISSED' }, { status: 'PENDING', dueAt: { $lte: new Date() } }] }).select('applicationId sequence status dueAt').lean(),
@@ -637,6 +645,7 @@ export async function listWorkspace(role, actor) {
     const urgency = new Map()
     for (const fact of urgentFacts) if (!urgency.has(fact.applicationId)) urgency.set(fact.applicationId, fact.value === 'YES' && fact)
     const aiSensitive = new Set(aiEvents.filter((event) => event.newState?.aiSensitive).map((event) => event.applicationId))
+    const safetyNeedsReview = new Set(aiEvents.filter((event) => event.newState?.safetyNeedsReview).map((event) => event.applicationId))
     const restrictedCounts = Map.groupBy(restricted, (item) => item.applicationId)
     const waiting = new Map(referrals.map((referral) => [referral.applicationId, referral]))
     const missedUpdates = Map.groupBy(lawyerUpdates, (item) => item.applicationId)
@@ -651,9 +660,9 @@ export async function listWorkspace(role, actor) {
       createdAt: item.createdAt, updatedAt: item.updatedAt,
       complaintType: summaries.get(item.applicationId)?.['complaint.type'] ?? null,
       vulnerability: vulnerabilities({ urgent: Boolean(urgency.get(item.applicationId)), representative: represented.has(item.applicationId),
-        nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId) }),
+        nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId) }),
       flags: queueFlags(item, identities.get(item.applicantPersonId.toString()), tasksByApplication.get(item.applicationId) ?? [],
-        urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0 }),
+        urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0 }),
         waiting.get(item.applicationId), missedUpdates.get(item.applicationId) ?? [], now),
     }))
     const counts = Object.fromEntries(['NEW', 'INCOMPLETE', 'URGENT_RECOMMENDATION', 'PENDING', 'OVERDUE', 'REFERRAL_WAITING', 'LAWYER_UPDATE_OVERDUE'].map((flag) => [flag, records.filter((record) => record.flags.some((item) => item.code === flag)).length]))

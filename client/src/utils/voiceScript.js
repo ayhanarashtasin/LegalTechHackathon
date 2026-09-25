@@ -17,7 +17,7 @@ export const steps = {
   nidKnown: { labelEn: 'NID known', label: 'এনআইডি নম্বর জানা', prompt: 'জাতীয় পরিচয়পত্র বা NID নম্বর কি জানা আছে?', en: 'Do you know the national ID (NID) number?', choices: yesNo },
   nid: { labelEn: 'NID number', label: 'এনআইডি নম্বর', prompt: 'NID নম্বরটি কত?', en: 'What is the NID number?', digits: NID_DIGITS },
   problem: { labelEn: 'Complaint', label: 'অভিযোগ', prompt: 'অভিযোগটি সংক্ষেপে বলুন: কী ঘটেছে, কখন, কোথায় এবং কারা জড়িত?', en: 'Briefly describe the complaint: what happened, when, where, and who was involved?', min: 5, max: 2000, long: true },
-  urgent: { labelEn: 'Safety risk', label: 'নিরাপত্তা ঝুঁকি', prompt: 'আপনি বা ভুক্তভোগী কি এখন কোনো হুমকি, সহিংসতা বা নিরাপত্তা ঝুঁকির মধ্যে আছেন?', en: 'Are you, or the person you are calling for, under any threat, violence, or safety risk right now?', choices: yesNo },
+  urgent: { labelEn: 'Safety risk', label: 'নিরাপত্তা ঝুঁকি', prompt: 'আপনি বা ভুক্তভোগী কি এখন কোনো হুমকি, সহিংসতা বা নিরাপত্তা ঝুঁকির মধ্যে আছেন?', en: 'Are you, or the person you are calling for, under any threat, violence, or safety risk right now?', choices: [...yesNo, ['UNKNOWN', 'নিশ্চিত নই—কর্মকর্তা যাচাই করবেন', 'Not sure—an officer will check']] },
   contactChannel: { labelEn: 'Contact route', label: 'যোগাযোগের মাধ্যম', prompt: 'কোন মাধ্যমে যোগাযোগ করা নিরাপদ ও সুবিধাজনক?', en: 'Which way of contacting you is safe and convenient?', choices: [['PHONE', 'ফোন', 'Phone call'], ['UDC', 'ইউডিসি', 'Through a UDC office'], ['TRUSTED_PERSON', 'বিশ্বস্ত ব্যক্তি', 'Through a trusted person']] },
   contactValue: { labelEn: 'Safe number', label: 'নিরাপদ নম্বর', prompt: 'কোন ফোন নম্বরে ফোন করা নিরাপদ?', en: 'Which phone number is safe to call?', digits: PHONE_DIGITS },
   trustedPerson: { labelEn: 'Trusted person', label: 'বিশ্বস্ত ব্যক্তি', prompt: 'যাঁর মাধ্যমে যোগাযোগ করব, তাঁর নাম কী এবং তিনি আপনার কী হন?', en: 'Who should we contact you through, and how are they related to you?', max: 160 },
@@ -37,7 +37,7 @@ const flow = [['service'], ['adviceTopic', advice],
   ['contactValue', (answers) => advice(answers) || (complaint(answers) && answers.contactChannel === 'PHONE')],
   ['trustedPerson', trusted], ['trustedPhone', trusted], ['safeTime', (answers) => answers.service !== undefined]]
 
-export const startCall = () => ({ answers: {}, previous: {}, corrected: [], aiFields: [] })
+export const startCall = () => ({ answers: {}, previous: {}, corrected: [], aiFields: [], safetyNoPending: false })
 export const modeOf = (call) => (advice(call.answers) ? 'ADVICE' : 'INTAKE')
 export const activeFields = (call) => flow.filter(([, applies]) => !applies || applies(call.answers)).map(([field]) => field)
 export const nextField = (call) => activeFields(call).find((field) => call.answers[field] === undefined)
@@ -46,7 +46,7 @@ export const displayValue = (call, field) => steps[field].choices?.find(([value]
 // Recorded messages that play once, before whatever is asked next: the greeting, the advice notice once advice is
 // chosen, the UDC advice once the NID is unknown, and the 999 safety message once a current risk is reported.
 export const notices = (call) => ['greeting',
-  advice(call.answers) && 'adviceIntro', call.answers.nidKnown === false && 'nidUnknown', call.answers.urgent === true && 'safetyAlert',
+  advice(call.answers) && 'adviceIntro', call.answers.nidKnown === false && 'nidUnknown', (call.answers.urgent === true || call.answers.urgent === 'UNKNOWN') && 'safetyAlert',
 ].filter(Boolean)
 
 // `via` keeps provenance honest: answers the live model extracted are listed in aiFields for the server to flag.
@@ -57,12 +57,13 @@ export function answer(call, field, value, via = 'CALLER') {
     answers: { ...call.answers, [field]: value },
     corrected: changed ? [...new Set([...call.corrected, field])] : call.corrected,
     aiFields: via === 'AI' ? [...new Set([...call.aiFields, field])] : call.aiFields.filter((item) => item !== field),
+    safetyNoPending: field === 'urgent' ? false : call.safetyNoPending,
   }
 }
 
 export function correct(call, field) {
   const { [field]: previous, ...answers } = call.answers
-  return { ...call, answers, previous: { ...call.previous, [field]: previous }, corrected: [...new Set([...call.corrected, field])] }
+  return { ...call, answers, previous: { ...call.previous, [field]: previous }, corrected: [...new Set([...call.corrected, field])], safetyNoPending: field === 'urgent' ? false : call.safetyNoPending }
 }
 
 // The first choice travels as `mode`; every other active answer is sent for the server to validate again.

@@ -41,10 +41,12 @@ export default function MediationPanel({ applicationId, session, role }) {
   const [notes, setNotes] = useState('')
   const [identifiersRemoved, setIdentifiersRemoved] = useState(false)
   const [acknowledgements, setAcknowledgements] = useState({ partyAUnderstands: false, partyAConsents: false, partyBUnderstands: false, partyBConsents: false })
+  const [warningsReviewed, setWarningsReviewed] = useState(false)
   const [reviewReason, setReviewReason] = useState('')
   const [draftEdits, setDraftEdits] = useState({})
   const [amendReason, setAmendReason] = useState('')
-  const [signerRole, setSignerRole] = useState('PARTY_A')
+  const signerRole = 'MEDIATOR'
+  const [issuedCodes, setIssuedCodes] = useState({})
   const [applicabilityBasis, setApplicabilityBasis] = useState('')
   const [certificateReason, setCertificateReason] = useState('')
 
@@ -56,6 +58,7 @@ export default function MediationPanel({ applicationId, session, role }) {
       if (result?.draft) {
         setDraftEdits(Object.fromEntries(result.draft.sections.map(({ key, text }) => [key, text])))
         setAcknowledgements(result.draft.partyAcknowledgements ?? { partyAUnderstands: false, partyAConsents: false, partyBUnderstands: false, partyBConsents: false })
+        setWarningsReviewed(result.draft.warningsReviewed ?? false)
       }
       setLoaded(true)
     }).catch((failure) => { if (failure.name !== 'AbortError') { setError(failure.message); setLoaded(true) } })
@@ -73,7 +76,8 @@ export default function MediationPanel({ applicationId, session, role }) {
       for (const row of pending) {
         const packet = await loadSignaturePacket(row.id, ownerId, signingPassphrase)
         const { applicationId: targetApplicationId, ...signature } = packet
-      const result = await api(pathFor(targetApplicationId, '/signatures'), { token: session.token, method: 'POST', body: signature })
+        if (signature.signerRole !== 'MEDIATOR') throw new Error(bi('An older party signature packet needs a new party signing code. Ask the party to sign again.', 'আগের পক্ষের স্বাক্ষরের জন্য নতুন কোড দরকার। পক্ষকে আবার স্বাক্ষর করতে বলুন।'))
+        const result = await api(pathFor(targetApplicationId, '/signatures'), { token: session.token, method: 'POST', body: signature })
         await removeSignaturePacket(row.id, ownerId)
         setMediation(result.mediation ?? result)
         setNotice(bi(`Offline ${signature.signerRole.replaceAll('_', ' ')} signature synced and verified.`, `অফলাইন স্বাক্ষর (${signerBn[signature.signerRole]}) সিঙ্ক ও যাচাই হয়েছে।`))
@@ -102,6 +106,7 @@ export default function MediationPanel({ applicationId, session, role }) {
       if (updated.draft && updated.draft.version !== mediation?.draft?.version) {
         setDraftEdits(Object.fromEntries(updated.draft.sections.map(({ key, text }) => [key, text])))
         setAcknowledgements(updated.draft.partyAcknowledgements ?? { partyAUnderstands: false, partyAConsents: false, partyBUnderstands: false, partyBConsents: false })
+        setWarningsReviewed(updated.draft.warningsReviewed ?? false)
       }
       setNotice(success)
       return result.mediation ?? result
@@ -138,6 +143,30 @@ export default function MediationPanel({ applicationId, session, role }) {
     finally { setBusy(false) }
   }
 
+  async function issueCode(partyRole) {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const result = await api(pathFor(applicationId, '/signing-invitations'), { token: session.token, method: 'POST', body: { signerRole: partyRole } })
+      setMediation(result.mediation)
+      setIssuedCodes((current) => ({ ...current, [partyRole]: result.code }))
+      setNotice(bi(`${partyRole.replaceAll('_', ' ')} code is shown below once. Share it privately; issuing another code cancels the earlier one.`, `${signerBn[partyRole]}-এর কোড নিচে একবার দেখানো হচ্ছে। গোপনে দিন; নতুন কোড দিলে আগেরটি বাতিল হবে।`))
+    } catch (failure) { setError(failure.message) }
+    finally { setBusy(false) }
+  }
+
+  async function refreshSignatures() {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api(pathFor(applicationId), { token: session.token })
+      setMediation(result.mediation)
+      setNotice(bi('Latest signatures loaded.', 'সর্বশেষ স্বাক্ষর দেখানো হয়েছে।'))
+    } catch (failure) { setError(failure.message) }
+    finally { setBusy(false) }
+  }
+
 
   const assignedToMe = mediation?.mediatorUserId === ownerId
   const mediatorCanAct = role === 'MEDIATOR' && assignedToMe
@@ -145,7 +174,8 @@ export default function MediationPanel({ applicationId, session, role }) {
   const signedRoles = new Set(signatures.map(({ signerRole }) => signerRole))
   const missingPartySignatures = !signedRoles.has('PARTY_A') || !signedRoles.has('PARTY_B')
   const stageIndex = stages.indexOf(mediation?.stage)
-  const signing = mediatorCanAct && mediation?.draft?.status === 'APPROVED'
+  const signing = mediatorCanAct && mediation?.draft?.status === 'APPROVED' && mediation.stage === 'SIGNATURES'
+  const hasUnsavedDraftEdits = mediation?.draft?.sections.some(({ key, text }) => (draftEdits[key] ?? text) !== text) ?? false
   const verifier = <Link to={`/applications/${applicationId}/mediation/verify`}><Bi en="Open independent signature verifier" bn="আলাদাভাবে স্বাক্ষর যাচাই করুন" /></Link>
 
   return <Panel id="mediation-title" en="Mediation" bn="মধ্যস্থতা" hint={loaded ? mediation ? say(mediation.stage) : bi('Not started', 'শুরু হয়নি') : undefined} open={role !== 'DLAO_OFFICER'}>
@@ -209,32 +239,47 @@ export default function MediationPanel({ applicationId, session, role }) {
 
       {mediatorCanAct && mediation.stage === 'DRAFT_OUTCOME' && mediation.draft && <section className="form-stack inline-form" aria-labelledby="settlement-title">
         <h3 id="settlement-title"><Term code={mediation.draft.template} /> · <Bi en="draft" bn="খসড়া" /> v{num(mediation.draft.version)}</h3><p className="muted">{mediation.draft.aiAssisted ? bi('AI-assisted', 'এআই-সহায়তায়') : bi('Rules-only placeholder', 'শুধু নিয়মভিত্তিক')} · <Term code={mediation.draft.status} /></p>
-        {mediation.draft.sections.map((section) => <div key={section.key}><h4>{section.label} {section.aiFilled && <span className="badge wait-badge">{bi('AI', 'এআই')}</span>}</h4>{mediation.draft.status === 'HUMAN_REVIEW' ? <><label htmlFor={`draft-section-${section.key}`}><Bi en="Reviewed text" bn="পর্যালোচিত লেখা" /></label><textarea id={`draft-section-${section.key}`} value={draftEdits[section.key] ?? section.text} onChange={(event) => setDraftEdits((current) => ({ ...current, [section.key]: event.target.value }))} maxLength="500" /></> : <p>{section.text}</p>}</div>)}
+        <p className="safety-note"><strong>{mediation.draft.aiAssisted ? bi('AI-ASSISTED DRAFT — HUMAN LEGAL REVIEW REQUIRED', 'এআই-সহায়তায় খসড়া — মানব আইনি পর্যালোচনা আবশ্যক') : bi('DRAFT — HUMAN LEGAL REVIEW REQUIRED', 'খসড়া — মানব আইনি পর্যালোচনা আবশ্যক')}</strong> <Bi en="This fictional template still needs legal approval before real use." bn="বাস্তবে ব্যবহারের আগে এই কাল্পনিক নমুনার আইনি অনুমোদন দরকার।" /></p>
+        {mediation.draft.templateExample && <p className="muted"><strong><Bi en="Reference example, not part of the signed draft" bn="নমুনা উদাহরণ, স্বাক্ষরিত খসড়ার অংশ নয়" /> {mediation.draft.templateRevision && `(${mediation.draft.templateRevision})`}:</strong> {bi(mediation.draft.templateExample, mediation.draft.templateExampleBn ?? mediation.draft.templateExample)}</p>}
+        {mediation.draft.sections.map((section) => <div key={section.key}><h4>{section.label} {section.aiFilled && <span className="badge wait-badge">{bi('AI-filled', 'এআই-পূরণকৃত')}</span>}</h4>{mediation.draft.status === 'HUMAN_REVIEW' ? <><label htmlFor={`draft-section-${section.key}`}><Bi en="Reviewed text" bn="পর্যালোচিত লেখা" /></label><textarea id={`draft-section-${section.key}`} value={draftEdits[section.key] ?? section.text} onChange={(event) => setDraftEdits((current) => ({ ...current, [section.key]: event.target.value }))} maxLength="500" /></> : <p>{section.text}</p>}</div>)}
         <p className="safety-note"><Bi en="Check every amount, date and duty. AI can miss contradictions." bn="প্রতিটি অঙ্ক, তারিখ ও দায়িত্ব যাচাই করুন। এআই পরস্পরবিরোধী তথ্য চোখ এড়িয়ে যেতে পারে।" /></p>
-        {mediation.draft.inconsistencies.map((warning, index) => <p className="error" key={`${warning}-${index}`}>{warning}</p>)}
+        {mediation.draft.inconsistencies.length > 0 && <div role="group" aria-label={bi('Draft warnings', 'খসড়ার সতর্কতা')}><h4><Bi en="Draft warnings" bn="খসড়ার সতর্কতা" /></h4><p className="muted"><Bi en="AI suggestions may refer to an earlier version; check them against the current draft." bn="এআই-এর সতর্কতা আগের সংস্করণ নিয়ে হতে পারে; বর্তমান খসড়ার সঙ্গে মিলিয়ে দেখুন।" /></p>{mediation.draft.inconsistencies.map((warning, index) => <p className="error" key={`${warning}-${index}`}>{mediation.draft.aiInconsistencies?.includes(warning) && <strong><Bi en="AI suggestion: " bn="এআই-এর সতর্কতা: " /></strong>}{warning}</p>)}</div>}
         {mediation.draft.status === 'HUMAN_REVIEW' && <>
           <form className="form-stack" onSubmit={async (event) => {
             event.preventDefault()
             const result = await send('/draft/amend', { template: mediation.draft.template, sections: mediation.draft.sections.map(({ key }) => ({ key, text: draftEdits[key] ?? '' })), reason: amendReason }, bi('Edits saved as a new version. Record the review again.', 'সম্পাদনা নতুন সংস্করণ হিসেবে সংরক্ষিত। আবার পর্যালোচনা লিখুন।'))
-            if (result) { setAcknowledgements({ partyAUnderstands: false, partyAConsents: false, partyBUnderstands: false, partyBConsents: false }); setReviewReason(''); setAmendReason('') }
+            if (result) { setAcknowledgements({ partyAUnderstands: false, partyAConsents: false, partyBUnderstands: false, partyBConsents: false }); setWarningsReviewed(false); setReviewReason(''); setAmendReason('') }
           }}>
             <label htmlFor="settlement-amend-reason"><Bi en="Reason for edits" bn="সম্পাদনার কারণ" /></label><textarea id="settlement-amend-reason" value={amendReason} onChange={(event) => setAmendReason(event.target.value)} minLength="10" maxLength="1000" required /><button type="submit" disabled={busy}><Bi en="Save edits as new version" bn="নতুন সংস্করণ সংরক্ষণ" /></button>
           </form>
-          <form className="form-stack" onSubmit={(event) => { event.preventDefault(); send('/draft/review', { ...acknowledgements, reason: reviewReason }, bi('Review saved. Signing opens only if both parties understood and agreed.', 'পর্যালোচনা সংরক্ষিত। দুই পক্ষ বুঝে সম্মতি দিলে তবেই স্বাক্ষর।')) }}>
+          <form className="form-stack" onSubmit={(event) => { event.preventDefault(); send('/draft/review', { ...acknowledgements, warningsReviewed, reason: reviewReason }, bi('Review saved. Signing opens only if both parties understood and agreed.', 'পর্যালোচনা সংরক্ষিত। দুই পক্ষ বুঝে সম্মতি দিলে তবেই স্বাক্ষর।')) }}>
           <h4><Bi en="Did the parties understand and agree?" bn="পক্ষরা কি বুঝেছেন ও সম্মত?" /></h4><p className="muted"><Bi en="Your attestation, not proof of identity or capacity." bn="আপনি যা যাচাই করেছেন, এটি তার বিবরণ; এতে কারও পরিচয় বা সিদ্ধান্ত নেওয়ার সক্ষমতা প্রমাণ হয় না।" /></p>
           {Object.entries({ partyAUnderstands: ['Party A understood', 'পক্ষ ক বুঝেছেন'], partyAConsents: ['Party A agrees to sign', 'পক্ষ ক স্বাক্ষরে সম্মত'], partyBUnderstands: ['Party B understood', 'পক্ষ খ বুঝেছেন'], partyBConsents: ['Party B agrees to sign', 'পক্ষ খ স্বাক্ষরে সম্মত'] }).map(([key, [en, bn]]) => <label className="checkbox-label" htmlFor={key} key={key}><input id={key} type="checkbox" checked={acknowledgements[key]} onChange={(event) => setAcknowledgements((current) => ({ ...current, [key]: event.target.checked }))} /><Bi en={en} bn={bn} /></label>)}
-          <label htmlFor="settlement-review-reason"><Bi en="Review reason" bn="পর্যালোচনার কারণ" /></label><textarea id="settlement-review-reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} minLength="10" maxLength="1000" required /><button type="submit" disabled={busy}><Bi en="Save review" bn="পর্যালোচনা সংরক্ষণ" /></button>
+          {mediation.draft.inconsistencies.length > 0 && <label className="checkbox-label" htmlFor="settlement-warnings-reviewed"><input id="settlement-warnings-reviewed" type="checkbox" checked={warningsReviewed} onChange={(event) => setWarningsReviewed(event.target.checked)} /><Bi en="I reviewed every draft warning with the parties." bn="আমি পক্ষগুলোর সঙ্গে খসড়ার প্রতিটি সতর্কতা পর্যালোচনা করেছি।" /></label>}
+          {hasUnsavedDraftEdits && <p role="alert" className="error"><Bi en="Save your draft edits as a new version before recording the review." bn="পর্যালোচনা নথিভুক্ত করার আগে খসড়ার পরিবর্তন নতুন সংস্করণ হিসেবে সংরক্ষণ করুন।" /></p>}
+          <label htmlFor="settlement-review-reason"><Bi en="Review reason" bn="পর্যালোচনার কারণ" /></label><textarea id="settlement-review-reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} minLength="10" maxLength="1000" required /><button type="submit" disabled={busy || hasUnsavedDraftEdits}><Bi en="Save review" bn="পর্যালোচনা সংরক্ষণ" /></button>
           </form>
         </>}
       </section>}
 
       {signing && <section className="form-stack inline-form" aria-labelledby="signature-title">
-        <h3 id="signature-title"><Bi en="Signatures" bn="স্বাক্ষর" /></h3><p className="muted"><Bi en="Party A, Party B and the mediator sign the same version. Choose a party only after checking who they are." bn="পক্ষ ক, পক্ষ খ ও মধ্যস্থতাকারী একই সংস্করণে স্বাক্ষর করেন। পরিচয় যাচাইয়ের পরেই পক্ষ বাছাই করুন।" /></p><p><strong><Bi en="A valid signature does not prove identity, consent or legal effect." bn="স্বাক্ষরটি যাচাইয়ে মিললেও তাতে পরিচয়, সম্মতি বা আইনি কার্যকারিতা প্রমাণ হয় না।" /></strong></p>
+        <h3 id="signature-title"><Bi en="Signatures" bn="স্বাক্ষর" /></h3>
+        <p className="muted"><Bi en="Give each party a separate private code through a verified contact route. Each party opens the approved draft and signs in their own browser, including offline after first opening it online." bn="যাচাই করা যোগাযোগের মাধ্যমে প্রত্যেক পক্ষকে আলাদা গোপন কোড দিন। প্রত্যেকে নিজের ব্রাউজারে অনুমোদিত খসড়া খুলে স্বাক্ষর করবেন; আগে অনলাইনে খুলে থাকলে অফলাইনেও পারবেন।" /></p>
+        <p><strong><Bi en="Code possession and a valid signature do not prove identity, capacity, informed consent or legal effect." bn="কোড থাকা ও বৈধ স্বাক্ষর পরিচয়, সক্ষমতা, সচেতন সম্মতি বা আইনি কার্যকারিতা প্রমাণ করে না।" /></strong></p>
+        <p><Link to="/mediation/sign"><Bi en="Open the party signing page" bn="পক্ষের স্বাক্ষরের পৃষ্ঠা খুলুন" /></Link></p>
+        {['PARTY_A', 'PARTY_B'].map((partyRole) => {
+          const invite = mediation.signingInvitations?.find((entry) => entry.signerRole === partyRole)
+          return <div key={partyRole}>
+            <strong><Term code={partyRole} /></strong> · {signedRoles.has(partyRole) ? bi('Signed', 'স্বাক্ষরিত') : invite ? bi(`Code expires ${when(invite.expiresAt)}`, `কোডের মেয়াদ ${when(invite.expiresAt)}`) : bi('No code issued', 'কোড দেওয়া হয়নি')}
+            {!signedRoles.has(partyRole) && <button type="button" className="secondary-button" disabled={busy || !online} onClick={() => issueCode(partyRole)}>{bi(invite ? `Replace ${partyRole.replaceAll('_', ' ')} code` : `Issue ${partyRole.replaceAll('_', ' ')} code`, invite ? `${signerBn[partyRole]}-এর কোড বদলান` : `${signerBn[partyRole]}-এর কোড দিন`)}</button>}
+            {issuedCodes[partyRole] && !signedRoles.has(partyRole) && <p role="status"><Bi en="Private code, shown only now:" bn="গোপন কোড, শুধু এখন দেখানো হচ্ছে:" /> <code className="signing-code">{issuedCodes[partyRole]}</code></p>}
+          </div>
+        })}
+        <button type="button" className="secondary-button" disabled={busy || !online} onClick={refreshSignatures}><Bi en="Refresh party signatures" bn="পক্ষগুলোর সর্বশেষ স্বাক্ষর দেখুন" /></button>
         <ol className="plain-list">{signatures.map((record) => <li key={record.signerRole}><strong><Term code={record.signerRole} /></strong> · {when(record.receivedAt)} · {record.documentHash.slice(0, 12)}…</li>)}</ol>
-        <label htmlFor="signature-passphrase"><Bi en="Local passphrase for encrypted offline signature packets" bn="অফলাইন স্বাক্ষরের পাসফ্রেজ" /></label><input id="signature-passphrase" type="password" autoComplete="off" minLength="8" value={signingPassphrase} onChange={(event) => setSigningPassphrase(event.target.value)} />
-        <p className="muted"><Bi en="The signing key is made in this browser and thrown away. Offline packets hold no document text." bn="স্বাক্ষরের জন্য ব্যবহৃত চাবি এই ব্রাউজারে তৈরি হয় এবং পরে মুছে যায়। ইন্টারনেট ছাড়া রাখা স্বাক্ষরের সঙ্গে নথির লেখা থাকে না।" /></p>
-        <label htmlFor="signer-role"><Bi en="Signer role witnessed by mediator" bn="যিনি স্বাক্ষর করছেন" /></label><select id="signer-role" value={signerRole} onChange={(event) => setSignerRole(event.target.value)}>{['PARTY_A', 'PARTY_B', 'MEDIATOR'].filter((item) => !signedRoles.has(item)).map((item) => <option key={item} value={item}>{say(item)}</option>)}</select>
-        <button type="button" disabled={busy || !signerRole || signingPassphrase.length < 8 || (signerRole === 'MEDIATOR' && missingPartySignatures)} onClick={sign}>{bi(`Create ${signerRole.replaceAll('_', ' ')} signature${online ? ' and sync' : ' offline'}`, `${signerBn[signerRole]}-এর স্বাক্ষর ${online ? 'দিন ও সিঙ্ক করুন' : 'অফলাইনে দিন'}`)}</button>
+        <label htmlFor="signature-passphrase"><Bi en="Your local passphrase for an encrypted offline mediator signature" bn="মধ্যস্থতাকারীর অফলাইন স্বাক্ষরের জন্য আপনার পাসফ্রেজ" /></label><input id="signature-passphrase" type="password" autoComplete="off" minLength="8" value={signingPassphrase} onChange={(event) => setSigningPassphrase(event.target.value)} />
+        <p className="muted"><Bi en="Your signing key is made in this browser and discarded. The offline signature packet contains no draft text." bn="আপনার স্বাক্ষরের চাবি এই ব্রাউজারে তৈরি হয় এবং পরে মুছে যায়। অফলাইন স্বাক্ষরের প্যাকেটে খসড়ার লেখা থাকে না।" /></p>
+        <button type="button" disabled={busy || signingPassphrase.length < 8 || missingPartySignatures || signedRoles.has('MEDIATOR')} onClick={sign}>{bi(`Create mediator signature${online ? ' and sync' : ' offline'}`, `মধ্যস্থতাকারীর স্বাক্ষর ${online ? 'দিন ও সিঙ্ক করুন' : 'অফলাইনে দিন'}`)}</button>
         <p role="status">{online ? bi('Connection: online', 'সংযোগ: অনলাইন') : bi('Connection: offline', 'সংযোগ: অফলাইন')} · {bi(`encrypted signatures awaiting sync: ${queue.length}`, `সিঙ্কের অপেক্ষায়: ${num(queue.length)}`)}</p>
         {queue.length > 0 && <><button type="button" className="secondary-button" disabled={!online || signingPassphrase.length < 8 || busy} onClick={syncPending}><Bi en="Sync now" bn="এখন সিঙ্ক করুন" /></button><ul className="plain-list">{queue.map((item) => <li key={item.id}><Bi en="Encrypted signature" bn="এনক্রিপ্ট করা স্বাক্ষর" /> · {when(item.updatedAt)}</li>)}</ul></>}
         {verifier}

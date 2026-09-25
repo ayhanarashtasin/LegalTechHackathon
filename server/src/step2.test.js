@@ -384,6 +384,7 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
   assert.ok(facts.every((fact) => fact.sourceType === 'REPRESENTATIVE_REPORTED' && !fact.applicantConfirmed))
   const record = await request(`/api/applications/${applicationId}`, { token: officer.token })
   assert.match(record.data.nextTask.nextAction, /AI flagged possible violence/)
+  assert.ok(record.data.vulnerability.includes('SAFETY_UNVERIFIED'))
   const transcript = await request(`/api/applications/${applicationId}/transcript`, { token: officer.token })
   assert.equal(transcript.data.turns.length, 2)
   const audit = (await request(`/api/applications/${applicationId}/audit`, { token: officer.token })).data
@@ -394,6 +395,22 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
   assert.equal(submittedEvent.newState.confirmation, 'VOICE')
   assert.ok(audit.events.some((event) => event.action === 'TRANSCRIPT_STORED'))
   assert.equal((await request(`/api/applications/${applicationId}/transcript`)).status, 401)
+
+  // An unclear safety reply remains unconfirmed and reaches the officer with a review reason and transcript.
+  const uncertain = await post('/api/voice/intakes', { ...intake, confirmation: 'BUTTON', aiSensitive: false,
+    answers: { ...intake.answers, urgent: 'UNKNOWN' }, aiFields: ['urgent'] })
+  assert.equal(uncertain.status, 201)
+  const safetyFact = await models.CaseFact.findOne({ applicationId: uncertain.data.applicationId, field: 'safety.urgent' }).lean()
+  assert.equal(safetyFact.value, 'UNKNOWN')
+  assert.equal(safetyFact.sourceType, 'UNKNOWN_OR_UNVERIFIED')
+  assert.equal(safetyFact.callerConfirmed, false)
+  assert.equal(safetyFact.applicantConfirmed, false)
+  const humanHandoff = await request(`/api/applications/${uncertain.data.applicationId}`, { token: officer.token })
+  assert.ok(humanHandoff.data.vulnerability.includes('SAFETY_UNVERIFIED'))
+  assert.match(humanHandoff.data.nextTask.nextAction, /Safety was unclear/)
+  const queue = await request('/api/workspace?role=DLAO_OFFICER', { token: officer.token })
+  assert.ok(queue.data.records.find(({ applicationId: id }) => id === uncertain.data.applicationId).flags
+    .some(({ code, reason }) => code === 'URGENT_RECOMMENDATION' && /human verification/.test(reason)))
 
   // The full call recording attaches once, only with this submission's one-time code, and only an officer can play it.
   const upload = (headers, bytes = 4000) => fetch(`${baseUrl}/api/voice/intakes/${applicationId}/recording`, { method: 'POST', headers: { 'content-type': 'audio/webm;codecs=opus', ...headers }, body: Buffer.alloc(bytes, 7) })
@@ -569,6 +586,7 @@ test('Step 7 document briefing cites readable fictional text, exposes missing/un
   try {
     const udc = await actor('test7.docsudc', 'UDC_OPERATOR')
     const officer = await actor('test7.docsofficer', 'DLAO_OFFICER')
+    const support = await actor('test7.docssupport', 'CASE_SUPPORT')
     const created = await request('/api/assisted', { method: 'POST', token: udc.token, body: {
       temporaryId: randomUUID(), clientMutationId: randomUUID(), applicantName: 'Fictional Nuching',
       translatorName: 'Fictional translator', typistName: 'Fictional typist', originalLanguage: 'Marma',
@@ -601,8 +619,29 @@ test('Step 7 document briefing cites readable fictional text, exposes missing/un
     assert.equal(proposed.data.model, 'deterministic-mock')
     assert.ok(proposed.data.missing.includes('Witness or other supporting record'))
     assert.ok(proposed.data.unreadable.includes('Land deed scan'))
+    assert.ok(proposed.data.uncertain.includes('Land record or deed'))
+    assert.equal(proposed.data.checklist.find(({ item }) => item === 'Land record or deed').status, 'UNCERTAIN')
+    assert.equal(proposed.data.checklist.find(({ item }) => item === 'Applicant identity evidence').status, 'PRESENT_FOR_REVIEW')
+    assert.equal(proposed.data.checklist.find(({ item }) => item === 'Witness or other supporting record').status, 'MISSING')
+    assert.equal(proposed.data.points.length, 5)
+    const sources = new Map(proposed.data.citations.map((citation) => [citation.sourceId, citation]))
+    for (const point of proposed.data.points) {
+      assert.ok(sources.has(point.sourceId))
+      assert.ok(sources.get(point.sourceId).excerpt.includes(point.text))
+      assert.ok(!/land deed scan/i.test(sources.get(point.sourceId).label))
+    }
     assert.ok(proposed.data.citations.some((item) => item.label === 'Identity note' && item.line === 1))
     assert.ok(proposed.data.citations.every((item) => item.label !== 'Land deed scan'))
+    const source = await request(`/api/documents/${uploaded[0].id}/versions/1/text`, { token: officer.token })
+    assert.equal(source.status, 200)
+    assert.match(source.data.textContent, /Identity remains incomplete/)
+    assert.equal((await request(`/api/documents/${uploaded[0].id}/versions/1/text`, { token: support.token })).status, 403)
+    assert.equal((await request(`/api/documents/${uploaded[1].id}/versions/1/text`, { token: officer.token })).status, 404)
+    assert.equal((await request(`/api/applications/${applicationId}/briefing`, { token: support.token })).status, 200)
+    assert.equal((await request(`/api/applications/${applicationId}/briefing`, { method: 'POST', token: support.token })).status, 403)
+    assert.equal((await request(`/api/applications/${applicationId}/briefing/approve`, { method: 'POST', token: support.token, body: { reason: 'I checked the files.' } })).status, 403)
+    await models.RoleAssignment.updateOne({ userId: support.user._id }, { $set: { officeCode: 'OTHER-DEMO' } })
+    assert.equal((await request(`/api/applications/${applicationId}/briefing`, { token: support.token })).status, 403)
     const revised = await request(`/api/documents/${uploaded[0].id}/versions`, { method: 'POST', token: officer.token,
       body: { label: 'Identity note revised', checklistItem: 'Applicant identity evidence', filename: 'Identity-revised.txt', textContent: 'New fictional identity note.', qualityState: 'READABLE' } })
     assert.equal(revised.status, 201)
@@ -658,9 +697,13 @@ test('Step 8 Nabila: urgency reasons, restricted evidence, tracked referral, ove
   assert.equal((await post(`${base}/review`, officer.token, { reviewState: 'READY_FOR_DECISION', reason: 'Officer reviewed the fictional Nabila intake.' })).status, 200)
   assert.equal((await post(`${base}/accept`, officer.token, { reason: 'Officer accepted the fictional urgent matter.' })).status, 200)
   assert.equal((await post(`${base}/priority-override`, officer.token, { priorityDecision: 'URGENT', reason: 'Officer confirmed urgency from the recorded reasons.' })).status, 200)
+  assert.equal((await post(`${base}/routing-decision`, officer.token, { route: 'REFER', officeCode: 'JHENAIDAH-DEMO', reason: 'Attempted route before escalation.' })).data.error.code, 'ROUTING_DECISION_NOT_DUE')
 
   assert.equal((await post(`${base}/referrals`, support.token, referral(jhenaidah))).status, 403)
   assert.equal((await post(`${base}/referrals`, officer.token, referral(sameOffice))).data.error.code, 'INVALID_RECEIVER')
+  await models.User.updateOne({ _id: magura.user.id }, { $set: { active: false } })
+  assert.equal((await post(`${base}/referrals`, officer.token, referral(magura))).data.error.code, 'INVALID_RECEIVER')
+  await models.User.updateOne({ _id: magura.user.id }, { $set: { active: true } })
   assert.equal((await post(`${base}/referrals`, officer.token, { ...referral(jhenaidah), dueAt: '2020-01-01T00:00:00.000Z' })).status, 400)
   assert.equal((await post(`${base}/referrals`, officer.token, referral(jhenaidah, { documentIds: [evidence.data.id] }))).data.error.code, 'INVALID_DOCUMENT')
   assert.equal((await post(`${base}/referrals`, officer.token, referral(jhenaidah, { sensitiveDocumentIds: [evidence.data.id] }))).status, 400)
@@ -713,14 +756,29 @@ test('Step 8 Nabila: urgency reasons, restricted evidence, tracked referral, ove
   assert.match(referrals.escalation.title, /authorised routing decision required/)
   assert.deepEqual(referrals.referrals.map(({ responseReason }) => responseReason), ['Fictional: this office lacks jurisdiction over the online harm.', 'Fictional: returned; the first office should act.'])
   assert.equal((await post(`${base}/referrals`, officer.token, referral(jhenaidah))).data.error.code, 'ROUTING_DECISION_REQUIRED')
+  const escalationTask = await models.Task.findOne({ applicationId, kind: 'ROUTING_DECISION', status: 'OPEN' })
+  await models.Task.updateOne({ _id: escalationTask.id }, { $set: { status: 'DONE' } })
+  assert.equal((await post(`${base}/referrals`, officer.token, referral(jhenaidah))).data.error.code, 'ROUTING_DECISION_REQUIRED')
+  await models.Task.updateOne({ _id: escalationTask.id }, { $set: { status: 'OPEN' } })
   assert.equal((await post(`${base}/routing-decision`, support.token, { route: 'REFER', officeCode: 'JHENAIDAH-DEMO', reason: 'Support cannot decide routing.' })).status, 403)
   assert.equal((await post(`${base}/routing-decision`, officer.token, { route: 'REFER', officeCode: 'NOWHERE', reason: 'Office without a receiving DLAO.' })).status, 400)
   assert.equal((await post(`${base}/routing-decision`, officer.token, { route: 'REFER', officeCode: 'JHENAIDAH-DEMO', reason: 'Authorised officer decided Jhenaidah must act on the fictional matter.' })).status, 200)
+  assert.equal((await post(`${base}/routing-decision`, officer.token, { route: 'RETAIN', reason: 'Attempted to overwrite the recorded route without a new return.' })).data.error.code, 'ROUTING_DECISION_NOT_DUE')
   assert.equal((await post(`${base}/referrals`, officer.token, referral(magura))).data.error.code, 'ROUTE_MISMATCH')
   const routed = await post(`${base}/referrals`, officer.token, referral(jhenaidah))
   assert.equal(routed.status, 201)
   assert.equal((await request(`/api/referrals/${routed.data.id}`, { token: jhenaidah.token })).data.previousReturns.length, 2)
   assert.equal((await respond(routed.data.id, jhenaidah.token, { action: 'ACCEPT', reason: 'Fictional: accepted as directed by the routing decision.' })).data.status, 'ACCEPTED')
+
+  // A later return reopens review; the previous human decision cannot silently authorise another transfer.
+  const later = await post(`${base}/referrals`, officer.token, referral(jhenaidah))
+  assert.equal(later.status, 201)
+  assert.deepEqual([(await respond(later.data.id, jhenaidah.token, { action: 'RETURN', reason: 'Fictional: the directed office returned the matter again.' })).data.returns,
+    (await request(`${base}/referrals`, { token: officer.token })).data.escalation?.title],
+  [3, 'Jurisdiction escalation: authorised routing decision required'])
+  assert.equal((await post(`${base}/referrals`, officer.token, referral(jhenaidah))).data.error.code, 'ROUTING_DECISION_REQUIRED')
+  assert.equal((await post(`${base}/routing-decision`, officer.token, { route: 'RETAIN', reason: 'Authorised officer keeps the fictional case with the sending office.' })).status, 200)
+  assert.equal((await post(`${base}/referrals`, officer.token, referral(jhenaidah))).data.error.code, 'ROUTE_RETAINED')
 
   const access = (await request(`${base}/evidence-access`, { token: officer.token })).data
   assert.deepEqual(new Set(access.map(({ outcome, basis }) => `${outcome}:${basis}`)), new Set(['DENIED:NONE', 'GRANTED:EXPLICIT_GRANT', 'GRANTED:REFERRAL']))

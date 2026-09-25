@@ -27,7 +27,7 @@ router.get('/:applicationId/evidence-access', applicationIdParam, requireRole('D
 router.get('/:applicationId/referrals', applicationIdParam, requireRole('DLAO_OFFICER'), readForApplication)
 router.post('/:applicationId/referrals', applicationIdParam, requireRole('DLAO_OFFICER'), validateReferral, send)
 router.post('/:applicationId/routing-decision', applicationIdParam, requireRole('DLAO_OFFICER'), validateRoutingDecision, routingDecision)
-router.get('/:applicationId/briefing', applicationIdParam, requireRole('DLAO_OFFICER'), readBriefing)
+router.get('/:applicationId/briefing', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), readBriefing)
 router.post('/:applicationId/briefing', applicationIdParam, requireRole('DLAO_OFFICER'), validateEmptyBody, generateBriefing)
 router.post('/:applicationId/briefing/approve', applicationIdParam, requireRole('DLAO_OFFICER'), validateBriefingApproval, approveDocumentBriefing)
 router.post('/:applicationId/representations', applicationIdParam, requireRole('DLAO_OFFICER'), validateRepresentation, addRepresentative)

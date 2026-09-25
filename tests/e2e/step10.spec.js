@@ -59,6 +59,16 @@ test('Step 10: DLAO links common evidence once and reviews duplicate suggestions
   await page.getByText('Read common evidence text').click()
   await expect(page.getByText(/Synthetic tabletop exercise only/)).toBeVisible()
 
+  await signIn(page, 'CASE_SUPPORT')
+  await openApplication(cases[0].applicationId)
+  await expand(page, /^Related cases/)
+  await page.getByRole('link', { name: 'Fictional fire claims' }).click()
+  await expect(page.getByRole('heading', { name: 'Fictional fire claims' })).toBeVisible()
+  await expect(page.getByText(/Synthetic tabletop exercise only/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Share existing evidence reference' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Link cases, do not merge' })).toHaveCount(0)
+  await signIn(page, 'DLAO_OFFICER')
+
   const examples = [
     ['Amina Rahman', '00000000001', '1990-02-03', 'DEMO NORTH'],
     ['Amina Rahman', '00000000001', '1990-02-03', 'DEMO NORTH'],

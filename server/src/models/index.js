@@ -61,6 +61,7 @@ const applicationSchema = new Schema({
     route: { type: String, enum: ['RETAIN', 'REFER'] },
     officeCode: String,
     reason: String,
+    returnCount: Number,
     decidedByUserId: ref('User', false),
     decidedAt: Date,
   },
@@ -277,9 +278,13 @@ export const DocumentBriefing = model('DocumentBriefing', new Schema({
   status: { type: String, enum: ['PROPOSED', 'APPROVED'], default: 'PROPOSED' },
   model: { type: String, required: true },
   summary: { type: String, required: true },
-  citations: [{ _id: false, documentVersionId: ref('DocumentVersion'), label: String, line: Number, excerpt: String }],
+  points: [{ _id: false, text: { type: String, required: true, maxlength: 180 }, sourceId: { type: String, required: true } }],
+  citations: [{ _id: false, sourceId: String, documentId: ref('Document'), documentVersionId: ref('DocumentVersion'), label: String, version: Number, line: Number, excerpt: String }],
+  checklist: [{ _id: false, item: String, status: { type: String, enum: ['MISSING', 'PRESENT_FOR_REVIEW', 'UNCERTAIN'] }, documentLabels: [String] }],
   missing: [String],
+  uncertain: [String],
   unreadable: [String],
+  limitedSources: [String],
   approvedByUserId: ref('User', false),
   approvedAt: Date,
 }, { timestamps: true }))
@@ -299,6 +304,12 @@ const triageDisagreementSchema = new Schema({
   signals: [{ type: String, enum: ['HIGH', 'LOW'] }],
   summary: { type: String, required: true, maxlength: 300 },
 }, { _id: false })
+const triageRoutingReviewSchema = new Schema({
+  status: { type: String, enum: ['ESCALATION_OPEN', 'RETURNED_REFERRAL_REVIEW', 'HUMAN_ROUTE_RECORDED', 'ROUTE_NOT_RECORDED'], required: true },
+  reason: { type: String, required: true, maxlength: 300 },
+  evidenceRefs: [{ type: String, maxlength: 80 }],
+  requiresHumanReview: { type: Boolean, enum: [true], required: true },
+}, { _id: false })
 const humanTriageDecisionSchema = new Schema({
   category: { type: String, enum: ['LABOUR', 'FAMILY', 'LAND', 'CRIMINAL', 'OTHER', 'UNCERTAIN'], required: true },
   disposition: { type: String, enum: ['PRIORITIZE_FOR_HUMAN_REVIEW', 'CONTINUE_ROUTINE_REVIEW', 'SEEK_MORE_INFORMATION', 'REQUEST_JURISDICTION_REVIEW', 'NO_CHANGE'], required: true },
@@ -313,6 +324,7 @@ const triageAssessmentSchema = new Schema({
   aiAssisted: { type: Boolean, required: true },
   components: { type: [triageComponentSchema], required: true },
   disagreements: [triageDisagreementSchema],
+  routingReview: triageRoutingReviewSchema,
   status: { type: String, enum: ['PENDING_HUMAN_REVIEW', 'REVIEWED'], default: 'PENDING_HUMAN_REVIEW' },
   humanDecision: humanTriageDecisionSchema,
   createdByUserId: ref('User'),
@@ -331,12 +343,17 @@ const settlementDraftSchema = new Schema({
   caseId: { type: String, required: true },
   mediationId: ref('Mediation'),
   template: { type: String, required: true, enum: ['MAINTENANCE', 'PROPERTY', 'LABOUR'] },
+  templateRevision: { type: String, maxlength: 30 },
+  templateExample: { type: String, maxlength: 600 },
+  templateExampleBn: { type: String, maxlength: 600 },
   version: { type: Number, required: true, default: 1 },
   model: { type: String, required: true },
   aiAssisted: { type: Boolean, required: true },
   sourceNotesDigest: { type: String, required: true },
   sections: { type: [settlementSectionSchema], required: true },
+  aiInconsistencies: [{ type: String, maxlength: 300 }],
   inconsistencies: [{ type: String, maxlength: 300 }],
+  warningsReviewed: { type: Boolean, default: false },
   status: { type: String, enum: ['HUMAN_REVIEW', 'APPROVED'], default: 'HUMAN_REVIEW' },
   reviewReason: { type: String, maxlength: 1000 },
   reviewedByUserId: ref('User', false),
@@ -406,14 +423,31 @@ const signatureRecordSchema = new Schema({
   documentHash: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
   publicKeyJwk: { type: Schema.Types.Mixed, required: true },
   signature: { type: String, required: true },
+  signingInvitationId: ref('SigningInvitation', false),
+  authorizationMethod: { type: String, enum: ['PARTY_CODE', 'MEDIATOR_SESSION'] },
+  partyConfirmed: Boolean,
   clientMutationId: { type: String, required: true, unique: true },
   clientSignedAt: { type: Date, required: true },
-  recordedByUserId: ref('User'),
+  recordedByUserId: ref('User', false),
   receivedAt: { type: Date, required: true },
 }, { timestamps: { createdAt: true, updatedAt: false } })
 signatureRecordSchema.index({ draftId: 1, draftVersion: 1, signerRole: 1 }, { unique: true })
 signatureRecordSchema.index({ applicationId: 1, receivedAt: 1 })
 export const SignatureRecord = model('SignatureRecord', signatureRecordSchema)
+
+const signingInvitationSchema = new Schema({
+  applicationId: recordId,
+  mediationId: ref('Mediation'),
+  draftId: ref('SettlementDraft'),
+  draftVersion: { type: Number, required: true },
+  signerRole: { type: String, required: true, enum: ['PARTY_A', 'PARTY_B'] },
+  tokenHash: { type: String, required: true, unique: true, match: /^[a-f0-9]{64}$/ },
+  issuedByUserId: ref('User'),
+  expiresAt: { type: Date, required: true },
+  usedAt: Date,
+}, { timestamps: true })
+signingInvitationSchema.index({ draftId: 1, signerRole: 1 }, { unique: true })
+export const SigningInvitation = model('SigningInvitation', signingInvitationSchema)
 
 const relatedIncidentGroupSchema = new Schema({
   title: { type: String, required: true, maxlength: 120 },
@@ -450,6 +484,7 @@ const referralSchema = new Schema({
 }, { timestamps: true })
 referralSchema.index({ receivingOfficeCode: 1, createdAt: -1 })
 referralSchema.index({ status: 1, dueAt: 1 })
+referralSchema.index({ applicationId: 1, status: 1, respondedAt: -1 })
 export const Referral = model('Referral', referralSchema)
 
 // Append-only read log for restricted evidence, kept apart from the audit chain so reads never bump record versions.

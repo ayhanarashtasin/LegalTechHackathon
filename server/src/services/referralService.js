@@ -1,5 +1,5 @@
 import mongoose from 'mongoose'
-import { Application, Document, Person, Referral, RoleAssignment, SafeContactProfile, Task } from '../models/index.js'
+import { Application, Document, Person, Referral, RoleAssignment, SafeContactProfile, Task, User } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
 import { appendAudit } from './auditService.js'
@@ -8,6 +8,24 @@ import { advance, officeApplication } from './applicationService.js'
 const WAITING = ['SENT', 'ACKNOWLEDGED']
 // ponytail: Goal.md T2 demo threshold; replace with the approved routing policy once the law team confirms who decides.
 export const RETURN_ESCALATION_THRESHOLD = 2
+
+async function routingReviewRequired(application, session) {
+  const returns = await Referral.countDocuments({ applicationId: application.applicationId, status: 'RETURNED' }).session(session)
+  if (returns < RETURN_ESCALATION_THRESHOLD) return { required: false, returns }
+  const decided = application.routingDecision
+  if (!decided?.route) return { required: true, returns }
+  if (Number.isInteger(decided.returnCount)) return { required: decided.returnCount < returns, returns }
+  // Older decisions have no returnCount; compare their timestamp with the latest return.
+  const latest = await Referral.findOne({ applicationId: application.applicationId, status: 'RETURNED' })
+    .sort({ respondedAt: -1, _id: -1 }).select('respondedAt').session(session).lean()
+  return { required: !decided.decidedAt || decided.decidedAt <= latest.respondedAt, returns }
+}
+
+async function hasActiveReceiver(officeCode, session) {
+  const assignments = await RoleAssignment.find({ role: 'RECEIVING_DLAO', officeCode, active: true }).select('userId').session(session).lean()
+  if (!assignments.length) return false
+  return Boolean(await User.exists({ _id: { $in: assignments.map(({ userId }) => userId) }, active: true }).session(session))
+}
 
 const view = (referral, now = Date.now()) => ({
   id: referral._id, applicationId: referral.applicationId, caseId: referral.caseId, status: referral.status,
@@ -29,11 +47,15 @@ export async function createReferral(applicationId, input, actor) {
     const application = await officeApplication(applicationId, actor, session)
     if (application.status !== 'ACCEPTED') throw new HttpError(409, 'CASE_REQUIRED', 'Only an accepted case with a Case ID can be referred.')
     if (await Referral.exists({ applicationId, status: { $in: WAITING } }).session(session)) throw new HttpError(409, 'REFERRAL_ACTIVE', 'A referral is still waiting for the receiving office.')
-    if (await Task.exists({ applicationId, kind: 'ROUTING_DECISION', status: 'OPEN' }).session(session)) throw new HttpError(409, 'ROUTING_DECISION_REQUIRED', 'Repeated returns were escalated. Record an authorised routing decision first.')
+    if ((await routingReviewRequired(application, session)).required || await Task.exists({ applicationId, kind: 'ROUTING_DECISION', status: 'OPEN' }).session(session)) {
+      throw new HttpError(409, 'ROUTING_DECISION_REQUIRED', 'Repeated returns were escalated. Record an authorised routing decision first.')
+    }
     const receiver = await RoleAssignment.findOne({ userId: input.responsibleUserId, role: 'RECEIVING_DLAO', active: true }).session(session)
-    if (!receiver || receiver.officeCode === application.officeCode) throw new HttpError(400, 'INVALID_RECEIVER', 'Choose an active receiving DLAO in another office.')
+    if (!receiver || receiver.officeCode === application.officeCode || !await User.exists({ _id: receiver.userId, active: true }).session(session)) {
+      throw new HttpError(400, 'INVALID_RECEIVER', 'Choose an active receiving DLAO in another office.')
+    }
     const decided = application.routingDecision
-    if (decided?.route === 'RETAIN') throw new HttpError(409, 'ROUTE_RETAINED', 'The authorised routing decision keeps this matter in this office. Record a new routing decision before referring it.')
+    if (decided?.route === 'RETAIN') throw new HttpError(409, 'ROUTE_RETAINED', 'The authorised routing decision keeps this matter in this office.')
     if (decided?.route === 'REFER' && decided.officeCode !== receiver.officeCode) throw new HttpError(409, 'ROUTE_MISMATCH', `The authorised routing decision directs this matter to ${decided.officeCode}.`)
     const documents = await Document.find({ applicationId, _id: { $in: [...input.documentIds, ...input.sensitiveDocumentIds] } }).session(session).lean()
     const byId = new Map(documents.map((item) => [item._id.toString(), item]))
@@ -144,11 +166,14 @@ export async function respondReferral(referralId, { action, reason }, actor) {
 export async function decideRouting(applicationId, { route, officeCode, reason }, actor) {
   return mongoose.connection.transaction(async (session) => {
     const application = await officeApplication(applicationId, actor, session)
-    if (route === 'REFER' && (officeCode === application.officeCode || !await RoleAssignment.exists({ role: 'RECEIVING_DLAO', officeCode, active: true }).session(session))) {
+    const review = await routingReviewRequired(application, session)
+    const escalation = await Task.exists({ applicationId, kind: 'ROUTING_DECISION', status: 'OPEN' }).session(session)
+    if (!review.required || !escalation) throw new HttpError(409, 'ROUTING_DECISION_NOT_DUE', 'A new routing decision requires an open repeated-return escalation.')
+    if (route === 'REFER' && (officeCode === application.officeCode || !await hasActiveReceiver(officeCode, session))) {
       throw new HttpError(400, 'INVALID_OFFICE', 'Choose another office with an active receiving DLAO.')
     }
     const previous = application.routingDecision?.route ? { route: application.routingDecision.route, officeCode: application.routingDecision.officeCode } : null
-    const routingDecision = { route, officeCode: route === 'REFER' ? officeCode : application.officeCode, reason, decidedByUserId: actor.userId, decidedAt: new Date() }
+    const routingDecision = { route, officeCode: route === 'REFER' ? officeCode : application.officeCode, reason, returnCount: review.returns, decidedByUserId: actor.userId, decidedAt: new Date() }
     const updated = await advance(application, session, { routingDecision })
     const closed = await Task.updateMany({ applicationId, kind: 'ROUTING_DECISION', status: 'OPEN' }, { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } }, { session })
     const [task] = await Task.create([{
@@ -159,7 +184,7 @@ export async function decideRouting(applicationId, { route, officeCode, reason }
     await appendAudit({
       applicationId, caseId: application.caseId, sequence: updated.auditSequence, action: 'HUMAN_ROUTING_DECISION',
       actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
-      previousState: { routingDecision: previous, openEscalations: closed.modifiedCount }, newState: { route, officeCode: routingDecision.officeCode, taskId: task.id }, reason,
+      previousState: { routingDecision: previous, openEscalations: closed.modifiedCount }, newState: { route, officeCode: routingDecision.officeCode, returnCount: review.returns, taskId: task.id }, reason,
     }, session)
     return { route, officeCode: routingDecision.officeCode }
   })

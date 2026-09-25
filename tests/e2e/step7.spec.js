@@ -1,4 +1,6 @@
+/* global process, indexedDB, document */
 import { expect, test } from '@playwright/test'
+import { randomUUID } from 'node:crypto'
 import { expand, signIn, signOut } from './support.js'
 
 test('Step 7 Nuching offline intake survives loss, syncs once, resolves a conflict, and has a cited document briefing', async ({ page, request }) => {
@@ -77,8 +79,10 @@ test('Step 7 Nuching offline intake survives loss, syncs once, resolves a confli
   const briefing = page.getByRole('heading', { name: /^Briefing.*Proposed/ }).locator('..')
   await expect(briefing).toBeVisible()
   await expect(briefing.getByText('Witness or other supporting record')).toBeVisible()
-  await expect(briefing.getByText('land deed unreadable')).toBeVisible()
-  await expect(briefing.getByText(/identity note, line 1/)).toBeVisible()
+  await expect(briefing.getByText('land deed unreadable').first()).toBeVisible()
+  await expect(briefing.getByText(/identity note, version 1, line 1/)).toBeVisible()
+  await page.getByRole('button', { name: 'Open source identity note, line 1' }).click()
+  await expect(briefing.getByText('Identity has not been legally verified; this sample is not proof of identity.')).toBeVisible()
   await page.getByLabel('Officer verification reason').fill('I checked the cited fictional lines and the listed missing and unreadable items.')
   await page.getByRole('button', { name: 'Approve briefing accuracy only' }).click()
   await expect(page.getByRole('heading', { name: /^Briefing.*Approved/ })).toBeVisible()
@@ -89,6 +93,7 @@ test('Step 7 Nuching offline intake survives loss, syncs once, resolves a confli
 test('Step 7 assisted intake remains labeled and keyboard reachable on a narrow screen', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await signIn(page, 'UDC_OPERATOR')
+  expect(await page.evaluate(() => globalThis.localStorage.getItem('dlas_token'))).toBeNull()
   await page.getByRole('link', { name: 'Open assisted intake and offline drafts' }).click()
   await expect(page.getByLabel('Local draft passphrase')).toBeVisible()
   await expect(page.getByLabel(/Original statement/)).toBeVisible()
@@ -96,4 +101,45 @@ test('Step 7 assisted intake remains labeled and keyboard reachable on a narrow 
   await page.getByLabel('Local draft passphrase').focus()
   await page.keyboard.press('Tab')
   await expect(page.getByRole('button', { name: 'Sync now' })).toBeFocused()
+})
+
+test('T6 briefing links each point to a readable source and reserves approval for the officer', async ({ page, request }) => {
+  const actors = JSON.parse(process.env.E2E_ACTORS)
+  const login = await request.post('/api/auth/login', { data: actors.UDC_OPERATOR })
+  const { token } = await login.json()
+  const created = await request.post('/api/assisted', { headers: { authorization: `Bearer ${token}` }, data: {
+    temporaryId: randomUUID(), clientMutationId: randomUUID(), applicantName: 'Fictional T6 Browser Applicant',
+    translatorName: 'Fictional translator', typistName: 'Fictional typist',
+    originalLanguage: 'Marma', originalStatement: 'Fictional land statement.', translatedStatement: 'Fictional Bangla land statement.',
+    caseType: 'LAND', consentAttestation: 'Fictional oral consent after translation.',
+    originalConfirmed: true, translationConfirmed: false, contactChannel: 'IN_PERSON',
+  } })
+  expect(created.status()).toBe(201)
+  const { applicationId } = await created.json()
+
+  await signIn(page, 'DLAO_OFFICER')
+  await page.getByLabel('Application or Case ID').fill(applicationId)
+  await page.getByRole('button', { name: 'Find record' }).click()
+  await expand(page, /^Document briefing/)
+  await page.getByRole('button', { name: 'Upload six fictional sample documents' }).click()
+  await expect(page.getByText('Six fictional documents uploaded.')).toBeVisible({ timeout: 30000 })
+  await page.getByRole('button', { name: 'Generate briefing' }).click()
+  const briefing = page.getByRole('heading', { name: /^Briefing.*Proposed/ }).locator('..')
+  await expect(briefing.getByText(/identity note, version 1, line 1/)).toBeVisible()
+  await expect(briefing.getByText('Witness or other supporting record')).toBeVisible()
+  await expect(briefing.getByText('land deed unreadable').first()).toBeVisible()
+  await page.getByRole('button', { name: 'Open source identity note, line 1' }).click()
+  await expect(briefing.getByText('Identity has not been legally verified; this sample is not proof of identity.')).toBeVisible()
+  await page.getByLabel('Officer verification reason').fill('I checked the full fictional source and the missing and unreadable items.')
+  await page.getByRole('button', { name: 'Approve briefing accuracy only' }).click()
+  await expect(page.getByRole('heading', { name: /^Briefing.*Approved/ })).toBeVisible()
+
+  await signOut(page)
+  await signIn(page, 'CASE_SUPPORT')
+  await page.getByLabel('Application or Case ID').fill(applicationId)
+  await page.getByRole('button', { name: 'Find record' }).click()
+  await expand(page, /^Document briefing/)
+  await expect(page.getByRole('heading', { name: /^Briefing.*Approved/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Generate briefing' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Approve briefing accuracy only' })).toHaveCount(0)
 })

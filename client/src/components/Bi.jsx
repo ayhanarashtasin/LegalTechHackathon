@@ -46,6 +46,8 @@ const words = {
   CASE_CATEGORIZER: ['Case type', 'মামলার ধরন'], PROCESS_SAFETY: ['Process and safety', 'প্রক্রিয়া ও নিরাপত্তা'], URGENCY_ROUTING: ['Urgency and routing', 'জরুরি অবস্থা ও অফিস নির্বাচন'],
   SAFETY_REVIEW: ['Safety review', 'নিরাপত্তা যাচাই'], ROUTINE_REVIEW: ['Routine review', 'সাধারণ পর্যালোচনা'], URGENT_REVIEW: ['Urgent review', 'জরুরি পর্যালোচনা'],
   ROUTING_REVIEW: ['Routing review', 'কোন অফিসে যাবে তা যাচাই'], SAFE_CONTACT_REVIEW: ['Safe contact review', 'যোগাযোগ নিরাপদ কি না যাচাই'],
+  ESCALATION_OPEN: ['Routing escalation open', 'অফিস নির্বাচন নিয়ে ঊর্ধ্বতন পর্যালোচনা চলছে'], RETURNED_REFERRAL_REVIEW: ['Returned referral needs review', 'ফেরত আসা রেফারেল যাচাই দরকার'],
+  HUMAN_ROUTE_RECORDED: ['Human route recorded', 'কর্মকর্তার সিদ্ধান্ত নথিভুক্ত'], ROUTE_NOT_RECORDED: ['Route not recorded', 'অফিস নির্বাচনের সিদ্ধান্ত লেখা নেই'],
   MISSING_INFORMATION_REVIEW: ['Missing information', 'তথ্য বাকি'], RESTRICTED_EVIDENCE_REVIEW: ['Restricted evidence review', 'সীমিত প্রমাণ যাচাই'],
   HIGH: ['High', 'উচ্চ'], LOW: ['Low', 'নিম্ন'], UNKNOWN: ['Unknown', 'অজানা'], PENDING_HUMAN_REVIEW: ['Waiting for officer', 'কর্মকর্তার অপেক্ষায়'], REVIEWED: ['Reviewed', 'পর্যালোচিত'],
   // Duplicates
@@ -106,6 +108,7 @@ const words = {
   COMPLAINT: ['Complaint', 'অভিযোগ'], ADVICE: ['Information or advice', 'তথ্য বা পরামর্শ'], TRUSTED_PERSON: ['Through a trusted person', 'বিশ্বস্ত ব্যক্তির মাধ্যমে'],
   INFORMATION_PROVIDED: ['Information given', 'তথ্য দেওয়া হয়েছে'], FORMAL_ASSISTANCE: ['Formal legal aid needed', 'আনুষ্ঠানিক আইনি সহায়তা দরকার'],
   SAFETY_RISK: ['Safety risk reported', 'নিরাপত্তা ঝুঁকির কথা জানানো হয়েছে'], REPRESENTATIVE_CALLER: ['Reported by a representative', 'প্রতিনিধি জানিয়েছেন'],
+  SAFETY_UNVERIFIED: ['Safety answer needs human verification', 'নিরাপত্তার উত্তর কর্মকর্তা যাচাই করবেন'],
   NID_UNKNOWN: ['NID unknown: verify at a UDC', 'এনআইডি জানা নেই: ইউডিসিতে যাচাই'], AI_FLAGGED_DANGER: ['AI flagged possible danger', 'এআই সম্ভাব্য বিপদ চিহ্নিত করেছে'],
   VICTIM_CONFIRMED: ['Victim confirmed', 'ভুক্তভোগী নিশ্চিত করেছেন'], VERIFICATION_REQUIRED: ['Verification required', 'যাচাই দরকার'],
   ADVICE_OUTCOME_RECORDED: ['Advice call outcome recorded', 'পরামর্শ কলের ফল নথিভুক্ত'],
@@ -211,6 +214,10 @@ const phrases = {
   'Current recorded priority is ROUTINE; confirm it against the current evidence.': 'নথিতে আবেদনটি সাধারণ হিসেবে চিহ্নিত। এখনকার তথ্যপ্রমাণ দেখে এটি ঠিক আছে কি না নিশ্চিত করুন।',
   'A safety urgency flag is recorded; human priority review is needed.': 'নিরাপত্তার জরুরি সংকেত আছে; অগ্রাধিকার পর্যালোচনা দরকার।',
   'This suggestion does not set priority or choose a receiving office.': 'এই পরামর্শ অগ্রাধিকার ঠিক করে না, গ্রহণকারী অফিসও বাছাই করে না।',
+  'No human routing decision is recorded. An authorised officer must check jurisdiction under approved policy.': 'অফিস নির্বাচনের কোনো মানবিক সিদ্ধান্ত লেখা নেই। অনুমোদিত নীতি অনুযায়ী একজন কর্মকর্তাকে এখতিয়ার যাচাই করতে হবে।',
+  'A routing escalation task is open after returned referrals. An authorised officer must decide the route.': 'রেফারেল ফেরত আসার পর অফিস নির্বাচন নিয়ে পর্যালোচনার কাজ খোলা আছে। অনুমোদিত কর্মকর্তাকে সিদ্ধান্ত নিতে হবে।',
+  'A returned referral needs a human routing review. Review its reason before deciding the next route.': 'ফেরত আসা রেফারেল নিয়ে কর্মকর্তার পর্যালোচনা দরকার। পরবর্তী অফিস নির্বাচনের আগে এর কারণ দেখুন।',
+  'A human route is recorded. Verify it against current referral evidence and approved policy.': 'একজন কর্মকর্তার অফিস নির্বাচনের সিদ্ধান্ত লেখা আছে। বর্তমান রেফারেলের তথ্য ও অনুমোদিত নীতি অনুযায়ী তা যাচাই করুন।',
   'The process/safety and urgency/routing components signal different urgency levels; a DLAO officer must resolve the conflict.': 'নিরাপত্তা ও অফিস নির্বাচনের যাচাইয়ে জরুরিতার মাত্রা আলাদা এসেছে। একজন ডিএলএও কর্মকর্তাকে তা পর্যালোচনা করে সিদ্ধান্ত নিতে হবে।',
 }
 const templates = [

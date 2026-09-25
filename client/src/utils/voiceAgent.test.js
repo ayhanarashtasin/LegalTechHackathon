@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { appendTranscript, applyExtraction, digitsFromWords, parseAnswer, pauseDetector, spokenDigits, spokenKey, spokenYesNo } from './voiceAgent.js'
+import { appendTranscript, applyExtraction, digitsFromWords, parseAnswer, pauseDetector, spokenDigits, spokenKey, spokenUncertain, spokenYesNo } from './voiceAgent.js'
 import { activeFields, answer, correct, nextField, notices, payload, startCall } from './voiceScript.js'
 
 
@@ -56,6 +56,7 @@ test('a spoken correction is tracked and Bangla digits become a usable NID and p
   for (const [field, value] of [['service', 'COMPLAINT'], ['callerRole', 'SELF'], ['callerName', 'Moyuri'], ['district', 'Jaipurhat'],
     ['nidKnown', true], ['nid', '০০০০ ০০০ ০০০'], ['problem', 'স্বামী মারধর করে।'], ['urgent', false], ['contactChannel', 'PHONE'],
     ['contactValue', '০১৭০০০০০০০০'], ['safeTime', 'সকাল ১০টা']]) {
+    if (field === 'urgent') call = applyExtraction(call, { urgent: false }).call // first spoken no asks the safety question again
     call = applyExtraction(call, { [field]: value }).call
   }
   expect(call.answers.nid).toBe('0000000000')
@@ -78,7 +79,27 @@ test('the payload carries no consent choices or empty transcript, and answers ar
   expect(parseAnswer('contactValue', 'not a number')).toBeUndefined()
   expect(parseAnswer('nid', '12345678901')).toBeUndefined() // an NID is 10, 13, or 17 digits
   expect(parseAnswer('urgent', 'YES')).toBe(true)
+  expect(parseAnswer('urgent', 'UNKNOWN')).toBe('UNKNOWN')
   expect(appendTranscript([{ speaker: 'CALLER', text: 'না' }], 'CALLER', 'রিপন')).toEqual([{ speaker: 'CALLER', text: 'না' }, { speaker: 'CALLER', text: 'রিপন' }])
+})
+
+test('spoken safety uncertainty stays unconfirmed and a negative answer is clarified once', () => {
+  let call = startCall()
+  for (const [field, value] of [['service', 'COMPLAINT'], ['callerRole', 'SELF'], ['callerName', 'Fictional caller'], ['district', 'Barguna'],
+    ['nidKnown', false], ['problem', 'A fictional threat was reported.']]) call = answer(call, field, value)
+  const first = applyExtraction(call, { urgent: false })
+  expect(first.clarification).toEqual(['urgent'])
+  expect(first.accepted).toEqual([])
+  expect(nextField(first.call)).toBe('urgent')
+  const second = applyExtraction(first.call, { urgent: false })
+  expect(second.accepted).toEqual(['urgent'])
+  expect(second.call.aiFields).toContain('urgent')
+  expect(spokenUncertain('আমি জানি না')).toBe(true)
+  expect(spokenUncertain('নিশ্চিত নই')).toBe(true)
+  expect(spokenUncertain('না')).toBe(false)
+  const unknown = applyExtraction(call, { urgent: 'UNKNOWN' }).call
+  expect(unknown.answers.urgent).toBe('UNKNOWN')
+  expect(notices(unknown)).toContain('safetyAlert')
 })
 
 // Feeds loudness readings every 100 ms, as the page samples the microphone; returns when the answer ends, or null.

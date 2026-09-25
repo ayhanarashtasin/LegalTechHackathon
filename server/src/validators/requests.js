@@ -238,7 +238,7 @@ const voiceAnswers = {
   // Format only: a 10, 13, or 17 digit NID. Nothing here checks it against any identity register.
   nid: (value) => typeof value === 'string' && /^(?:[0-9]{10}|[0-9]{13}|[0-9]{17})$/.test(value) ? value : fail('NID number must be 10, 13, or 17 digits.'),
   problem: (value) => text(value, 'Problem', 5, 2000),
-  urgent: explicit('Safety risk'),
+  urgent: (value) => value === 'UNKNOWN' ? value : explicit('Safety risk')(value),
   contactChannel: oneOf(['PHONE', 'UDC', 'TRUSTED_PERSON'], 'Safe contact route'),
   contactValue: phoneNumber('Safe phone number'),
   trustedPerson: (value) => text(value, 'Trusted person', 2, 160),
@@ -338,5 +338,10 @@ export function factIdParam(request, _response, next) {
 
 export function documentIdParam(request, _response, next) {
   objectId(request.params.documentId, 'Document ID')
+  next()
+}
+
+export function documentVersionParam(request, _response, next) {
+  if (!/^[1-9][0-9]{0,5}$/.test(request.params.version)) fail('Document version is invalid.')
   next()
 }
