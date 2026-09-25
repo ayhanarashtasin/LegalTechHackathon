@@ -270,11 +270,11 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
     setPasswordMsg('')
 
     if (newPassword.length < 3) {
-      setPasswordError(bi('New password must be at least 3 characters.', 'নতুন পাসওয়ার্ড কমপক্ষে ৩ অক্ষরের হতে হবে।'))
+      setPasswordError(bi('New password must be at least 3 characters.', 'নতুন পাসওয়ার্ড ন্যূনতম ৩ অক্ষরের হতে হবে।'))
       return
     }
     if (newPassword !== confirmPassword) {
-      setPasswordError(bi('New passwords do not match.', 'নতুন পাসওয়ার্ড দুটি মিলছে না।'))
+      setPasswordError(bi('New passwords do not match.', 'প্রদত্ত নতুন পাসওয়ার্ড দুটি মিলছে না।'))
       return
     }
 
@@ -326,7 +326,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                   onClick={handleStartEdit}
                 >
                   <PencilIcon />
-                  <span>{bi('Edit Profile', 'প্রোফাইল সম্পাদনা')}</span>
+                  <span>{bi('Edit Profile', 'প্রোফাইল সম্পাদনা করুন')}</span>
                 </button>
               )
             ) : (
@@ -345,7 +345,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                   className="profile-form-save-btn"
                   disabled={saving || !fullName.trim()}
                 >
-                  {saving ? bi('Saving…', 'সংরক্ষণ হচ্ছে…') : bi('Save Changes', 'সংরক্ষণ করুন')}
+                  {saving ? bi('Saving…', 'সংরক্ষণ হচ্ছে…') : bi('Save Changes', 'পরিবর্তন সংরক্ষণ করুন')}
                 </button>
               </div>
             )}
@@ -375,7 +375,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
 
         {loading ? (
           <div className="loading-state-box" style={{ margin: '2rem 0' }}>
-            <p>{bi('Loading profile details…', 'প্রোফাইল লোড হচ্ছে…')}</p>
+            <p>{bi('Loading profile details…', 'নাগরিক প্রোফাইলের তথ্য লোড হচ্ছে…')}</p>
           </div>
         ) : (
           /* Form Grid Layout matching Image 1 exactly */
@@ -387,7 +387,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                   <label htmlFor="pf-full-name">{bi('Full Name', 'পূর্ণ নাম')}</label>
                   {isVerified && (
                     <span className="profile-locked-tag">
-                      <LockIcon /> {bi('Verified (DLAO locked)', 'যাচাইকৃত (লক করা)')}
+                      <LockIcon /> {bi('Verified (DLAO locked)', 'ডিএলএও কর্তৃক যাচাইকৃত ও সুরক্ষিত')}
                     </span>
                   )}
                 </div>
@@ -409,7 +409,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
 
               {/* Row 1: Email Address / Account */}
               <div className="profile-field-group">
-                <label htmlFor="pf-account">{bi('Email Address / Account', 'ইমেইল / অ্যাকাউন্ট')}</label>
+                <label htmlFor="pf-account">{bi('Email Address / Account', 'ইমেইল ঠিকানা বা ব্যবহারকারী অ্যাকাউন্ট')}</label>
                 <div className="profile-input-wrapper">
                   <MailIcon />
                   <input
@@ -427,7 +427,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
 
               {/* Row 2: Phone / Contact No */}
               <div className="profile-field-group">
-                <label htmlFor="pf-phone">{bi('Phone / Contact No', 'ফোন / যোগাযোগের নম্বর')}</label>
+                <label htmlFor="pf-phone">{bi('Phone / Contact No', 'মোবাইল / যোগাযোগের নম্বর')}</label>
                 <div className="profile-input-wrapper">
                   <PhoneIcon />
                   <input
@@ -469,7 +469,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
 
               {/* Row 3: Home District */}
               <div className="profile-field-group">
-                <label htmlFor="pf-district">{bi('Home District', 'নিজ জেলা')}</label>
+                <label htmlFor="pf-district">{bi('Home District', 'স্থায়ী / নিজ জেলা')}</label>
                 <div className="profile-input-wrapper">
                   <MapPinIcon />
                   <input
@@ -492,7 +492,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
 
               {/* Row 3: Safe Contact Time Window (Clock Selection) */}
               <div className="profile-field-group">
-                <label htmlFor="pf-timewindow">{bi('Safe Contact Time Window', 'নিরাপদ যোগাযোগের সময়সূচি')}</label>
+                <label htmlFor="pf-timewindow">{bi('Safe Contact Time Window', 'নিরাপদ যোগাযোগের উপযুক্ত সময়সূচি')}</label>
                 {!isEditing ? (
                   <div className="profile-input-wrapper">
                     <ClockIcon />
@@ -501,7 +501,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                       type="text"
                       readOnly
                       className="profile-field-input is-readonly"
-                      value={safeTimeWindow || bi('Not specified', 'নির্দিষ্ট করা হয়নি')}
+                      value={safeTimeWindow || bi('Not specified', 'নির্দিষ্ট কোনো সময় উল্লেখ নেই')}
                     />
                   </div>
                 ) : (
@@ -519,7 +519,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                         />
                       </div>
                     </div>
-                    <span className="profile-time-separator">{bi('to', 'থেকে')}</span>
+                    <span className="profile-time-separator">{bi('to', 'হতে')}</span>
                     <div className="profile-time-clock-box">
                       <span className="profile-time-clock-label">{bi('End Time', 'শেষের সময়')}</span>
                       <div className="profile-input-wrapper">
@@ -537,8 +537,8 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                       <button
                         type="button"
                         className="profile-time-clear-btn"
-                        title={bi('Clear time window', 'সময়সূচি মুছুন')}
-                        aria-label={bi('Clear time window', 'সময়সূচি মুছুন')}
+                        title={bi('Clear time window', 'সময়সূচি বাতিল করুন')}
+                        aria-label={bi('Clear time window', 'সময়সূচি বাতিল করুন')}
                         onClick={() => handleTimeChange('', '')}
                       >
                         &times;
@@ -551,9 +551,9 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
               {/* Row 4: Identity Verification Status (strictly DLAO only) */}
               <div className="profile-field-group">
                 <div className="profile-label-row">
-                  <label htmlFor="pf-identity-status">{bi('Identity Verification Status', 'পরিচয় যাচাইয়ের অবস্থা')}</label>
+                  <label htmlFor="pf-identity-status">{bi('Identity Verification Status', 'জাতীয় পরিচয় যাচাইয়ের স্থিতি')}</label>
                   <span className="profile-readonly-note">
-                    {bi('DLAO officer verified only', 'শুধুমাত্র ডিএলএও কর্তৃক যাচাইযোগ্য')}
+                    {bi('DLAO officer verified only', 'কেবলমাত্র দায়িত্বপ্রাপ্ত কর্মকর্তা কর্তৃক যাচাইযোগ্য')}
                   </span>
                 </div>
                 <div className="profile-input-wrapper">
@@ -570,7 +570,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
 
               {/* Row 4: Total Matters Filed */}
               <div className="profile-field-group">
-                <label htmlFor="pf-matters">{bi('Total Matters Filed', 'মোট দায়েরকৃত আবেদন')}</label>
+                <label htmlFor="pf-matters">{bi('Total Matters Filed', 'দায়েরকৃত মোট আইনি সহায়তা আবেদন')}</label>
                 <div className="profile-input-wrapper">
                   <BriefcaseIcon />
                   <input
@@ -599,7 +599,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                   setPasswordMsg('')
                 }}
               >
-                <span>{showPasswordSection ? bi('Close Password Change', 'পাসওয়ার্ড পরিবর্তন বন্ধ করুন') : bi('Change Password', 'পাসওয়ার্ড পরিবর্তন করুন')}</span>
+                <span>{showPasswordSection ? bi('Close Password Change', 'পাসওয়ার্ড পরিবর্তন ফর্ম বন্ধ করুন') : bi('Change Password', 'পাসওয়ার্ড পরিবর্তন করুন')}</span>
               </button>
             </div>
 
@@ -676,7 +676,7 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
                     className="primary-action-btn"
                     disabled={changingPassword || !currentPassword || !newPassword}
                   >
-                    {changingPassword ? bi('Updating…', 'আপডেট হচ্ছে…') : bi('Update Password', 'পাসওয়ার্ড আপডেট করুন')}
+                    {changingPassword ? bi('Updating…', 'পাসওয়ার্ড আপডেট হচ্ছে…') : bi('Update Password', 'পাসওয়ার্ড আপডেট করুন')}
                   </button>
                 </div>
               </form>

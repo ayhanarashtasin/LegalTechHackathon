@@ -184,7 +184,7 @@ export default function AssistedIntake({ session }) {
     setError('')
     try {
       for (const item of drafts) await loadDraft(item.id, ownerId, passphrase)
-      setNotice(bi(`${drafts.length} local encrypted draft${drafts.length === 1 ? '' : 's'} verified. Each hash and AES-GCM tag matches.`, `${num(drafts.length)}টি এনক্রিপ্ট করা খসড়া যাচাই হয়েছে। প্রতিটির হ্যাশ ও AES-GCM ট্যাগ মেলে।`))
+      setNotice(bi(`${drafts.length} local encrypted draft${drafts.length === 1 ? '' : 's'} verified. Each hash and AES-GCM tag matches.`, `${num(drafts.length)}টি সংরক্ষিত খসড়া যাচাই হয়েছে। প্রতিটি কপির সত্যতা ও ডিজিটাল সুরক্ষা নিশ্চিত আছে।`))
     } catch (failure) { setError(failure.message) }
   }
 
@@ -206,7 +206,7 @@ export default function AssistedIntake({ session }) {
       <strong>{online ? bi('Internet connected', 'ইন্টারনেট সংযুক্ত') : bi('No internet connection', 'ইন্টারনেট সংযোগ নেই')}</strong>
       <span>{saving ? bi('Saving a protected copy on this device…', 'এই ডিভাইসে সুরক্ষিত কপি রাখা হচ্ছে…') : online ? bi('Saved applications can be sent to the server.', 'সংরক্ষিত আবেদন সার্ভারে পাঠানো যাবে।') : bi('Continue working. The application stays on this device until you reconnect.', 'কাজ চালিয়ে যান। সংযোগ ফিরে না আসা পর্যন্ত আবেদনটি এই ডিভাইসেই থাকবে।')}</span>
     </div>
-    <p className="safety-note"><strong>{bi('Legal aid is free.', 'আইনি সহায়তা বিনামূল্যে।')}</strong> {bi("No UDC worker may charge for this. The applicant's original words, Bangla translation, and the typist are recorded separately; an officer checks them later.", 'কোনো ইউডিসি কর্মী এর জন্য টাকা নিতে পারবেন না। আবেদনকারীর মূল কথা, বাংলা অনুবাদ ও টাইপিস্ট আলাদাভাবে লেখা হয়; পরে একজন কর্মকর্তা যাচাই করেন।')}</p>
+    <p className="safety-note"><strong>{bi('Legal aid is free.', 'আইনি সহায়তা বিনামূল্যে।')}</strong> {bi("No UDC worker may charge for this. The applicant's original words, Bangla translation, and the typist are recorded separately; an officer checks them later.", 'কোনো ইউডিসি কর্মী এর জন্য টাকা নিতে পারবেন না। আবেদনকারীর মূল কথা, বাংলা অনুবাদ ও টাইপিস্টের পরিচয় আলাদাভাবে নথিভুক্ত করা হয়; পরে একজন কর্মকর্তা যাচাই করেন।')}</p>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" aria-live="polite" className="success">{notice}</p>}
     {receipt?.lookupCode && <p className="safety-note">{bi('Application', 'আবেদন')} {receipt.applicationId} · {bi('one-time lookup code:', 'একবার ব্যবহারযোগ্য কোড:')} <code>{receipt.lookupCode}</code>. {bi('Share only by an agreed safe route.', 'শুধু সম্মত নিরাপদ পথে জানান।')}</p>}

@@ -76,14 +76,14 @@ export default function LawyerCasePage({ session }) {
 
   function respond(decision) {
     send(`/api/lawyers/assignments/${record.assignmentId}/respond`, { decision, reason: responseReason.trim() },
-      decision === 'ACCEPT' ? bi('Assignment accepted. You are now the official legal aid counsel for this case.', 'নিয়োগ গ্রহণ করা হয়েছে। আপনি এই মামলার আনুষ্ঠানিক আইনি সহায়তা আইনজীবী।') : bi('Assignment rejected. The DLAO has been notified.', 'নিয়োগ প্রত্যাখ্যান করা হয়েছে। ডিএলএও কর্মকর্তাকে জানানো হয়েছে।'))
+      decision === 'ACCEPT' ? bi('Assignment accepted. You are now the official legal aid counsel for this case.', 'নিয়োগ সফলভাবে গৃহীত হয়েছে। আপনি এই মামলার দায়িত্বপ্রাপ্ত প্যানেল আইনজীবী হিসেবে নিযুক্ত হলেন।') : bi('Assignment rejected. The DLAO has been notified.', 'নিয়োগ প্রত্যাখ্যান করা হয়েছে। সংশ্লিষ্ট ডিএলএও কার্যালয়কে অবহিত করা হয়েছে।'))
   }
 
   function submitUpdate(event, update) {
     event.preventDefault()
     const draft = drafts[update._id] || {}
     send(`/api/lawyers/assignments/${record.assignmentId}/updates/${update._id}`, draft,
-      bi(`Progress update ${num(update.sequence)} recorded in official file.`, 'মামলার অগ্রগতি নথিভুক্ত হয়েছে।'))
+      bi(`Progress update ${num(update.sequence)} recorded in official file.`, `মামলার ${num(update.sequence)} নম্বর অগ্রগতি প্রতিবেদন সরকারি নথিতে অন্তর্ভুক্ত হয়েছে।`))
   }
 
   function saveConsultation(event) {
@@ -100,7 +100,7 @@ export default function LawyerCasePage({ session }) {
     setConsultations(updated)
     try { localStorage.setItem(`dlas_lawyer_consult_${caseId}`, JSON.stringify(updated)) } catch { /* Storage may be unavailable. */ }
     setConsultNotes('')
-    setNotice(bi('Client consultation & case strategy note recorded.', 'মক্কেলের সাথে পরামর্শ ও কৌশল সংক্রান্ত নোট সংরক্ষিত হয়েছে।'))
+    setNotice(bi('Client consultation & case strategy note recorded.', 'মক্কেলের সাথে পরামর্শ ও মামলার আইনি কৌশল সংক্রান্ত বিবরণী সংরক্ষিত হয়েছে।'))
   }
 
   function saveCourtFiling(event) {
@@ -110,7 +110,7 @@ export default function LawyerCasePage({ session }) {
       localStorage.setItem(`dlas_lawyer_court_no_${caseId}`, courtCaseNo)
       localStorage.setItem(`dlas_lawyer_court_stage_${caseId}`, courtStage)
     } catch { /* Storage may be unavailable. */ }
-    setNotice(bi('Court filing details updated.', 'আদালতের মামলার তথ্য হালনাগাদ হয়েছে।'))
+    setNotice(bi('Court filing details updated.', 'আদালতের মামলার বিবরণ ও পর্যায় সফলভাবে হালনাগাদ করা হয়েছে।'))
   }
 
   function logHearing(event) {
@@ -128,7 +128,7 @@ export default function LawyerCasePage({ session }) {
     try { localStorage.setItem(`dlas_lawyer_hearings_${caseId}`, JSON.stringify(updated)) } catch { /* Storage may be unavailable. */ }
     setHearingNotes('')
     setHearingBench('')
-    setNotice(bi('Court hearing appearance recorded in case records.', 'আদালতে শুনানির উপস্থিতি ও বিবরণ নথিভুক্ত হয়েছে।'))
+    setNotice(bi('Court hearing appearance recorded in case records.', 'আদালতে শুনানির হাজিরা ও কার্যবিবরণী মামলার নথিতে লিপিবদ্ধ করা হয়েছে।'))
   }
 
   function submitOutcome(event) {
@@ -144,7 +144,7 @@ export default function LawyerCasePage({ session }) {
     }
     setOutcomeRecord(outcomeData)
     try { localStorage.setItem(`dlas_lawyer_outcome_${caseId}`, JSON.stringify(outcomeData)) } catch { /* Storage may be unavailable. */ }
-    setNotice(bi('Case outcome & lawyer completion output submitted to DLAO.', 'মামলার রায় ও দায়িত্ব সমাপ্তির প্রতিবেদন ডিএলএও অফিসে দাখিল হয়েছে।'))
+    setNotice(bi('Case outcome & lawyer completion output submitted to DLAO.', 'মামলার চূড়ান্ত নিষ্পত্তি ও দায়িত্ব সমাপ্তির প্রতিবেদন ডিএলএও কার্যালয়ে দাখিল করা হয়েছে।'))
   }
 
   function submitFeeClaim(event) {
@@ -162,10 +162,10 @@ export default function LawyerCasePage({ session }) {
     setFeeClaims(updated)
     try { localStorage.setItem(`dlas_lawyer_fee_${caseId}`, JSON.stringify(updated)) } catch { /* Storage may be unavailable. */ }
     setFeeNotes('')
-    setNotice(bi('Fee bill claim submitted as per DBLA schedule. Awaiting officer verification.', 'ডিবিএলএ বিধি মোতাবেক ফি দাবি দাখিল করা হয়েছে।'))
+    setNotice(bi('Fee bill claim submitted as per DBLA schedule. Awaiting officer verification.', 'ডিবিএলএ বিধিমালা অনুযায়ী আইনজীবী ফি বিল দাখিল করা হয়েছে। কর্মকর্তার যাচাইয়ের অপেক্ষায় রয়েছে।'))
   }
 
-  const back = <Link to="/">← <Bi en="Lawyer worklist" bn="আইনজীবীর কাজের তালিকা" /></Link>
+  const back = <Link to="/">← <Bi en="Lawyer worklist" bn="প্যানেল আইনজীবীর কার্যতালিকা" /></Link>
   if (!record) return <section aria-labelledby="case-title">{back}<h1 id="case-title">{caseId}</h1>{error ? <p role="alert" className="error">{error}</p> : <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}</section>
 
   const pending = record.assignmentStatus === 'PENDING'
@@ -202,10 +202,10 @@ export default function LawyerCasePage({ session }) {
       {back}
       <div className={`record-head ${isUrgent ? 'urgent-record' : ''}`} style={isUrgent ? { padding: '1rem', borderRadius: '6px' } : {}}>
         <div>
-          <p className="eyebrow"><Bi en="Panel Lawyer Case Record" bn="প্যানেল আইনজীবী মামলা নথি" /></p>
+          <p className="eyebrow"><Bi en="Panel Lawyer Case Record" bn="প্যানেল আইনজীবীর মামলা নথি" /></p>
           <h1 id="case-title">{record.caseId}</h1>
           <p className="record-sub">
-            <Bi en="Application" bn="আবেদন" /> {record.applicationId}
+            <Bi en="Application" bn="আবেদন নম্বর" /> {record.applicationId}
             {record.applicantName && <> · <strong><Bi en="Beneficiary:" bn="সুবিধাভোগী:" /> {record.applicantName}</strong></>}
           </p>
         </div>
@@ -218,7 +218,7 @@ export default function LawyerCasePage({ session }) {
       {isUrgent && (
         <div className="urgent-record" style={{ padding: '0.75rem 1rem', borderRadius: '6px', margin: '1rem 0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span className="urgent-flag" style={{ margin: 0 }}>{say('URGENT')}</span>
-          <span><strong><Bi en="Urgent Case:" bn="জরুরি মামলা:" /></strong> <Bi en="Priority case flagged by DLAO / AI assessment. Expedited representation requested." bn="ডিএলএও কর্মকর্তা বা এআই মূল্যায়নে চিহ্নিত অগ্রাধিকারমূলক মামলা। দ্রুত পদক্ষেপ গ্রহণ করুন।" /></span>
+          <span><strong><Bi en="Urgent Case:" bn="জরুরি মামলা:" /></strong> <Bi en="Priority case flagged by DLAO / AI assessment. Expedited representation requested." bn="ডিএলএও কার্যালয় বা এআই মূল্যায়নে চিহ্নিত অগ্রাধিকারমূলক মামলা। দ্রুত কার্যকর আইনি পদক্ষেপ গ্রহণের অনুরোধ করা যাচ্ছে।" /></span>
         </div>
       )}
 
@@ -230,7 +230,7 @@ export default function LawyerCasePage({ session }) {
         <div className="phase-tracker-header">
           <div>
             <span className="phase-tracker-badge">Panel Lawyer Assignment Workflow</span>
-            <h3 className="phase-tracker-title"><Bi en="Legal Aid Representation & Case Management" bn="আইনি সহায়তা প্রতিনিধিত্ব ও মামলা পরিচালনা" /></h3>
+            <h3 className="phase-tracker-title"><Bi en="Legal Aid Representation & Case Management" bn="আইনি সহায়তা প্রদান ও মামলা পরিচালনা" /></h3>
           </div>
           <div className="phase-tracker-summary">
             {pending ? bi('Step 1 of 5 • Awaiting Acceptance', 'ধাপ ১/৫ • নিয়োগ গ্রহণের অপেক্ষায়') : `Step ${lawyerStage} of 5 • ${lawyerSteps[lawyerStage - 1].title}`}
@@ -272,17 +272,17 @@ export default function LawyerCasePage({ session }) {
 
       {/* Summary Card */}
       <section className={`card ${isUrgent ? 'urgent-record' : ''}`} aria-labelledby="summary-title" style={{ marginBottom: '1.25rem' }}>
-        <h2 id="summary-title"><Bi en="At a glance" bn="এক নজরে" /></h2>
+        <h2 id="summary-title"><Bi en="At a glance" bn="এক নজরে মামলার তথ্য" /></h2>
         <dl className="facts">
-          <div><dt><Bi en="Case status" bn="মামলার অবস্থা" /></dt><dd><Term code={record.status} /></dd></div>
-          <div><dt><Bi en="Your assignment" bn="আপনার নিয়োগ" /></dt><dd><Term code={record.assignmentStatus} /></dd></div>
+          <div><dt><Bi en="Case status" bn="মামলার বর্তমান অবস্থা" /></dt><dd><Term code={record.status} /></dd></div>
+          <div><dt><Bi en="Your assignment" bn="আপনার নিয়োগের অবস্থা" /></dt><dd><Term code={record.assignmentStatus} /></dd></div>
           {record.applicantName && <div><dt><Bi en="Client / Beneficiary" bn="মক্কেল / সুবিধাভোগী" /></dt><dd><strong>{record.applicantName}</strong></dd></div>}
-          {record.legalNeed && <div className="wide"><dt><Bi en="Legal Need & Guidance" bn="আইনি সহায়তা প্রয়োজন" /></dt><dd>{record.legalNeed}</dd></div>}
-          {record.complaintType && <div><dt><Bi en="Complaint Category" bn="অভিযোগের বিষয়" /></dt><dd><Term code={record.complaintType} /></dd></div>}
-          {record.vulnerability?.length > 0 && <div className="wide"><dt><Bi en="Special Vulnerability" bn="বিশেষ সুরক্ষা / ঝুঁকি" /></dt><dd>{record.vulnerability.map(say).join(' · ')}</dd></div>}
+          {record.legalNeed && <div className="wide"><dt><Bi en="Legal Need & Guidance" bn="আইনি সহায়তা ও পরামর্শের ক্ষেত্র" /></dt><dd>{record.legalNeed}</dd></div>}
+          {record.complaintType && <div><dt><Bi en="Complaint Category" bn="অভিযোগের ধরন" /></dt><dd><Term code={record.complaintType} /></dd></div>}
+          {record.vulnerability?.length > 0 && <div className="wide"><dt><Bi en="Special Vulnerability" bn="বিশেষ সুরক্ষা বা ঝুঁকির কারণ" /></dt><dd>{record.vulnerability.map(say).join(' · ')}</dd></div>}
           {!pending && <>
-            <div><dt><Bi en="Next hearing" bn="পরবর্তী শুনানি" /></dt><dd>{record.nextHearingAt ? <time dateTime={record.nextHearingAt}>{when(record.nextHearingAt)}</time> : bi('Not set', 'নির্ধারিত নয়')}</dd></div>
-            <div className="wide"><dt><Bi en="Next step" bn="পরবর্তী ধাপ" /></dt><dd>{record.nextAction || bi('Not set', 'নির্ধারিত নয়')}</dd></div>
+            <div><dt><Bi en="Next hearing" bn="পরবর্তী শুনানির তারিখ" /></dt><dd>{record.nextHearingAt ? <time dateTime={record.nextHearingAt}>{when(record.nextHearingAt)}</time> : bi('Not set', 'নির্ধারিত নয়')}</dd></div>
+            <div className="wide"><dt><Bi en="Next step" bn="পরবর্তী করণীয় পদক্ষেপ" /></dt><dd>{record.nextAction || bi('Not set', 'নির্ধারিত নয়')}</dd></div>
           </>}
         </dl>
       </section>
@@ -290,9 +290,9 @@ export default function LawyerCasePage({ session }) {
       {/* Respond to assignment offer */}
       {pending && (
         <section className={`card ${isUrgent ? 'urgent-record' : ''}`} aria-labelledby="decision-title">
-          <h2 id="decision-title"><Bi en="Step 1: Respond to Assignment Offer (DBLA Appointment)" bn="ধাপ ১: নিয়োগ প্রস্তাবে সিদ্ধান্ত দিন (ডিবিএলএ নিয়োগ)" /></h2>
-          <p className="muted"><Bi en="As per DBLA procedure, the case remains under DLAO jurisdiction until you formally accept assignment." bn="ডিবিএলএ কার্যপদ্ধতি অনুযায়ী আপনি আনুষ্ঠানিকভাবে নিয়োগ গ্রহণ না করা পর্যন্ত মামলাটির দায়িত্ব আপনার উপর বর্তাবে না।" /></p>
-          <label htmlFor="assignment-response-reason"><Bi en="Reason for accepting or declining" bn="গ্রহণ বা প্রত্যাখ্যানের কারণ" /></label>
+          <h2 id="decision-title"><Bi en="Step 1: Respond to Assignment Offer (DBLA Appointment)" bn="ধাপ ১: নিয়োগের প্রস্তাবে সম্মতি প্রদান (ডিবিএলএ নিয়োগ)" /></h2>
+          <p className="muted"><Bi en="As per DBLA procedure, the case remains under DLAO jurisdiction until you formally accept assignment." bn="ডিবিএলএ বিধিমালা অনুযায়ী আপনি আনুষ্ঠানিকভাবে নিয়োগ গ্রহণ না করা পর্যন্ত মামলাটির কার্যক্রম পরিচালনার দায়িত্ব সংশ্লিষ্ট ডিএলএও কর্মকর্তার অধীনে থাকবে।" /></p>
+          <label htmlFor="assignment-response-reason"><Bi en="Reason for accepting or declining" bn="নিয়োগ গ্রহণ বা প্রত্যাখ্যানের কারণ" /></label>
           <textarea id="assignment-response-reason" value={responseReason} onChange={(event) => setResponseReason(event.target.value)} minLength="10" maxLength="500" required />
           <div className="choice-row" style={{ marginTop: '0.75rem', display: 'flex', gap: '0.75rem' }}>
             <button type="button" disabled={busy || responseReason.trim().length < 10} onClick={() => respond('ACCEPT')}>
@@ -311,31 +311,31 @@ export default function LawyerCasePage({ session }) {
           {/* Step 2: Case Information & Client Consultation */}
           <section className="panel" aria-labelledby="consult-title">
             <div className="panel-body">
-              <h2 id="consult-title" className="panel-heading"><Bi en="Step 2: Case Information & Client Consultation" bn="ধাপ ২: মামলা পর্যালোচনা ও মক্কেলের পরামর্শ" /></h2>
-              <p className="muted"><Bi en="Review case details, conduct initial client interview/consultation, formulate legal strategy, and record consultation notes." bn="মক্কেলের সাথে সাক্ষাৎ/পরামর্শ করুন এবং মামলার কৌশলগত নোট লিপিবদ্ধ করুন।" /></p>
+              <h2 id="consult-title" className="panel-heading"><Bi en="Step 2: Case Information & Client Consultation" bn="ধাপ ২: মামলা পর্যালোচনা ও মক্কেলের আইনি পরামর্শ" /></h2>
+              <p className="muted"><Bi en="Review case details, conduct initial client interview/consultation, formulate legal strategy, and record consultation notes." bn="মামলার নথিপত্র পর্যালোচনা করুন, সুবিধাভোগীর সাথে সাক্ষাৎ বা পরামর্শ সম্পন্ন করে আইনি কৌশল ও করণীয় লিপিবদ্ধ করুন।" /></p>
 
-              <AddForm en="Record Client Consultation" bn="মক্কেলের পরামর্শ লিপিবদ্ধ করুন">
+              <AddForm en="Record Client Consultation" bn="মক্কেলের আইনি পরামর্শ লিপিবদ্ধ করুন">
                 <form onSubmit={saveConsultation} className="form-stack inline-form">
                   <label htmlFor="consult-date"><Bi en="Consultation Date" bn="সাক্ষাৎ / পরামর্শের তারিখ" /></label>
                   <input id="consult-date" type="date" value={consultDate} onChange={(e) => setConsultDate(e.target.value)} required />
 
                   <label htmlFor="consult-mode"><Bi en="Meeting Mode" bn="পরামর্শের মাধ্যম" /></label>
                   <select id="consult-mode" value={consultMode} onChange={(e) => setConsultMode(e.target.value)}>
-                    <option value="IN_PERSON_CHAMBER">{bi('In-Person (Lawyer Chamber / DLAO Office)', 'সরাসরি (চেম্বার / লিগ্যাল এইড অফিস)')}</option>
-                    <option value="PHONE_SAFE">{bi('Safe Phone Call (Approved Route)', 'নিরাপদ ফোন কল')}</option>
-                    <option value="COURT_PREMISES">{bi('Court Premises Consultation', 'আদালত চত্বরে আলোচনা')}</option>
+                    <option value="IN_PERSON_CHAMBER">{bi('In-Person (Lawyer Chamber / DLAO Office)', 'সরাসরি সাক্ষাৎ (আইনজীবীর চেম্বার / ডিএলএও অফিস)')}</option>
+                    <option value="PHONE_SAFE">{bi('Safe Phone Call (Approved Route)', 'অনুমোদিত নিরাপদ টেলিফোন সংযোগ')}</option>
+                    <option value="COURT_PREMISES">{bi('Court Premises Consultation', 'আদালত প্রাঙ্গণে তাৎক্ষণিক পরামর্শ')}</option>
                   </select>
 
-                  <label htmlFor="consult-notes"><Bi en="Consultation & Strategy Notes" bn="পরামর্শ ও আইনি কৌশলের বিবরণ" /></label>
+                  <label htmlFor="consult-notes"><Bi en="Consultation & Strategy Notes" bn="পরামর্শ ও আইনি কৌশলের বিবরণী" /></label>
                   <textarea id="consult-notes" value={consultNotes} onChange={(e) => setConsultNotes(e.target.value)} minLength="10" maxLength="1000" placeholder="Record key facts confirmed by client, list of witnesses, relief sought, and litigation plan..." required />
 
-                  <button type="submit" disabled={busy}><Bi en="Save Consultation Record" bn="পরামর্শ নোট সংরক্ষণ" /></button>
+                  <button type="submit" disabled={busy}><Bi en="Save Consultation Record" bn="পরামর্শের বিবরণী সংরক্ষণ করুন" /></button>
                 </form>
               </AddForm>
 
               {consultations.length > 0 ? (
                 <div className="version-history" style={{ marginTop: '0.75rem' }}>
-                  <h4><Bi en="Consultation History" bn="পরামর্শের ইতিহাস" /></h4>
+                  <h4><Bi en="Consultation History" bn="পরামর্শের বিবরণীর ইতিহাস" /></h4>
                   <ol className="timeline compact">
                     {consultations.map((c) => (
                       <li key={c.id}>
@@ -346,7 +346,7 @@ export default function LawyerCasePage({ session }) {
                   </ol>
                 </div>
               ) : (
-                <p className="muted" style={{ fontSize: '0.85rem' }}><Bi en="No consultation logged yet. Record your initial meeting with the beneficiary." bn="এখনো কোনো পরামর্শ নথিভুক্ত হয়নি। মক্কেলের সাথে প্রথম বৈঠকের তথ্য লিখুন।" /></p>
+                <p className="muted" style={{ fontSize: '0.85rem' }}><Bi en="No consultation logged yet. Record your initial meeting with the beneficiary." bn="এখনো কোনো পরামর্শ লিপিবদ্ধ করা হয়নি। সুবিধাভোগী মক্কেলের সাথে প্রথম বৈঠকের তথ্য অন্তর্ভুক্ত করুন।" /></p>
               )}
             </div>
           </section>
@@ -354,12 +354,12 @@ export default function LawyerCasePage({ session }) {
           {/* Step 3: Court / Legal Representation & Hearing Tracking */}
           <section className="panel" aria-labelledby="court-rep-title">
             <div className="panel-body">
-              <h2 id="court-rep-title" className="panel-heading"><Bi en="Step 3: Court / Legal Representation & Hearings" bn="ধাপ ৩: আদালতে প্রতিনিধিত্ব ও শুনানি ট্র্যাকিং" /></h2>
-              <p className="muted"><Bi en="File case documents in court, represent applicant in hearings, update hearing dates, and record hearing outcomes." bn="আদালতে মামলা দায়ের করুন, শুনানিতে হাজিরা দিন এবং পরবর্তী শুনানির তারিখ হালনাগাদ করুন।" /></p>
+              <h2 id="court-rep-title" className="panel-heading"><Bi en="Step 3: Court / Legal Representation & Hearings" bn="ধাপ ৩: আদালতে আইনি প্রতিনিধিত্ব ও শুনানির ট্র্যাকিং" /></h2>
+              <p className="muted"><Bi en="File case documents in court, represent applicant in hearings, update hearing dates, and record hearing outcomes." bn="সংশ্লিষ্ট আদালতে মামলা বা আরজি দাখিল করুন, শুনানিতে নিয়মিত হাজিরা প্রদান করুন এবং আদেশের বিবরণ হালনাগাদ রাখুন।" /></p>
 
               {/* Court filing details */}
               <div style={{ background: '#fdfbf7', border: '1px solid #e8e2d2', borderRadius: '6px', padding: '1rem', margin: '0.75rem 0' }}>
-                <h3 style={{ margin: '0 0 0.5rem 0' }}><Bi en="Court & Filing Reference" bn="আদালত ও মামলার বিবরণ" /></h3>
+                <h3 style={{ margin: '0 0 0.5rem 0' }}><Bi en="Court & Filing Reference" bn="আদালত ও মামলার বিবরণী" /></h3>
                 <form onSubmit={saveCourtFiling} className="form-stack inline-form">
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
                     <div>
@@ -371,41 +371,41 @@ export default function LawyerCasePage({ session }) {
                       <input id="court-case-no" value={courtCaseNo} onChange={(e) => setCourtCaseNo(e.target.value)} placeholder="e.g. Family Suit No. 12/2026" />
                     </div>
                     <div>
-                      <label htmlFor="court-stage"><Bi en="Case Stage in Court" bn="আদালতে মামলার পর্যায়" /></label>
+                      <label htmlFor="court-stage"><Bi en="Case Stage in Court" bn="আদালতে মামলার বর্তমান পর্যায়" /></label>
                       <select id="court-stage" value={courtStage} onChange={(e) => setCourtStage(e.target.value)}>
-                        <option value="PLAINT_SUBMITTED">{bi('Plaint Filed / Cognizance', 'আরজি দাখিল / গ্রহণ')}</option>
-                        <option value="SUMMONS_SERVED">{bi('Summons / Notice Served', 'সমন জারি')}</option>
-                        <option value="WRITTEN_STATEMENT">{bi('Written Statement Filed', 'জবাব দাখিল')}</option>
-                        <option value="FRAMING_ISSUES">{bi('Framing of Issues / Charge', 'বিচার্য বিষয় / অভিযোগ গঠন')}</option>
-                        <option value="WITNESS_EVIDENCE">{bi('Evidence / Witness Hearing', 'সাক্ষ্য গ্রহণ')}</option>
-                        <option value="FINAL_ARGUMENTS">{bi('Final Arguments', 'যুক্তিতর্ক')}</option>
+                        <option value="PLAINT_SUBMITTED">{bi('Plaint Filed / Cognizance', 'আরজি দাখিল / আমলে গ্রহণ')}</option>
+                        <option value="SUMMONS_SERVED">{bi('Summons / Notice Served', 'সমন বা নোটিশ জারি')}</option>
+                        <option value="WRITTEN_STATEMENT">{bi('Written Statement Filed', 'লিখিত জবাব দাখিল')}</option>
+                        <option value="FRAMING_ISSUES">{bi('Framing of Issues / Charge', 'বিচার্য বিষয় বা চার্জ গঠন')}</option>
+                        <option value="WITNESS_EVIDENCE">{bi('Evidence / Witness Hearing', 'সাক্ষ্য গ্রহণ পর্যায়')}</option>
+                        <option value="FINAL_ARGUMENTS">{bi('Final Arguments', 'চূড়ান্ত যুক্তিতর্ক')}</option>
                         <option value="FIXED_FOR_JUDGMENT">{bi('Fixed for Judgment', 'রায়ের জন্য দিন ধার্য')}</option>
                       </select>
                     </div>
                   </div>
-                  <button type="submit" className="secondary-button" style={{ marginTop: '0.5rem' }}><Bi en="Save Court Information" bn="আদালতের তথ্য সংরক্ষণ" /></button>
+                  <button type="submit" className="secondary-button" style={{ marginTop: '0.5rem' }}><Bi en="Save Court Information" bn="আদালতের তথ্য সংরক্ষণ করুন" /></button>
                 </form>
               </div>
 
               {/* Hearing appearances log */}
-              <AddForm en="Record Hearing Appearance" bn="শুনানির হাজিরা লিপিবদ্ধ করুন">
+              <AddForm en="Record Hearing Appearance" bn="শুনানির হাজিরা ও কার্যবিবরণী লিপিবদ্ধ করুন">
                 <form onSubmit={logHearing} className="form-stack inline-form">
                   <label htmlFor="hearing-date"><Bi en="Hearing Date" bn="শুনানির তারিখ" /></label>
                   <input id="hearing-date" type="date" value={hearingDate} onChange={(e) => setHearingDate(e.target.value)} required />
 
-                  <label htmlFor="hearing-bench"><Bi en="Presiding Judge / Bench" bn="বিচারক / এজলাস" /></label>
+                  <label htmlFor="hearing-bench"><Bi en="Presiding Judge / Bench" bn="বিচারক / এজলাসের বিবরণ" /></label>
                   <input id="hearing-bench" value={hearingBench} onChange={(e) => setHearingBench(e.target.value)} placeholder="e.g. Joint District Judge Court 1" />
 
                   <label htmlFor="hearing-notes"><Bi en="Hearing Proceedings & Court Order" bn="শুনানির কার্যক্রম ও আদালতের আদেশ" /></label>
                   <textarea id="hearing-notes" value={hearingNotes} onChange={(e) => setHearingNotes(e.target.value)} minLength="10" maxLength="1000" placeholder="Detail witness examination, argument points, and court's order today..." required />
 
-                  <button type="submit"><Bi en="Log Hearing Appearance" bn="হাজিরা সংরক্ষণ করুন" /></button>
+                  <button type="submit"><Bi en="Log Hearing Appearance" bn="শুনানির হাজিরা সংরক্ষণ করুন" /></button>
                 </form>
               </AddForm>
 
               {hearings.length > 0 && (
                 <div className="version-history" style={{ marginTop: '0.75rem' }}>
-                  <h4><Bi en="Hearing Log & Appearances" bn="শুনানি ও হাজিরার ইতিহাস" /></h4>
+                  <h4><Bi en="Hearing Log & Appearances" bn="শুনানি ও হাজিরার বিবরণী" /></h4>
                   <ol className="timeline compact">
                     {hearings.map((h) => (
                       <li key={h.id}>
@@ -420,44 +420,44 @@ export default function LawyerCasePage({ session }) {
           </section>
 
           {/* Required Progress Updates (Preserved) */}
-          <section className="panel" aria-labelledby="updates-title"><div className="panel-body"><h2 id="updates-title" className="panel-heading"><Bi en="Required Progress Updates (DLAO Schedules)" bn="প্রয়োজনীয় অগ্রগতির আপডেট (ডিএলএও নির্ধারিত)" /></h2>
-            {openUpdates.length === 0 ? <p className="muted"><Bi en="Nothing due." bn="কোনো আপডেট বাকি নেই।" /></p> : <ul className="plain-list">{openUpdates.map((update) => {
+          <section className="panel" aria-labelledby="updates-title"><div className="panel-body"><h2 id="updates-title" className="panel-heading"><Bi en="Required Progress Updates (DLAO Schedules)" bn="প্রয়োজনীয় অগ্রগতির বিবরণী (ডিএলএও নির্ধারিত সময়সূচি)" /></h2>
+            {openUpdates.length === 0 ? <p className="muted"><Bi en="Nothing due." bn="আপাতত কোনো অগ্রগতি প্রতিবেদন বাকি নেই।" /></p> : <ul className="plain-list">{openUpdates.map((update) => {
               const draft = drafts[update._id] || {}
-              return <li key={update._id}><div><strong><Bi en="Update" bn="আপডেট" /> {num(update.sequence)}</strong> <Badge code={update.status} /><p>{update.instruction}</p><small><Bi en="Due" bn="শেষ সময়" /> {when(update.dueAt)}{update.status === 'MISSED' && <> · <strong>{overdueText(update.dueAt)}</strong></>}</small>
-                {update.reminderCount > 0 && <p role="note" className="reminder-note"><Bi en="The DLAO office has asked for this update" bn="ডিএলএও অফিস এই আপডেটটি চেয়েছে" /> ({bi(`${update.reminderCount} time${update.reminderCount === 1 ? '' : 's'}`, `${num(update.reminderCount)} বার`)}, <Bi en="last" bn="শেষবার" /> {when(update.lastRemindedAt)})</p>}
+              return <li key={update._id}><div><strong><Bi en="Update" bn="আপডেট" /> {num(update.sequence)}</strong> <Badge code={update.status} /><p>{update.instruction}</p><small><Bi en="Due" bn="দাখিলের শেষ সময়" /> {when(update.dueAt)}{update.status === 'MISSED' && <> · <strong>{overdueText(update.dueAt)}</strong></>}</small>
+                {update.reminderCount > 0 && <p role="note" className="reminder-note"><Bi en="The DLAO office has asked for this update" bn="ডিএলএও কার্যালয় থেকে এই অগ্রগতি প্রতিবেদনের তাগিদ দেওয়া হয়েছে" /> ({bi(`${update.reminderCount} time${update.reminderCount === 1 ? '' : 's'}`, `${num(update.reminderCount)} বার`)}, <Bi en="last" bn="সর্বশেষ" /> {when(update.lastRemindedAt)})</p>}
                 <form onSubmit={(event) => submitUpdate(event, update)} className="form-stack inline-form">
                   <label htmlFor={`lawyer-report-${update._id}`}><Bi en="Progress report" bn="অগ্রগতির প্রতিবেদন" /></label><textarea id={`lawyer-report-${update._id}`} value={draft.report || ''} onChange={(event) => setDrafts((current) => ({ ...current, [update._id]: { ...current[update._id], report: event.target.value } }))} minLength="5" maxLength="2000" required />
-                  <label htmlFor={`lawyer-next-${update._id}`}><Bi en="Next step" bn="পরবর্তী ধাপ" /></label><input id={`lawyer-next-${update._id}`} value={draft.nextAction || ''} onChange={(event) => setDrafts((current) => ({ ...current, [update._id]: { ...current[update._id], nextAction: event.target.value } }))} minLength="5" maxLength="300" required />
-                  <button type="submit" disabled={busy}><Bi en="Submit progress update" bn="আপডেট জমা দিন" /></button>
+                  <label htmlFor={`lawyer-next-${update._id}`}><Bi en="Next step" bn="পরবর্তী করণীয় পদক্ষেপ" /></label><input id={`lawyer-next-${update._id}`} value={draft.nextAction || ''} onChange={(event) => setDrafts((current) => ({ ...current, [update._id]: { ...current[update._id], nextAction: event.target.value } }))} minLength="5" maxLength="300" required />
+                  <button type="submit" disabled={busy}><Bi en="Submit progress update" bn="অগ্রগতি প্রতিবেদন জমা দিন" /></button>
                 </form>
               </div></li>
             })}</ul>}
-            {(record.updates || []).filter(({ report }) => report).map((update) => <div className="version-history" key={update._id}><h3><Bi en="Update" bn="আপডেট" /> {num(update.sequence)} <Badge code={update.status} /></h3><p>{update.report}</p><p><Bi en="Next step:" bn="পরবর্তী ধাপ:" /> {update.nextAction}</p><small>{when(update.submittedAt)}</small></div>)}
+            {(record.updates || []).filter(({ report }) => report).map((update) => <div className="version-history" key={update._id}><h3><Bi en="Update" bn="আপডেট" /> {num(update.sequence)} <Badge code={update.status} /></h3><p>{update.report}</p><p><Bi en="Next step:" bn="পরবর্তী করণীয়:" /> {update.nextAction}</p><small>{when(update.submittedAt)}</small></div>)}
           </div></section>
 
           {/* Step 4: Case Outcome & Completion Output */}
           <section className="panel" aria-labelledby="outcome-title">
             <div className="panel-body">
-              <h2 id="outcome-title" className="panel-heading"><Bi en="Step 4: Case Outcome & Completion Output" bn="ধাপ ৪: মামলার রায় ও সমাপ্তি প্রতিবেদন দাখিল" /></h2>
-              <p className="muted"><Bi en="When case is disposed or resolved, record the legal outcome (Judgment/Settlement) and submit your formal completion output." bn="মামলা নিষ্পত্তি হলে রায়ের বিবরণ ও দায়িত্ব সমাপ্তি প্রতিবেদন দাখিল করুন।" /></p>
+              <h2 id="outcome-title" className="panel-heading"><Bi en="Step 4: Case Outcome & Completion Output" bn="ধাপ ৪: মামলার চূড়ান্ত নিষ্পত্তি ও সমাপ্তি প্রতিবেদন দাখিল" /></h2>
+              <p className="muted"><Bi en="When case is disposed or resolved, record the legal outcome (Judgment/Settlement) and submit your formal completion output." bn="মামলা নিষ্পত্তি বা সমাধান হলে আদালতের আদেশের বিবরণ এবং দায়িত্ব সমাপ্তির আনুষ্ঠানিক প্রতিবেদন দাখিল করুন।" /></p>
 
               {outcomeRecord ? (
                 <div className="success" style={{ margin: '0.75rem 0' }}>
-                  <h3><Bi en="Completion Output Submitted to DLAO" bn="দায়িত্ব সমাপ্তি প্রতিবেদন দাখিল সম্পন্ন" /></h3>
+                  <h3><Bi en="Completion Output Submitted to DLAO" bn="দায়িত্ব সমাপ্তি প্রতিবেদন ডিএলএও কার্যালয়ে দাখিল সম্পন্ন" /></h3>
                   <dl className="details compact" style={{ marginTop: '0.5rem' }}>
-                    <div><dt><Bi en="Legal Outcome" bn="আইনি ফলাফল" /></dt><dd><Term code={outcomeRecord.type} /></dd></div>
+                    <div><dt><Bi en="Legal Outcome" bn="আইনি নিষ্পত্তির ফলাফল" /></dt><dd><Term code={outcomeRecord.type} /></dd></div>
                     <div><dt><Bi en="Disposal Date" bn="নিষ্পত্তির তারিখ" /></dt><dd>{outcomeRecord.date}</dd></div>
-                    <div><dt><Bi en="Decree / Judgment Ref" bn="ডিক্রি / আদেশ নম্বর" /></dt><dd>{outcomeRecord.referenceNo || bi('Not recorded', 'নেই')}</dd></div>
-                    <div><dt><Bi en="Completion Summary" bn="চূড়ান্ত প্রতিবেদন" /></dt><dd>{outcomeRecord.report}</dd></div>
+                    <div><dt><Bi en="Decree / Judgment Ref" bn="ডিক্রি / আদেশ / রেফারেন্স নম্বর" /></dt><dd>{outcomeRecord.referenceNo || bi('Not recorded', 'লিপিবদ্ধ নেই')}</dd></div>
+                    <div><dt><Bi en="Completion Summary" bn="সমাপ্তি প্রতিবেদনের বিবরণ" /></dt><dd>{outcomeRecord.report}</dd></div>
                     <div><dt><Bi en="Submitted at" bn="দাখিলের সময়" /></dt><dd>{when(outcomeRecord.submittedAt)}</dd></div>
                   </dl>
                   <p style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>
-                    ✓ <Bi en="Lawyer completion output recorded. You may now submit your final fee claim below." bn="দায়িত্ব সমাপ্তি গৃহীত হয়েছে। আপনি নিম্নে ফি বিল দাবি দাখিল করতে পারবেন।" />
+                    ✓ <Bi en="Lawyer completion output recorded. You may now submit your final fee claim below." bn="দায়িত্ব সমাপ্তি প্রতিবেদন সফলভাবে দাখিল হয়েছে। আপনি এখন নিম্নের ধাপ থেকে চূড়ান্ত ফি বিল দাবি দাখিল করতে পারেন।" />
                   </p>
                 </div>
               ) : (
                 <form onSubmit={submitOutcome} className="form-stack inline-form">
-                  <label htmlFor="lawyer-outcome-type"><Bi en="Disposal Outcome Type" bn="নিষ্পত্তির ধরন" /></label>
+                  <label htmlFor="lawyer-outcome-type"><Bi en="Disposal Outcome Type" bn="মামলা নিষ্পত্তির ধরন" /></label>
                   <select id="lawyer-outcome-type" value={outcomeType} onChange={(e) => setOutcomeType(e.target.value)}>
                     <option value="COURT_JUDGMENT_FAVOUR">{bi('Judgment in Favour of Beneficiary (পক্ষে রায়)', 'সুবিধাভোগীর পক্ষে রায়')}</option>
                     <option value="COURT_JUDGMENT_DISMISSED">{bi('Case Dismissed / Decreed (খারিজ / ডিক্রি)', 'মামলা খারিজ / ডিক্রি')}</option>
@@ -471,11 +471,11 @@ export default function LawyerCasePage({ session }) {
                   <label htmlFor="lawyer-outcome-ref"><Bi en="Judgment / Order / Decree Number" bn="রায় / আদেশ / ডিক্রি নম্বর" /></label>
                   <input id="lawyer-outcome-ref" value={outcomeRef} onChange={(e) => setOutcomeRef(e.target.value)} placeholder="e.g. Decree dated 24/09/2026 in Suit No. 12" />
 
-                  <label htmlFor="lawyer-completion-report"><Bi en="Completion Output Report (Summary for DLAO)" bn="দায়িত্ব সমাপ্তির প্রতিবেদন (ডিএলএও অফিসের জন্য)" /></label>
+                  <label htmlFor="lawyer-completion-report"><Bi en="Completion Output Report (Summary for DLAO)" bn="দায়িত্ব সমাপ্তি প্রতিবেদন (ডিএলএও কার্যালয়ের অবগতির জন্য)" /></label>
                   <textarea id="lawyer-completion-report" value={outcomeReport} onChange={(e) => setOutcomeReport(e.target.value)} minLength="10" maxLength="1500" placeholder="Summarize final hearing, terms of decree/judgment, reliefs obtained for client, and formal conclusion of advocacy..." required />
 
                   <button type="submit" disabled={busy} style={{ background: '#28562d', borderColor: '#1f4523' }}>
-                    <Bi en="Submit Completion Output" bn="দায়িত্ব সমাপ্তি প্রতিবেদন জমা দিন" />
+                    <Bi en="Submit Completion Output" bn="সমাপ্তি প্রতিবেদন দাখিল করুন" />
                   </button>
                 </form>
               )}
@@ -485,12 +485,12 @@ export default function LawyerCasePage({ session }) {
           {/* Step 5: Lawyer Fee / Payment Claim Processing */}
           <section className="panel" aria-labelledby="fee-claim-title">
             <div className="panel-body">
-              <h2 id="fee-claim-title" className="panel-heading"><Bi en="Step 5: Payment / Lawyer Fee Claim Processing" bn="ধাপ ৫: ফি দাবি ও পেমেন্ট প্রক্রিয়াকরণ" /></h2>
-              <p className="muted"><Bi en="Process lawyer fee as per DBLA rules. Submit interim or final completion bills for officer verification and government disbursement." bn="ডিবিএলএ বিধি মোতাবেক কাজের স্তর অনুযায়ী অন্তর্বর্তী বা চূড়ান্ত ফি দাবি দাখিল করুন।" /></p>
+              <h2 id="fee-claim-title" className="panel-heading"><Bi en="Step 5: Payment / Lawyer Fee Claim Processing" bn="ধাপ ৫: আইনজীবী ফি দাবি ও বিল প্রক্রিয়াকরণ" /></h2>
+              <p className="muted"><Bi en="Process lawyer fee as per DBLA rules. Submit interim or final completion bills for officer verification and government disbursement." bn="ডিবিএলএ বিধিমালা অনুযায়ী দায়িত্বের বিভিন্ন ধাপে অন্তর্বর্তী বা চূড়ান্ত ফি দাবি দাখিল করুন। সরকারি যাচাই শেষে ফি প্রদান করা হবে।" /></p>
 
               {/* Status display */}
               <div style={{ background: '#faf9f6', border: '1px solid #e3e2dc', borderRadius: '6px', padding: '0.85rem 1rem', margin: '0.75rem 0' }}>
-                <strong><Bi en="DBLA Payment Pipeline Status:" bn="ডিবিএলএ পেমেন্ট প্রক্রিয়াকরণ অবস্থা:" /></strong>
+                <strong><Bi en="DBLA Payment Pipeline Status:" bn="ডিবিএলএ ফি প্রদান প্রক্রিয়ার অবস্থা:" /></strong>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
                   {record.payment ? (
                     <>
@@ -501,34 +501,34 @@ export default function LawyerCasePage({ session }) {
                       <span className="muted">{record.payment.reason}</span>
                     </>
                   ) : (
-                    <span className="muted">{bi('No official payment event recorded yet.', 'এখনো কোনো সরকারি পেমেন্ট ইভেন্ট নেই।')}</span>
+                    <span className="muted">{bi('No official payment event recorded yet.', 'সরকারি বিল পরিশোধের কোনো রেকর্ড এখনো লিপিবদ্ধ হয়নি।')}</span>
                   )}
                 </div>
               </div>
 
               {/* Submit Fee Bill Form */}
-              <AddForm en="Submit Fee Claim Bill" bn="ফি দাবি বিল দাখিল করুন">
+              <AddForm en="Submit Fee Claim Bill" bn="আইনজীবী ফি দাবি বিল দাখিল করুন">
                 <form onSubmit={submitFeeClaim} className="form-stack inline-form">
-                  <label htmlFor="fee-category"><Bi en="Bill Stage / Category" bn="বিলের পর্যায় / খাত" /></label>
+                  <label htmlFor="fee-category"><Bi en="Bill Stage / Category" bn="বিলের পর্যায় বা খাত" /></label>
                   <select id="fee-category" value={feeCategory} onChange={(e) => setFeeCategory(e.target.value)}>
-                    <option value="CASE_PREPARATION">{bi('Case Preparation & Plaint Filing (ইন্টারিম ফি)', 'মামলা প্রস্তুতি ও আরজি দাখিল (অন্তর্বর্তী ফি)')}</option>
-                    <option value="HEARING_ATTENDANCE">{bi('Hearing Attendance & Witnesses (শুনানি হাজিরা ফি)', 'শুনানি হাজিরা ফি')}</option>
-                    <option value="FINAL_DISPOSAL">{bi('Final Case Completion & Disposal Output (চূড়ান্ত নিষ্পত্তি ফি)', 'চূড়ান্ত নিষ্পত্তি ফি')}</option>
+                    <option value="CASE_PREPARATION">{bi('Case Preparation & Plaint Filing (ইন্টারিম ফি)', 'মামলার প্রস্তুতি ও আরজি দাখিল (অন্তর্বর্তী ফি)')}</option>
+                    <option value="HEARING_ATTENDANCE">{bi('Hearing Attendance & Witnesses (শুনানি হাজিরা ফি)', 'শুনানিতে হাজিরা ও সাক্ষ্য গ্রহণ (কার্যক্রম ফি)')}</option>
+                    <option value="FINAL_DISPOSAL">{bi('Final Case Completion & Disposal Output (চূড়ান্ত নিষ্পত্তি ফি)', 'মামলার চূড়ান্ত নিষ্পত্তি ও দায়িত্ব সমাপ্তি (চূড়ান্ত ফি)')}</option>
                   </select>
 
-                  <label htmlFor="fee-amount"><Bi en="Claim Amount (BDT)" bn="দাবিকৃত টাকার পরিমাণ (টাকা)" /></label>
+                  <label htmlFor="fee-amount"><Bi en="Claim Amount (BDT)" bn="দাবিকৃত অর্থের পরিমাণ (টাকা)" /></label>
                   <input id="fee-amount" type="number" min="500" max="25000" step="500" value={feeAmount} onChange={(e) => setFeeAmount(e.target.value)} required />
 
-                  <label htmlFor="fee-notes"><Bi en="Voucher / Bill Particulars & Justification" bn="ভাউচার / বিলের বিবরণ ও প্রমাণক" /></label>
+                  <label htmlFor="fee-notes"><Bi en="Voucher / Bill Particulars & Justification" bn="বিল বা ভাউচারের বিবরণ ও আইনি ভিত্তি" /></label>
                   <textarea id="fee-notes" value={feeNotes} onChange={(e) => setFeeNotes(e.target.value)} minLength="10" maxLength="500" placeholder="Detail case appearances, court dates, and statutory fee schedule reference..." required />
 
-                  <button type="submit" disabled={busy}><Bi en="Submit Fee Claim to DLAO Finance" bn="হিসাব শাখায় ফি বিল জমা দিন" /></button>
+                  <button type="submit" disabled={busy}><Bi en="Submit Fee Claim to DLAO Finance" bn="ডিএলএও হিসাব শাখায় ফি বিল জমা দিন" /></button>
                 </form>
               </AddForm>
 
               {feeClaims.length > 0 && (
                 <div className="version-history" style={{ marginTop: '0.75rem' }}>
-                  <h4><Bi en="Submitted Fee Claims" bn="দাখিলকৃত ফি বিলসমূহ" /></h4>
+                  <h4><Bi en="Submitted Fee Claims" bn="দাখিলকৃত ফি বিলের তালিকা" /></h4>
                   <ul className="plain-list">
                     {feeClaims.map((claim) => (
                       <li key={claim.id} style={{ padding: '0.65rem 0', borderBottom: '1px solid #ecebe6' }}>
@@ -548,8 +548,8 @@ export default function LawyerCasePage({ session }) {
           </section>
 
           {/* Case Documents (Preserved) */}
-          <section className="panel" aria-labelledby="documents-title"><div className="panel-body"><h2 id="documents-title" className="panel-heading"><Bi en="Case Documents" bn="মামলার নথি" /></h2><p className="muted"><Bi en="Restricted evidence is not shown here." bn="সীমিত প্রমাণ এখানে দেখানো হয় না।" /></p>
-            {!record.documents?.length ? <p><Bi en="No documents linked." bn="কোনো নথি যুক্ত নেই।" /></p> : <ul className="plain-list">{record.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong> {document.version?.qualityState && <Badge code={document.version.qualityState} />}<p className="muted"><Bi en="Version" bn="সংস্করণ" /> {num(document.currentVersion)}</p>{document.version?.qualityState === 'READABLE' && <details><summary><Bi en="Read linked document text" bn="নথির লেখা পড়ুন" /></summary><pre>{document.version.textContent || bi('No readable text stored.', 'পড়ার মতো লেখা নেই।')}</pre></details>}{document.version?.qualityState === 'UNREADABLE' && <p><Bi en="Unreadable: a person must check it." bn="নথিটি পড়া যাচ্ছে না; একজন কর্মীকে যাচাই করতে হবে।" /></p>}</div></li>)}</ul>}
+          <section className="panel" aria-labelledby="documents-title"><div className="panel-body"><h2 id="documents-title" className="panel-heading"><Bi en="Case Documents" bn="মামলার নথিপত্র" /></h2><p className="muted"><Bi en="Restricted evidence is not shown here." bn="গোপনীয় বা সংরক্ষিত প্রমাণাদি এই তালিকায় দেখানো হয় না।" /></p>
+            {!record.documents?.length ? <p><Bi en="No documents linked." bn="কোনো নথিপত্র সংযুক্ত নেই।" /></p> : <ul className="plain-list">{record.documents.map((document) => <li key={document.id}><div><strong>{document.label}</strong> {document.version?.qualityState && <Badge code={document.version.qualityState} />}<p className="muted"><Bi en="Version" bn="সংস্করণ" /> {num(document.currentVersion)}</p>{document.version?.qualityState === 'READABLE' && <details><summary><Bi en="Read linked document text" bn="নথির বিবরণ দেখুন" /></summary><pre>{document.version.textContent || bi('No readable text stored.', 'সংরক্ষিত কোনো পাঠযোগ্য লেখা নেই।')}</pre></details>}{document.version?.qualityState === 'UNREADABLE' && <p><Bi en="Unreadable: a person must check it." bn="নথিটি অপাঠযোগ্য; সংশ্লিষ্ট কর্মকর্তার মাধ্যমে ম্যানুয়ালি যাচাই করা আবশ্যক।" /></p>}</div></li>)}</ul>}
           </div></section>
         </div>
       )}

@@ -82,7 +82,7 @@ export default function CitizenDashboard({ session }) {
           applicantName: appApplicantName.trim() || session.user.displayName,
         },
       })
-      setFeedbackMsg(res.message || 'Application submitted successfully.')
+      setFeedbackMsg(res.message || bi('Application submitted successfully.', 'আইনি সহায়তার আবেদন সফলভাবে দাখিল হয়েছে।'))
       setShowAppModal(false)
       setAppProblem('')
       setAppUrgent(false)
@@ -106,7 +106,7 @@ export default function CitizenDashboard({ session }) {
         token: session.token,
         body: { reason: changeReason.trim() },
       })
-      setFeedbackMsg(res.message || 'Lawyer change request submitted successfully.')
+      setFeedbackMsg(res.message || bi('Lawyer change request submitted successfully.', 'আইনজীবী পরিবর্তনের আবেদন সফলভাবে দাখিল হয়েছে।'))
       setSelectedCaseForChange(null)
       setChangeReason('')
       setRefresh((r) => r + 1)
@@ -122,14 +122,14 @@ export default function CitizenDashboard({ session }) {
       {/* Top Welcome Bar */}
       <section className="citizen-welcome-hero">
         <div className="citizen-hero-content">
-          <span className="citizen-kicker">{bi('Citizen Legal Aid Portal', 'নাগরিক লিগ্যাল এইড পোর্টাল')}</span>
+          <span className="citizen-kicker">{bi('Citizen Legal Aid Portal', 'নাগরিক আইনি সহায়তা পোর্টাল')}</span>
           <h1 className="citizen-heading">
             {bi('Welcome,', 'স্বাগতম,')} {profile?.displayName || session.user.displayName || session.user.username}
           </h1>
           <p className="citizen-subhead">
             {bi(
               'Track your legal aid applications, court case progression, and advocate assignments transparently.',
-              'আপনার আইনি সহায়তা আবেদন, মামলার অগ্রগতি এবং নিযুক্ত আইনজীবীর তথ্য স্বচ্ছভাবে পর্যবেক্ষণ করুন।'
+              'আপনার আইনি সহায়তা আবেদন, আদালতের মামলার অগ্রগতি এবং নিযুক্ত আইনজীবীর বিবরণ স্বচ্ছভাবে পর্যবেক্ষণ করুন।'
             )}
           </p>
         </div>
@@ -139,17 +139,17 @@ export default function CitizenDashboard({ session }) {
             className="citizen-voice-cta"
             onClick={openAppModal}
           >
-            {bi('Submit Digital Application', 'ডিজিটাল আবেদন জমা দিন')}
+            {bi('Submit Digital Application', 'ডিজিটাল আবেদন দাখিল করুন')}
           </button>
           <Link to="/voice" className="citizen-voice-secondary-cta">
-            {bi('Voice Intake (16699)', 'ভয়েস আবেদন (১৬৬৯৯)')}
+            {bi('Voice Intake (16699)', 'টেলিফোনে আবেদন (১৬৬৯৯)')}
           </Link>
         </div>
       </section>
 
       {feedbackMsg && (
         <div className="auth-alert success" role="status">
-          <strong>{bi('Update: ', 'আপডেট: ')}</strong>{feedbackMsg}
+          <strong>{bi('Update: ', 'বিজ্ঞপ্তি: ')}</strong>{feedbackMsg}
         </div>
       )}
 
@@ -163,12 +163,12 @@ export default function CitizenDashboard({ session }) {
       <section className="citizen-cases-section">
         <div className="section-head">
           <h2>{bi('Your Legal Aid Applications & Cases', 'আপনার আইনি সহায়তা আবেদন ও মামলাসমূহ')}</h2>
-          <span className="case-count">{cases.length} {cases.length === 1 ? bi('matter found', 'টি মামলা') : bi('matters found', 'টি মামলা')}</span>
+          <span className="case-count">{cases.length} {cases.length === 1 ? bi('matter found', 'টি আবেদন/মামলা') : bi('matters found', 'টি আবেদন/মামলা')}</span>
         </div>
 
         {loading ? (
           <div className="loading-state-box">
-            <p>{bi('Loading your case files…', 'মামলার তথ্য লোড হচ্ছে…')}</p>
+            <p>{bi('Loading your case files…', 'আপনার মামলার তথ্য ও রেকর্ড লোড হচ্ছে…')}</p>
           </div>
         ) : cases.length === 0 ? (
           <div className="citizen-empty-container">
@@ -178,11 +178,11 @@ export default function CitizenDashboard({ session }) {
             </div>
 
             <div className="empty-state-box">
-              <p className="empty-title">{bi('No active legal aid applications found', 'কোনো সক্রিয় আইনি সহায়তা আবেদন পাওয়া যায়নি')}</p>
+              <p className="empty-title">{bi('No active legal aid applications found', 'বর্তমানে কোনো সক্রিয় আইনি সহায়তা আবেদন নেই')}</p>
               <p className="empty-desc">
                 {bi(
                   'Submit an application online or use our 16699 voice simulation to get started. Court hearing schedules and legal aid lawyer assignment become available after DLAO review and acceptance.',
-                  'অনলাইনে আবেদন জমা দিন অথবা শুরু করতে আমাদের ১৬৬৯৯ ভয়েস সিমুলেশন ব্যবহার করুন। ডিএলএও পর্যালোচনা ও অনুমোদনের পর শুনানির তারিখ ও আইনজীবী নিযুক্ত করা হবে।'
+                  'অনলাইনে নতুন আবেদন দাখিল করুন অথবা ১৬৬৯৯ হেল্পলাইনের মাধ্যমে আবেদন জানান। জেলা লিগ্যাল এইড অফিসার (ডিএলএও) কর্তৃক আবেদন পর্যালোচনা ও মঞ্জুর হওয়ার পর শুনানির তারিখ ও প্যানেল আইনজীবী নিযুক্ত করা হবে।'
                 )}
               </p>
             </div>
@@ -239,17 +239,17 @@ export default function CitizenDashboard({ session }) {
                     {/* Court / Hearing Schedule - ONLY show if accepted */}
                     {isAccepted && (
                       <div className="bento-box">
-                        <h4 className="bento-title">{bi('Hearing and Action Plan', 'শুনানি ও পদক্ষেপ')}</h4>
+                        <h4 className="bento-title">{bi('Hearing and Action Plan', 'পরবর্তী শুনানি ও করণীয়')}</h4>
                         {c.caseRecord?.nextHearingAt ? (
                           <div>
                             <p className="bento-highlight">
                               {new Date(c.caseRecord.nextHearingAt).toLocaleString()}
                             </p>
-                            <p className="bento-sub">{c.caseRecord.nextAction || bi('Review file with legal aid counsel before hearing', 'শুনানির আগে আইনজীবীর সাথে ফাইল পর্যালোচনা করুন')}</p>
+                            <p className="bento-sub">{c.caseRecord.nextAction || bi('Review file with legal aid counsel before hearing', 'শুনানির পূর্বে দায়িত্বপ্রাপ্ত আইনজীবীর সাথে মামলার নথিপত্র পর্যালোচনা করুন')}</p>
                             {c.caseRecord.courtName && <p className="bento-court">{c.caseRecord.courtName}</p>}
                           </div>
                         ) : (
-                          <p className="bento-muted">{bi('No court hearing scheduled yet.', 'এখনো কোনো শুনানির তারিখ নির্ধারিত হয়নি।')}</p>
+                          <p className="bento-muted">{bi('No court hearing scheduled yet.', 'আদালতে শুনানির দিন এখনো ধার্য হয়নি।')}</p>
                         )}
                       </div>
                     )}
@@ -257,14 +257,14 @@ export default function CitizenDashboard({ session }) {
                     {/* Appointed Legal Counsel */}
                     <div className="bento-box">
                       <div className="bento-head-between">
-                        <h4 className="bento-title">{bi('Appointed Legal Counsel', 'নিযুক্ত আইনজীবী')}</h4>
+                        <h4 className="bento-title">{bi('Appointed Legal Counsel', 'নিয়োজিত প্যানেল আইনজীবী')}</h4>
                         {isAccepted && c.lawyer && !pendingChangeReq && !approvedChangeReq && (
                           <button
                             type="button"
                             className="text-action-link"
                             onClick={() => setSelectedCaseForChange(c)}
                           >
-                            {bi('Request Change', 'আইনজীবী বদলের আবেদন')}
+                            {bi('Request Change', 'আইনজীবী পরিবর্তনের আবেদন')}
                           </button>
                         )}
                       </div>
@@ -272,24 +272,24 @@ export default function CitizenDashboard({ session }) {
                       {!isAccepted ? (
                         <div className="pending-assignment-box">
                           <p className="bento-muted">
-                            {bi('Pending DLAO review and approval.', 'ডিএলএও পর্যালোচনা ও অনুমোদনের অপেক্ষায়।')}
+                            {bi('Pending DLAO review and approval.', 'ডিএলএও কর্মকর্তার পর্যালোচনা ও অনুমোদনের অপেক্ষায়।')}
                           </p>
                           <span className="disabled-action-note">
-                            {bi('Lawyer reassignment is available once a legal counsel is assigned.', 'আইনজীবী নিযুক্ত হওয়ার পর বদলের অনুরোধ করা যাবে।')}
+                            {bi('Lawyer reassignment is available once a legal counsel is assigned.', 'আইনজীবী নিযুক্ত হওয়ার পর পরিবর্তনের আবেদন করা যাবে।')}
                           </span>
                         </div>
                       ) : c.lawyer ? (
                         <div>
                           <p className="bento-highlight">{c.lawyer.lawyerName}</p>
-                          <p className="bento-sub">{bi('Office Contact: ', 'যোগাযোগ: ')}{c.lawyer.lawyerPhone || bi('Provided via DLAO office', 'ডিএলএও অফিসের মাধ্যমে')}</p>
-                          <span className="bento-status-tag">{bi('Status: Active Representation', 'অবস্থা: সক্রিয় আইনি প্রতিনিধিত্ব')}</span>
+                          <p className="bento-sub">{bi('Office Contact: ', 'যোগাযোগের মাধ্যম: ')}{c.lawyer.lawyerPhone || bi('Provided via DLAO office', 'ডিএলএও কার্যালয়ের মাধ্যমে যোগাযোগযোগ্য')}</p>
+                          <span className="bento-status-tag">{bi('Status: Active Representation', 'স্থিতি: সক্রিয় আইনি প্রতিনিধিত্ব')}</span>
 
                           {pendingChangeReq && (
                             <div className="pending-reassignment-notice">
                               <span className="warning-dot" />
                               <div>
-                                <strong>{bi('Reassignment Request Pending Review', 'বদলের অনুরোধ পর্যালোচনার অপেক্ষায়')}</strong>
-                                <p>{bi('Reason submitted: ', 'কারণ: ')}&ldquo;{pendingChangeReq.reason}&rdquo;</p>
+                                <strong>{bi('Reassignment Request Pending Review', 'আইনজীবী পরিবর্তনের আবেদন পর্যালোচনার অপেক্ষায়')}</strong>
+                                <p>{bi('Reason submitted: ', 'আবেদনের কারণ: ')}&ldquo;{pendingChangeReq.reason}&rdquo;</p>
                               </div>
                             </div>
                           )}
@@ -297,22 +297,22 @@ export default function CitizenDashboard({ session }) {
                           {approvedChangeReq && (
                             <div className="pending-reassignment-notice" role="status">
                               <div>
-                                <strong>{bi('Change approved; replacement pending', 'বদলের অনুরোধ অনুমোদিত; নতুন আইনজীবীর অপেক্ষায়')}</strong>
-                                <p>{bi('The current lawyer remains assigned until a replacement accepts.', 'নতুন আইনজীবী দায়িত্ব না নেওয়া পর্যন্ত বর্তমান আইনজীবী নিযুক্ত থাকবেন।')}</p>
+                                <strong>{bi('Change approved; replacement pending', 'পরিবর্তনের আবেদন অনুমোদিত; নতুন আইনজীবী বরাদ্দের অপেক্ষায়')}</strong>
+                                <p>{bi('The current lawyer remains assigned until a replacement accepts.', 'নতুন আইনজীবী আনুষ্ঠানিকভাবে দায়িত্ব গ্রহণ না করা পর্যন্ত বর্তমান আইনজীবীই দায়িত্বে বহাল থাকবেন।')}</p>
                               </div>
                             </div>
                           )}
 
                           {pastChangeReqs.length > 0 && (
                             <details className="past-requests-details">
-                              <summary>{bi('View Past Change Requests', 'পূর্ববর্তী অনুরোধের বিবরণ')} ({pastChangeReqs.length})</summary>
+                              <summary>{bi('View Past Change Requests', 'পূর্ববর্তী পরিবর্তনের আবেদনের বিবরণী')} ({pastChangeReqs.length})</summary>
                               <ul className="past-requests-list">
                                 {pastChangeReqs.map(pr => (
                                   <li key={pr.id}>
                                     <span className="pr-date">{new Date(pr.createdAt).toLocaleDateString()}</span>
                                     <span className={`pr-status ${pr.status.toLowerCase()}`}>{pr.status}</span>
                                     <p className="pr-reason">&ldquo;{pr.reason}&rdquo;</p>
-                                    {pr.reviewReason && <p className="pr-reason">{bi('Officer review: ', 'কর্মকর্তার পর্যালোচনা: ')}{pr.reviewReason}</p>}
+                                    {pr.reviewReason && <p className="pr-reason">{bi('Officer review: ', 'কর্মকর্তার পর্যালোচনা মন্তব্য: ')}{pr.reviewReason}</p>}
                                   </li>
                                 ))}
                               </ul>
@@ -321,8 +321,8 @@ export default function CitizenDashboard({ session }) {
                         </div>
                       ) : (
                         <div className="pending-assignment-box">
-                          <p className="bento-muted">{bi('No panel lawyer assigned yet.', 'এখনো কোনো আইনজীবী নিযুক্ত করা হয়নি।')}</p>
-                          <p className="bento-sub">{bi('The DLAO Officer will assign a legal counsel once the case is scheduled.', 'মামলাটি শুনানির জন্য প্রস্তুত হলে ডিএলএও কর্মকর্তা আইনজীবী নিযুক্ত করবেন।')}</p>
+                          <p className="bento-muted">{bi('No panel lawyer assigned yet.', 'এখনো কোনো প্যানেল আইনজীবী নিযুক্ত করা হয়নি।')}</p>
+                          <p className="bento-sub">{bi('The DLAO Officer will assign a legal counsel once the case is scheduled.', 'আবেদনটি আদালতে শুনানির জন্য গৃহীত হলে ডিএলএও কর্মকর্তা একজন প্যানেল আইনজীবী বরাদ্দ করবেন।')}</p>
                         </div>
                       )}
                     </div>
@@ -330,13 +330,13 @@ export default function CitizenDashboard({ session }) {
                     {/* Mediation Status */}
                     {c.mediation && (
                       <div className="bento-box">
-                        <h4 className="bento-title">{bi('Mediation Status', 'সালিশ / মধ্যস্থতা অবস্থা')}</h4>
+                        <h4 className="bento-title">{bi('Mediation Status', 'সালিশ বা বিকল্প বিরোধ নিষ্পত্তি (এডিআর)')}</h4>
                         <p className="bento-highlight">
-                          {bi('Session Status: ', 'অবস্থা: ')}
+                          {bi('Session Status: ', 'বৈঠকের স্থিতি: ')}
                           <span className="status-pill status-accepted">{c.mediation.status || 'Active'}</span>
                         </p>
                         {c.mediation.scheduledAt && (
-                          <p className="bento-sub">{bi('Scheduled for: ', 'নির্ধারিত তারিখ: ')}{new Date(c.mediation.scheduledAt).toLocaleString()}</p>
+                          <p className="bento-sub">{bi('Scheduled for: ', 'ধার্যকৃত তারিখ ও সময়: ')}{new Date(c.mediation.scheduledAt).toLocaleString()}</p>
                         )}
                       </div>
                     )}
@@ -355,9 +355,9 @@ export default function CitizenDashboard({ session }) {
           <div className="auth-modal-card">
             <div className="auth-modal-header">
               <div>
-                <span className="auth-modal-sub">{bi('Direct Legal Aid Request', 'সরাসরি আইনি আবেদন')}</span>
+                <span className="auth-modal-sub">{bi('Direct Legal Aid Request', 'সরাসরি আইনি সহায়তার আবেদন')}</span>
                 <h3 id="app-modal-title" className="auth-modal-heading">
-                  {bi('Submit Legal Aid Application', 'আইনি সহায়তা আবেদনপত্র')}
+                  {bi('Submit Legal Aid Application', 'আইনি সহায়তার আবেদনপত্র দাখিল')}
                 </h3>
               </div>
               <button
@@ -382,14 +382,14 @@ export default function CitizenDashboard({ session }) {
               </div>
 
               <div>
-                <label htmlFor="app-problem">{bi('Describe Your Legal Matter / Incident', 'আপনার আইনি সমস্যা বা ঘটনার বিবরণ')}</label>
+                <label htmlFor="app-problem">{bi('Describe Your Legal Matter / Incident', 'আপনার আইনি সমস্যা, বিরোধ বা ঘটনার বিবরণ')}</label>
                 <textarea
                   id="app-problem"
                   rows="4"
                   required
                   placeholder={bi(
                     'Provide details regarding the dispute, family matter, labor rights, tenancy, or legal challenge.',
-                    'আপনার বিরোধ, পারিবারিক বিষয়, জমি-জমা, শ্রম অধিকার বা আইনি সমস্যার বিবরণ দিন।'
+                    'পারিবারিক সমস্যা, জমিজমা বিরোধ, বকেয়া বেতন বা শ্রম অধিকার, দেনা-পাওনা কিংবা আইনি সংকটের বিস্তারিত বিবরণ প্রদান করুন।'
                   )}
                   value={appProblem}
                   onChange={(e) => setAppProblem(e.target.value)}
@@ -411,7 +411,7 @@ export default function CitizenDashboard({ session }) {
               </div>
 
               <div>
-                <label htmlFor="app-phone">{bi('Safe Contact Phone', 'নিরাপদ যোগাযোগের ফোন নম্বর')}</label>
+                <label htmlFor="app-phone">{bi('Safe Contact Phone', 'জরুরি যোগাযোগের ফোন নম্বর')}</label>
                 <input
                   id="app-phone"
                   type="tel"
@@ -422,7 +422,7 @@ export default function CitizenDashboard({ session }) {
               </div>
 
               <div>
-                <label htmlFor="app-identity-doc">{bi('Identity Document Available', 'সংযুক্ত পরিচয়পত্র')}</label>
+                <label htmlFor="app-identity-doc">{bi('Identity Document Available', 'সংযুক্ত পরিচয়পত্র / প্রমাণক')}</label>
                 <select
                   id="app-identity-doc"
                   className="auth-select"
@@ -431,7 +431,7 @@ export default function CitizenDashboard({ session }) {
                 >
                   <option value="NID">{bi('National ID (NID)', 'জাতীয় পরিচয়পত্র (এনআইডি)')}</option>
                   <option value="BIRTH_CERTIFICATE">{bi('Birth Certificate', 'জন্ম নিবন্ধন')}</option>
-                  <option value="NONE">{bi('None or not currently available', 'নেই বা আপাতত নেই')}</option>
+                  <option value="NONE">{bi('None or not currently available', 'আপাতত কোনোটি নেই বা সংযুক্ত নেই')}</option>
                 </select>
               </div>
 
@@ -444,7 +444,7 @@ export default function CitizenDashboard({ session }) {
                   onChange={(e) => setAppUrgent(e.target.checked)}
                 />
                 <label htmlFor="app-urgent" style={{ margin: 0, fontWeight: 550, cursor: 'pointer' }}>
-                  {bi('Immediate danger or urgent protection requested', 'তাৎক্ষণিক বিপদের ঝুঁকি বা জরুরি সুরক্ষা প্রয়োজন')}
+                  {bi('Immediate danger or urgent protection requested', 'তাৎক্ষণিক জীবনের ঝুঁকি বা জরুরি আইনি সুরক্ষার আবেদন')}
                 </label>
               </div>
 
@@ -477,9 +477,9 @@ export default function CitizenDashboard({ session }) {
           <div className="auth-modal-card">
             <div className="auth-modal-header">
               <div>
-                <span className="auth-modal-sub">{bi('Legal Aid Oversight', 'আইনি সহায়তা তদারকি')}</span>
+                <span className="auth-modal-sub">{bi('Legal Aid Oversight', 'আইনি সহায়তা তদারকি ও সমন্বয়')}</span>
                 <h3 id="change-modal-title" className="auth-modal-heading">
-                  {bi('Request Lawyer Reassignment', 'আইনজীবী বদলের আবেদন')}
+                  {bi('Request Lawyer Reassignment', 'প্যানেল আইনজীবী পরিবর্তনের আবেদন')}
                 </h3>
               </div>
               <button
@@ -499,7 +499,7 @@ export default function CitizenDashboard({ session }) {
 
               <div>
                 <label htmlFor="change-reason">
-                  {bi('Reason for Reassignment Request', 'আইনজীবী বদলের কারণ')}
+                  {bi('Reason for Reassignment Request', 'আইনজীবী পরিবর্তনের কারণ ও ব্যাখ্যা')}
                 </label>
                 <textarea
                   id="change-reason"
@@ -507,7 +507,7 @@ export default function CitizenDashboard({ session }) {
                   required
                   placeholder={bi(
                     'Describe why you are requesting a new lawyer (e.g. communication difficulties, conflict of interest, unavailability).',
-                    'আইনজীবী বদলের কারণ লিখুন (যেমন: যোগাযোগে সমস্যা, স্বার্থের সংঘাত, সময় না দেওয়া ইত্যাদি)।'
+                    'আইনজীবী পরিবর্তনের যৌক্তিক কারণ উল্লেখ করুন (যেমন: নিয়মিত যোগাযোগ না থাকা, স্বার্থের সংঘাত, আদালতে অনুপস্থিতি ইত্যাদি)।'
                   )}
                   value={changeReason}
                   onChange={(e) => setChangeReason(e.target.value)}
@@ -528,7 +528,7 @@ export default function CitizenDashboard({ session }) {
                   className="primary-action-btn"
                   disabled={submittingChange || !changeReason.trim()}
                 >
-                  {submittingChange ? bi('Submitting to DLAO…', 'জমা হচ্ছে…') : bi('Submit Request to DLAO Officer', 'ডিএলএও কর্মকর্তার কাছে পাঠান')}
+                  {submittingChange ? bi('Submitting to DLAO…', 'ডিএলএও কার্যালয়ে প্রেরণ করা হচ্ছে…') : bi('Submit Request to DLAO Officer', 'ডিএলএও কর্মকর্তার নিকট আবেদন দাখিল করুন')}
                 </button>
               </div>
             </form>

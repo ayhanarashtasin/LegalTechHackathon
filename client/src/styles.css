@@ -348,6 +348,26 @@ thead th { font-size: .8rem; color: #4e5751; }
 .timeline.compact li { padding: .5rem 0 .55rem .4rem; }
 .inline-form { margin-top: 1rem; }
 .inline-form textarea { min-height: 4.5rem; }
+
+/* Means test: DBLA eligibility check */
+.means-test { border: 1px solid #e3e2dc; border-radius: 7px; padding: .85rem 1.1rem 1rem; margin: .75rem 0 1rem; background: #fbfbfa; }
+.means-test legend { font-weight: 700; font-size: .95rem; padding: 0 .3rem; }
+.means-test > p { font-size: .84rem; margin: .15rem 0 .7rem; }
+.means-test-options { display: flex; gap: .6rem; }
+.means-test-option { position: relative; display: flex; align-items: center; gap: .5rem; flex: 1; padding: .6rem .75rem; border: 1px solid #e3e2dc; border-radius: 5px; background: #fff; cursor: pointer; transition: border-color .15s, background .15s; }
+.means-test-option:hover { border-color: #999e9a; }
+.means-test-option.selected { border-color: #346538; background: #f4f9f4; }
+.means-test-option input[type="radio"] { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.means-test-option::before { content: ""; width: 14px; height: 14px; border: 1.5px solid #999e9a; border-radius: 50%; flex: none; box-sizing: border-box; transition: border-color .15s; }
+.means-test-option.selected::before { border-color: #346538; border-width: 4px; }
+.means-test-label { display: grid; gap: .1rem; }
+.means-test-label strong { font-size: .85rem; font-weight: 650; color: #222724; line-height: 1.3; }
+.means-test-label small { font-size: .78rem; color: #5a625c; font-weight: 400; line-height: 1.3; }
+.means-test-result { margin-top: .65rem; padding: .55rem .8rem; border-radius: 5px; font-size: .84rem; }
+.means-test-result p { margin: .15rem 0 0; }
+.means-test-eligible { background: #edf3ec; color: #28562d; border: 1px solid #a8c4ab; }
+.means-test-ineligible { background: #fdebec; color: #9f2f2d; border: 1px solid #d9a3a1; }
+@media (max-width: 760px) { .means-test-options { flex-direction: column; } }
 @media (max-width: 760px) {
   .panel > details > summary { flex-wrap: wrap; gap: .2rem 1rem; }
   .panel-hint { order: 2; flex-basis: 100%; text-align: left; }
@@ -1295,20 +1315,20 @@ thead th { font-size: .8rem; color: #4e5751; }
   margin-bottom: 0.75rem;
 }
 .phase-step-circle {
-  width: 2rem;
-  height: 2rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: 0 0 1.5rem;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   font-weight: 700;
   z-index: 2;
-  transition: all 0.2s ease-in-out;
 }
 .phase-step-line {
   flex: 1;
-  height: 2px;
+  height: 1px;
   background: #ecebe6;
   margin-left: 0.4rem;
   z-index: 1;
@@ -1327,7 +1347,7 @@ thead th { font-size: .8rem; color: #4e5751; }
   background: #1b1e1d;
   color: #ffffff;
   border: 2px solid #1b1e1d;
-  box-shadow: 0 0 0 3px rgba(27, 30, 29, 0.12);
+  box-shadow: 0 0 0 2px rgba(27, 30, 29, 0.12);
 }
 .step-active .phase-step-line {
   background: #ecebe6;
@@ -1382,7 +1402,7 @@ thead th { font-size: .8rem; color: #4e5751; }
     margin-bottom: 0;
   }
   .phase-step-line {
-    width: 2px;
+    width: 1px;
     height: 100%;
     min-height: 2.5rem;
     margin-left: 0;

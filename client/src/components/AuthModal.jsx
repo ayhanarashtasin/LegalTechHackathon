@@ -100,15 +100,15 @@ export default function AuthModal({
     e.preventDefault()
     setError('')
     if (!regName.trim()) {
-      setError(bi('Name is required.', 'নাম আবশ্যক।'))
+      setError(bi('Name is required.', 'আপনার পূর্ণ নাম প্রদান করা আবশ্যক।'))
       return
     }
     if (!regIdentifier.trim()) {
-      setError(bi('Email ID / Phone is required.', 'ইমেইল আইডি / ফোন আবশ্যক।'))
+      setError(bi('Email ID / Phone is required.', 'ইমেইল বা মোবাইল নম্বর প্রদান করা আবশ্যক।'))
       return
     }
     if (!regPassword || regPassword.length < 3) {
-      setError(bi('Password must be at least 3 characters.', 'পাসওয়ার্ড কমপক্ষে ৩ অক্ষরের হতে হবে।'))
+      setError(bi('Password must be at least 3 characters.', 'পাসওয়ার্ড ন্যূনতম ৩ অক্ষরের হতে হবে।'))
       return
     }
 
@@ -142,18 +142,18 @@ export default function AuthModal({
       <div className="auth-modal-card">
         <div className="auth-modal-header">
           <div>
-            <span className="auth-modal-sub">{bi('Government Legal Aid Services', 'সরকারি আইনি সহায়তা সেবা')}</span>
+            <span className="auth-modal-sub">{bi('Government Legal Aid Services', 'গণপ্রজাতন্ত্রী বাংলাদেশ সরকার · জাতীয় আইনগত সহায়তা প্রদান সংস্থা')}</span>
             <h2 id="auth-modal-title" className="auth-modal-heading">
               {mode === 'signup'
-                ? bi('Citizen Registration', 'নাগরিক নিবন্ধন')
+                ? bi('Citizen Registration', 'নাগরিক আইনি সহায়তা নিবন্ধন')
                 : activeTab === 'citizen'
-                  ? bi('Citizen Sign In', 'নাগরিক সাইন ইন')
+                  ? bi('Citizen Sign In', 'নাগরিক পোর্টাল লগইন')
                   : activeTab === 'officer'
-                    ? bi('Officer Sign In', 'কর্মকর্তা সাইন ইন')
-                    : bi('Admin Sign In', 'অ্যাডমিন সাইন ইন')}
+                    ? bi('Officer Sign In', 'দায়িত্বপ্রাপ্ত কর্মকর্তা লগইন')
+                    : bi('Admin Sign In', 'কেন্দ্রীয় প্রশাসন লগইন')}
             </h2>
           </div>
-          <button type="button" className="auth-modal-close" onClick={onClose} aria-label={bi('Close', 'বন্ধ')}>
+          <button type="button" className="auth-modal-close" onClick={onClose} aria-label={bi('Close', 'বন্ধ করুন')}>
             &times;
           </button>
         </div>
@@ -210,7 +210,7 @@ export default function AuthModal({
               </div>
 
               <div>
-                <label htmlFor="reg-identifier">{bi('Email ID / Phone', 'ইমেইল আইডি / ফোন')}</label>
+                <label htmlFor="reg-identifier">{bi('Email ID / Phone', 'ইমেইল বা মোবাইল নম্বর')}</label>
                 <input
                   id="reg-identifier"
                   type="text"
@@ -234,7 +234,7 @@ export default function AuthModal({
               </div>
 
               <div>
-                <label htmlFor="reg-nid">{bi('NID (Optional)', 'এনআইডি (ঐচ্ছিক)')}</label>
+                <label htmlFor="reg-nid">{bi('NID (Optional)', 'জাতীয় পরিচয়পত্র নম্বর (এনআইডি - ঐচ্ছিক)')}</label>
                 <input
                   id="reg-nid"
                   type="text"
@@ -246,18 +246,18 @@ export default function AuthModal({
 
               <div className="auth-action-row">
                 <button type="submit" className="primary-action-btn" disabled={busy}>
-                  {busy ? bi('Creating account…', 'অ্যাকাউন্ট তৈরি হচ্ছে…') : bi('Sign up', 'নিবন্ধন করুন')}
+                  {busy ? bi('Creating account…', 'অ্যাকাউন্ট তৈরি হচ্ছে…') : bi('Sign up', 'নিবন্ধন সম্পন্ন করুন')}
                 </button>
               </div>
 
               <div className="auth-toggle-link-row">
-                <span>{bi('Already have an account?', 'আগে থেকেই অ্যাকাউন্ট আছে?')}</span>{' '}
+                <span>{bi('Already have an account?', 'ইতিমধ্যে কি অ্যাকাউন্ট রয়েছে?')}</span>{' '}
                 <button
                   type="button"
                   className="link-btn"
                   onClick={handleSwitchToSignIn}
                 >
-                  {bi('Sign in', 'সাইন ইন করুন')}
+                  {bi('Sign in', 'প্রবেশ / লগইন করুন')}
                 </button>
               </div>
             </form>
@@ -267,12 +267,12 @@ export default function AuthModal({
           {mode === 'signin' && activeTab === 'citizen' && (
             <form onSubmit={handleCitizenLoginSubmit} className="auth-form-stack">
               <div>
-                <label htmlFor="citizen-login-id">{bi('Email ID / Phone', 'ইমেইল আইডি / ফোন')}</label>
+                <label htmlFor="citizen-login-id">{bi('Email ID / Phone', 'ইমেইল বা মোবাইল নম্বর')}</label>
                 <input
                   id="citizen-login-id"
                   type="text"
                   required
-                  placeholder={bi('Enter email or phone', 'ইমেইল বা ফোন নম্বর দিন')}
+                  placeholder={bi('Enter email or phone', 'ইমেইল বা মোবাইল নম্বর লিখুন')}
                   value={citizenLoginId}
                   onChange={(e) => setCitizenLoginId(e.target.value)}
                 />
@@ -289,7 +289,7 @@ export default function AuthModal({
                   onChange={(e) => setCitizenLoginPassword(e.target.value)}
                 />
                 <p className="auth-hint">
-                  {bi('Auto-filled with demo credentials (demo.citizen / 1234).', 'ডেমো তথ্য স্বয়ংক্রিয় পূরণ হয়েছে (demo.citizen / 1234)।')}
+                  {bi('Auto-filled with demo credentials (demo.citizen / 1234).', 'ডেমো অ্যাক্সেসের তথ্য স্বয়ংক্রিয় পূরণ করা হয়েছে (demo.citizen / 1234)।')}
                   {' '}&bull;{' '}
                   <button
                     type="button"
@@ -299,25 +299,25 @@ export default function AuthModal({
                       setCitizenLoginPassword('1234')
                     }}
                   >
-                    {bi('Reset to demo', 'ডেমো তথ্য')}
+                    {bi('Reset to demo', 'ডেমো তথ্যে পুনঃস্থাপন')}
                   </button>
                 </p>
               </div>
 
               <div className="auth-action-row">
                 <button type="submit" className="primary-action-btn" disabled={busy}>
-                  {busy ? bi('Signing in…', 'সাইন ইন হচ্ছে…') : bi('Sign In as Citizen', 'নাগরিক হিসেবে সাইন ইন')}
+                  {busy ? bi('Signing in…', 'লগইন হচ্ছে…') : bi('Sign In as Citizen', 'নাগরিক হিসেবে প্রবেশ করুন')}
                 </button>
               </div>
 
               <div className="auth-toggle-link-row">
-                <span>{bi('Do not have an account?', 'অ্যাকাউন্ট নেই?')}</span>{' '}
+                <span>{bi('Do not have an account?', 'কোনো অ্যাকাউন্ট নেই?')}</span>{' '}
                 <button
                   type="button"
                   className="link-btn"
                   onClick={() => onSwitchMode && onSwitchMode('signup')}
                 >
-                  {bi('Sign up', 'নিবন্ধন করুন')}
+                  {bi('Sign up', 'নতুন নিবন্ধন করুন')}
                 </button>
               </div>
             </form>
@@ -327,7 +327,7 @@ export default function AuthModal({
           {mode === 'signin' && activeTab === 'officer' && (
             <form onSubmit={handleOfficerSubmit} className="auth-form-stack">
               <div>
-                <label htmlFor="officer-role-select">{bi('Choose Officer Role', 'কর্মকর্তার ভূমিকা নির্বাচন করুন')}</label>
+                <label htmlFor="officer-role-select">{bi('Choose Officer Role', 'কর্মকর্তার দায়িত্ব ও পদবি নির্বাচন করুন')}</label>
                 <select
                   id="officer-role-select"
                   className="auth-select"
@@ -343,7 +343,7 @@ export default function AuthModal({
               </div>
 
               <div>
-                <label htmlFor="officer-id">{bi('Officer ID', 'কর্মকর্তা আইডি')}</label>
+                <label htmlFor="officer-id">{bi('Officer ID', 'কর্মকর্তার ইউজার আইডি')}</label>
                 <input
                   id="officer-id"
                   type="text"
@@ -363,13 +363,13 @@ export default function AuthModal({
                   onChange={(e) => setOfficerPassword(e.target.value)}
                 />
                 <p className="auth-hint">
-                  {bi('Auto-filled with demo credentials (password: 1234).', 'ডেমো তথ্য স্বয়ংক্রিয় পূরণ হয়েছে (পাসওয়ার্ড: 1234)।')}
+                  {bi('Auto-filled with demo credentials (password: 1234).', 'ডেমো পরীক্ষার তথ্য স্বয়ংক্রিয় পূরণ করা হয়েছে (পাসওয়ার্ড: 1234)।')}
                 </p>
               </div>
 
               <div className="auth-action-row">
                 <button type="submit" className="primary-action-btn" disabled={busy}>
-                  {busy ? bi('Signing in…', 'সাইন ইন হচ্ছে…') : bi('Sign In as Officer', 'কর্মকর্তা হিসেবে সাইন ইন')}
+                  {busy ? bi('Signing in…', 'লগইন হচ্ছে…') : bi('Sign In as Officer', 'কর্মকর্তা হিসেবে প্রবেশ করুন')}
                 </button>
               </div>
             </form>
@@ -379,11 +379,11 @@ export default function AuthModal({
           {mode === 'signin' && activeTab === 'admin' && (
             <form onSubmit={handleAdminSubmit} className="auth-form-stack">
               <p className="auth-hint" style={{ marginTop: 0 }}>
-                {bi('Central System Administration and Infrastructure Oversight.', 'কেন্দ্রীয় সিস্টেম প্রশাসন ও অবকাঠামো তদারকি।')}
+                {bi('Central System Administration and Infrastructure Oversight.', 'কেন্দ্রীয় সিস্টেম প্রশাসন, ব্যবহারকারী নিয়ন্ত্রণ ও নিরাপত্তা তদারকি।')}
               </p>
 
               <div>
-                <label htmlFor="admin-id">{bi('Administrator ID', 'প্রশাসক আইডি')}</label>
+                <label htmlFor="admin-id">{bi('Administrator ID', 'প্রশাসকের ইউজার আইডি')}</label>
                 <input
                   id="admin-id"
                   type="text"
@@ -403,13 +403,13 @@ export default function AuthModal({
                   onChange={(e) => setAdminPassword(e.target.value)}
                 />
                 <p className="auth-hint">
-                  {bi('Auto-filled with admin credentials (admin.com / admin123).', 'অ্যাডমিন তথ্য স্বয়ংক্রিয় পূরণ হয়েছে (admin.com / admin123)।')}
+                  {bi('Auto-filled with admin credentials (admin.com / admin123).', 'অ্যাডমিন অ্যাক্সেস তথ্য স্বয়ংক্রিয় পূরণ করা হয়েছে (admin.com / admin123)।')}
                 </p>
               </div>
 
               <div className="auth-action-row">
                 <button type="submit" className="primary-action-btn" disabled={busy}>
-                  {busy ? bi('Signing in…', 'সাইন ইন হচ্ছে…') : bi('Sign In as Admin', 'অ্যাডমিন হিসেবে সাইন ইন')}
+                  {busy ? bi('Signing in…', 'লগইন হচ্ছে…') : bi('Sign In as Admin', 'প্রশাসক হিসেবে প্রবেশ করুন')}
                 </button>
               </div>
             </form>

@@ -300,7 +300,7 @@ export default function CitizenCaseTracker() {
                 </svg>
               </div>
               <div>
-                <strong>{bi('Current Next Step:', 'বর্তমান পরবর্তী পদক্ষেপ:')}</strong>{' '}
+                <strong>{bi('Current Next Step:', 'পরবর্তী করণীয়:')}</strong>{' '}
                 <span>{result.nextAction}</span>
               </div>
             </div>
@@ -379,7 +379,7 @@ export default function CitizenCaseTracker() {
           {result.updates && result.updates.length > 0 && (
             <div className="tracker-events-section">
               <h3 className="tracker-section-title">
-                {bi('Activity & Handover Checkpoints', 'হস্তান্তর ও সকল আপডেট লগ')}
+                {bi('Activity & Handover Checkpoints', 'কার্যক্রম ও অগ্রগতির বিবরণী')}
               </h3>
               <div className="tracker-timeline">
                 {result.updates.map((update, idx) => (
