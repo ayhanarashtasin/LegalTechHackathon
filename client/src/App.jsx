@@ -4,6 +4,7 @@ import VoiceAccess from './pages/VoiceAccess.jsx'
 import AssistedIntake from './pages/AssistedIntake.jsx'
 import AuthModal from './components/AuthModal.jsx'
 import CitizenProfileModal from './components/CitizenProfileModal.jsx'
+import CitizenCaseTracker from './components/CitizenCaseTracker.jsx'
 import { api } from './services/api.js'
 import { clearOfflineDrafts, resumeOfflineDrafts } from './utils/offlineDrafts.js'
 import { bi, setLang, useLang } from './components/Bi.jsx'
@@ -31,7 +32,7 @@ function initialLightMode() {
     || (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-data: reduce)').matches))
 }
 
-function LandingHero({ onOpenAuth }) {
+function LandingHero() {
   return (
     <section className="login-panel landing-hero-panel" aria-labelledby="welcome-title">
       <div className="landing-hero-body">
@@ -42,22 +43,7 @@ function LandingHero({ onOpenAuth }) {
         </p>
         <p className="citizen-door"><Link to="/mediation/sign">{bi('Sign a mediation draft with a private code', 'গোপন কোড দিয়ে মধ্যস্থতার খসড়ায় স্বাক্ষর করুন')}</Link></p>
 
-        <div className="landing-auth-buttons">
-          <button
-            type="button"
-            className="landing-btn landing-signin-btn"
-            onClick={() => onOpenAuth('signin', 'citizen')}
-          >
-            {bi('Sign in', 'সাইন ইন')}
-          </button>
-          <button
-            type="button"
-            className="landing-btn landing-signup-btn"
-            onClick={() => onOpenAuth('signup', 'citizen')}
-          >
-            {bi('Sign up', 'নিবন্ধন (সাইন আপ)')}
-          </button>
-        </div>
+        <CitizenCaseTracker />
       </div>
     </section>
   )
@@ -255,7 +241,22 @@ export default function App() {
             )}
           </div>
         ) : (
-          <div className="header-right-spacer" aria-hidden="true" />
+          <div className="header-auth-actions">
+            <button
+              type="button"
+              className="header-auth-btn header-signin-btn"
+              onClick={() => setAuthModal({ isOpen: true, mode: 'signin', tab: 'citizen' })}
+            >
+              {bi('Sign in', 'সাইন ইন')}
+            </button>
+            <button
+              type="button"
+              className="header-auth-btn header-signup-btn"
+              onClick={() => setAuthModal({ isOpen: true, mode: 'signup', tab: 'citizen' })}
+            >
+              {bi('Sign up', 'নিবন্ধন')}
+            </button>
+          </div>
         )}
       </header>
       <main id="main" className="app-main" tabIndex={-1}>
@@ -273,11 +274,7 @@ export default function App() {
                   <Dashboard session={session} />
                 )
               ) : (
-                <LandingHero
-                  onOpenAuth={(mode, tab) =>
-                    setAuthModal({ isOpen: true, mode, tab })
-                  }
-                />
+                <LandingHero />
               )
             }
           />

@@ -25,6 +25,7 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
   const [paymentStatus, setPaymentStatus] = useState('SUBMITTED')
   const [paymentReason, setPaymentReason] = useState('')
   const [paymentAssignmentId, setPaymentAssignmentId] = useState('')
+  const [canBearCosts, setCanBearCosts] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -100,7 +101,7 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
   const holds = data?.panelLawyers.filter(({ hold }) => hold?.newAssignmentHold) ?? []
   const hint = activeAssignments[0]?.lawyerName ?? (pendingAssignments.length ? bi('Offer pending', 'আইনজীবীর উত্তরের অপেক্ষায়') : data && bi('No lawyer yet', 'এখনো আইনজীবী নেই'))
 
-  return <Panel id="lawyer-title" en="Lawyer" bn="আইনজীবী" hint={hint} open={holds.length > 0 || openRequests.length > 0}>
+  return <Panel id="lawyer-title" en="Phase 5: Panel Lawyer Process (If Required)" bn="ধাপ ৫: প্যানেল আইনজীবী নিয়োগ ও মামলা পরিচালনা" hint={hint} open>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
     {!data && !error && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
@@ -116,6 +117,37 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
       </section>)}
 
       <div className="block"><h3 id="assignment-title"><Bi en="Assigned lawyer" bn="নিযুক্ত আইনজীবী" /></h3>
+        <div className="means-test-box" style={{ background: '#fcfbf7', border: '1px solid #e8e2d2', borderLeft: '4px solid #b8860b', borderRadius: '6px', padding: '0.9rem 1.1rem', margin: '0.75rem 0 1rem 0' }}>
+          <h4 style={{ margin: '0 0 0.4rem 0' }}><Bi en="Beneficiary Financial Status Check (DBLA Criteria)" bn="সুবিধাভোগীর আর্থিক অবস্থা যাচাই (ডিবিএলএ নীতিমালা)" /></h4>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: '#555' }}>
+            <Bi en="Verify if beneficiary can bear private advocate costs before government-funded panel lawyer allocation." bn="সরকারি খরচে প্যানেল আইনজীবী বরাদ্দের পূর্বে আবেদনকারীর আর্থিক অসচ্ছলতা নিশ্চিত করুন।" />
+          </p>
+          <div style={{ margin: '0.6rem 0 0.3rem 0', fontWeight: 600, fontSize: '0.88rem' }}>
+            <Bi en="Can beneficiary bear the legal cost?" bn="আবেদনকারী কি মামলার খরচ বহনে সক্ষম?" />
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', marginTop: '0.4rem', fontSize: '0.88rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+              <input type="radio" name={`dlao-means-${applicationId}`} checked={!canBearCosts} onChange={() => setCanBearCosts(false)} />
+              <span><Bi en="No: Cannot bear cost (Approve panel lawyer allocation)" bn="না: খরচ বহনে অক্ষম (প্যানেল আইনজীবী বরাদ্দ অনুমোদিত)" /></span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+              <input type="radio" name={`dlao-means-${applicationId}`} checked={canBearCosts} onChange={() => setCanBearCosts(true)} />
+              <span><Bi en="Yes: Can bear cost (Ineligible for State Counsel)" bn="হ্যাঁ: খরচ বহনে সক্ষম (সরকারি আইনজীবী প্রযোজ্য নয়)" /></span>
+            </label>
+          </div>
+          {canBearCosts ? (
+            <div style={{ marginTop: '0.6rem', padding: '0.6rem 0.8rem', background: '#fdf6f6', border: '1px solid #d9a3a1', borderRadius: '4px', fontSize: '0.85rem', color: '#9f2f2d' }}>
+              <strong><Bi en="No government-funded panel lawyer allocation." bn="সরকারি খরচে প্যানেল আইনজীবী বরাদ্দ হবে না।" /></strong>
+              <p style={{ margin: '0.2rem 0 0 0' }}><Bi en="Inform applicant (Explore alternative options / private counsel)." bn="আবেদনকারীকে বিকল্প বা ব্যক্তিগত আইনজীবী নিয়োগের পরামর্শ প্রদান করুন।" /></p>
+            </div>
+          ) : (
+            <div style={{ marginTop: '0.6rem', padding: '0.6rem 0.8rem', background: '#edf5ee', border: '1px solid #b7dab9', borderRadius: '4px', fontSize: '0.85rem', color: '#28562d' }}>
+              <strong>✓ <Bi en="Approve panel lawyer allocation" bn="প্যানেল আইনজীবী বরাদ্দ অনুমোদিত" /></strong>
+              <p style={{ margin: '0.2rem 0 0 0' }}><Bi en="Beneficiary qualifies under DBLA criteria. Select and assign an advocate from the approved panel below." bn="সুবিধাভোগী ডিবিএলএ মানদণ্ডে যোগ্য। নিম্নের তালিকা থেকে অনুমোদিত প্যানেল আইনজীবী নির্বাচন ও নিয়োগ দিন।" /></p>
+            </div>
+          )}
+        </div>
+
         {data.assignments.length === 0 ? <p className="muted"><Bi en="No lawyer yet." bn="এখনো আইনজীবী নেই।" /></p> : <ul className="plain-list">{data.assignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong> <Badge code={item.status} />{!item.active && <small className="muted"> · <Bi en="past" bn="আগের" /></small>}{item.hold && <p><small><Bi en="Hold" bn="স্থগিত" />: <Term code={item.hold.reviewState} /></small></p>}</div></li>)}</ul>}
         {pendingAssignments.length > 0 && <p role="status"><Bi en="Waiting for the lawyer to accept or decline." bn="আইনজীবীর উত্তরের অপেক্ষা।" /></p>}
         <AddForm en="Offer to a lawyer" bn="আইনজীবীকে প্রস্তাব দিন">
@@ -123,7 +155,7 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
             <label htmlFor="panel-lawyer"><Bi en="Panel lawyer" bn="প্যানেল আইনজীবী" /></label><select id="panel-lawyer" value={lawyerUserId} onChange={(event) => setLawyerUserId(event.target.value)} required><option value="">{bi('Choose', 'বাছাই করুন')}</option>{data.panelLawyers.map((person) => <option key={person.id} value={person.id} disabled={person.hold?.newAssignmentHold}>{person.displayName}{person.hold?.newAssignmentHold ? ` · ${bi('on hold', 'স্থগিত')}` : ''}</option>)}</select>
             <label htmlFor="assignment-change-request"><Bi en="Linked change request" bn="সংশ্লিষ্ট বদলের অনুরোধ" /></label><select id="assignment-change-request" value={changeRequestId} onChange={(event) => setChangeRequestId(event.target.value)}><option value="">{bi('None: officer decision', 'নেই: কর্মকর্তার সিদ্ধান্ত')}</option>{approvedRequests.map((item) => <option key={item.id} value={item.id}>{bi('Approved request', 'অনুমোদিত অনুরোধ')} · {when(item.createdAt)}</option>)}</select>
             <label htmlFor="assignment-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="assignment-reason" value={assignmentReason} onChange={(event) => setAssignmentReason(event.target.value)} minLength="10" maxLength="500" required />
-            <button type="submit" disabled={busy || !lawyerUserId || pendingAssignments.length > 0}><Bi en="Send offer" bn="প্রস্তাব পাঠান" /></button>
+            <button type="submit" disabled={busy || !lawyerUserId || pendingAssignments.length > 0 || canBearCosts}><Bi en="Send offer" bn="প্রস্তাব পাঠান" /></button>
           </form>
         </AddForm>
       </div>

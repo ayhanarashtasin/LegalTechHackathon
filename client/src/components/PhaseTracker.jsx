@@ -1,25 +1,26 @@
-export default function PhaseTracker({ application = null, caseRecord = null, lawyer = null, mediation = null }) {
+export default function PhaseTracker({ application = null, caseRecord = null, lawyer = null, mediation = null, pathway = null }) {
   const hasApplication = Boolean(application && application.applicationId)
   const status = application?.status || null
   const reviewState = application?.reviewState || null
   const channel = application?.channel || application?.intakeChannel || null
   const isAccepted = status === 'ACCEPTED'
   const isTerminated = status === 'TERMINATED' || status === 'REJECTED' || caseRecord?.status === 'CLOSED'
-  const hasLawyerOrMediation = Boolean(lawyer?.lawyerName || mediation?.stage)
-  const isSettled = mediation?.outcome === 'AGREEMENT_REACHED' || caseRecord?.status === 'SETTLED'
+  const hasLawyer = Boolean(lawyer?.lawyerName || lawyer?.assignmentStatus === 'ACCEPTED' || lawyer?.active)
+  const hasMediation = Boolean(mediation?.stage)
+  const isSettled = mediation?.outcome === 'AGREEMENT_REACHED' || caseRecord?.status === 'SETTLED' || caseRecord?.outcome
 
-  // Determine current active step (0 to 6)
+  // Determine current active phase (1 to 6)
   let currentStep = 0
   if (hasApplication) {
-    if (isTerminated) {
+    if (isTerminated || isSettled) {
       currentStep = 6
-    } else if (isSettled) {
+    } else if (isAccepted && hasLawyer) {
       currentStep = 5
-    } else if (hasLawyerOrMediation) {
+    } else if (isAccepted && (hasMediation || (pathway && pathway !== 'NONE'))) {
       currentStep = 4
     } else if (isAccepted) {
       currentStep = 3
-    } else if (reviewState === 'READY_FOR_DECISION' || status === 'SUBMITTED') {
+    } else if (status === 'SUBMITTED' || reviewState === 'READY_FOR_DECISION' || reviewState === 'NEEDS_INFORMATION' || reviewState === 'PENDING_REVIEW') {
       currentStep = 2
     } else {
       currentStep = 1
@@ -29,7 +30,7 @@ export default function PhaseTracker({ application = null, caseRecord = null, la
   const channelLabel = !hasApplication
     ? 'Awaiting Submission'
     : channel === 'VOICE_SIM'
-      ? '16699 Voice'
+      ? '16699 IVR Voice'
       : channel === 'UDC'
         ? 'UDC Center'
         : 'Web Portal'
@@ -37,52 +38,52 @@ export default function PhaseTracker({ application = null, caseRecord = null, la
   const steps = [
     {
       num: 1,
-      title: 'Intake Channel',
+      title: '1. Access & Application',
       subtitle: channelLabel,
-      detail: hasApplication ? 'Initial citizen submission recorded' : 'Voice (16699) or Web portal intake',
+      detail: hasApplication ? 'Submission received & Application ID generated' : 'Web, mobile app, 16699 IVR, or UDC',
     },
     {
       num: 2,
-      title: 'Application Review',
-      subtitle: !hasApplication ? 'Not Started' : reviewState === 'READY_FOR_DECISION' ? 'Reviewed' : 'Submitted',
-      detail: !hasApplication ? 'Awaiting initial submission' : reviewState === 'READY_FOR_DECISION' ? 'DLAO review completed' : 'Awaiting officer review',
+      title: '2. Verification & Eligibility',
+      subtitle: !hasApplication ? 'Pending' : reviewState === 'READY_FOR_DECISION' ? 'Eligibility Verified' : 'Under Officer Review',
+      detail: !hasApplication ? 'Awaiting submission' : reviewState === 'READY_FOR_DECISION' ? 'Identity & DBLA criteria checked' : 'Verifying identity, documents & eligibility',
     },
     {
       num: 3,
-      title: 'DLAO Decision',
-      subtitle: !hasApplication ? 'Pending' : isAccepted ? 'Case Accepted' : status === 'REJECTED' ? 'Rejected' : 'Pending',
-      detail: isAccepted ? `Case ID: ${application.caseId || 'Assigned'}` : 'Officer eligibility determination',
+      title: '3. Jurisdiction & Routing',
+      subtitle: !hasApplication ? 'Pending' : isAccepted ? 'Jurisdiction Accepted' : status === 'REJECTED' ? 'Not Approved' : 'Assessment',
+      detail: isAccepted ? `Case ID: ${application.caseId || 'Assigned'}` : 'Appropriate office jurisdiction verification',
     },
     {
       num: 4,
-      title: 'Lawyer or Mediation',
-      subtitle: lawyer?.lawyerName ? lawyer.lawyerName : mediation?.stage ? 'Mediation Active' : 'Pending Assignment',
-      detail: lawyer?.lawyerName ? `Appointed: ${lawyer.lawyerName}` : 'Legal aid counsel or ADR mediator',
+      title: '4. Service Pathways',
+      subtitle: hasMediation ? 'Mediation / ADR' : pathway === 'ADVICE' ? 'Legal Advice' : isAccepted ? 'Pathway Routing' : 'Pending',
+      detail: 'Advice, Mediation (ADR/ODR), or Direct Legal Aid',
     },
     {
       num: 5,
-      title: 'Settlement',
-      subtitle: isSettled ? 'Settled' : 'In Progress',
-      detail: isSettled ? 'Agreement or resolution reached' : 'Negotiation or court hearing ongoing',
+      title: '5. Panel Lawyer Process',
+      subtitle: hasLawyer ? (lawyer.lawyerName || 'Lawyer Appointed') : 'If Required',
+      detail: hasLawyer ? `Assigned counsel · Hearings & court representation` : 'Financial check & panel lawyer allocation',
     },
     {
       num: 6,
-      title: 'Case Termination',
-      subtitle: isTerminated ? 'Closed' : 'Active',
-      detail: isTerminated ? 'Final decree or case closed' : 'Awaiting conclusion of proceedings',
+      title: '6. Case Outcome & Closure',
+      subtitle: isTerminated ? 'Case Closed' : isSettled ? 'Settled / Disposed' : 'Final Disposal',
+      detail: isTerminated ? 'Legal outcome recorded & fee disbursed' : 'Court judgment, settlement & completion audit',
     },
   ]
 
   const summaryText = currentStep === 0
-    ? 'Step 0 of 6 \u2022 Awaiting initial submission'
-    : `Step ${Math.min(currentStep, 6)} of 6 \u2022 ${steps[currentStep - 1]?.title}`
+    ? 'Phase 0 of 6 \u2022 Awaiting initial submission'
+    : `Phase ${Math.min(currentStep, 6)} of 6 \u2022 ${steps[currentStep - 1]?.title}`
 
   return (
-    <div className="phase-tracker-card" aria-label="Case Lifecycle Progression">
+    <div className="phase-tracker-card" aria-label="DLAS Comprehensive End-to-End Workflow">
       <div className="phase-tracker-header">
         <div>
-          <span className="phase-tracker-badge">Lifecycle Progression</span>
-          <h3 className="phase-tracker-title">Official Legal Aid Progression Path</h3>
+          <span className="phase-tracker-badge">DLAS Comprehensive End-to-End Workflow</span>
+          <h3 className="phase-tracker-title">From Application to Access to Justice</h3>
         </div>
         <div className={`phase-tracker-summary ${currentStep === 0 ? 'step-zero-summary' : ''}`}>
           {summaryText}
@@ -91,7 +92,7 @@ export default function PhaseTracker({ application = null, caseRecord = null, la
 
       <ol className="phase-steps-grid">
         {steps.map((step) => {
-          const isCompleted = currentStep > 0 && (step.num < currentStep || (step.num === currentStep && isTerminated && step.num === 6))
+          const isCompleted = currentStep > 0 && (step.num < currentStep || (step.num === currentStep && (isTerminated || isSettled) && step.num === 6))
           const isCurrent = currentStep > 0 && step.num === currentStep && !isTerminated
           const isFuture = currentStep === 0 || step.num > currentStep
 
