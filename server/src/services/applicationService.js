@@ -712,6 +712,23 @@ export async function listWorkspace(role, actor) {
     const assignments = await LawyerAssignment.find({ lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).select('caseId applicationId status').limit(25).lean()
     return { role, officeCode: assignment.officeCode, records: assignments.map(({ _id, caseId, applicationId, status }) => ({ assignmentId: _id, caseId, applicationId, assignmentStatus: status })) }
   }
+  if (role === 'UDC_OPERATOR') {
+    const applications = await Application.find({ channel: 'UDC', officeCode: assignment.officeCode })
+      .sort({ createdAt: -1 }).limit(25).select('applicationId status reviewState applicantPersonId createdAt channel').lean()
+    const people = await Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName').lean()
+    const names = new Map(people.map((person) => [person._id.toString(), person.displayName]))
+    return {
+      role, officeCode: assignment.officeCode,
+      records: applications.map((item) => ({
+        applicationId: item.applicationId,
+        status: item.status,
+        reviewState: item.reviewState,
+        applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
+        createdAt: item.createdAt,
+        channel: item.channel,
+      })),
+    }
+  }
   return { role, officeCode: assignment.officeCode, records: [] }
 }
 

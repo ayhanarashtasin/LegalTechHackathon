@@ -172,7 +172,7 @@ try {
   // machine that creates him, or still holds his old 24-character code, issues it: seeding a shared database from
   // another machine never replaces a PIN someone else is using.
   const malekCode = passwords.demo_malek_status_lookup_code
-  let issueMalekPin = Boolean(malekCode) && !/^\d{6}$/.test(malekCode)
+  let issueMalekPin = !malek || !malek.lookupCodeHash || !malekCode || !/^\d{6}$/.test(malekCode) || malek.lookupCodeHash !== lookupHash(malekCode)
   if (!malek) {
     const helpline = await User.findOne({ username: 'demo.helpline' })
     const helplineRole = await RoleAssignment.findOne({ userId: helpline._id, role: 'HELPLINE_AGENT', active: true })
@@ -181,7 +181,7 @@ try {
     issueMalekPin = true
   }
   if (issueMalekPin) {
-    const pin = newVoicePin()
+    const pin = malekCode && /^\d{6}$/.test(malekCode) ? malekCode : newVoicePin()
     await Application.updateOne({ applicationId: malek.applicationId }, { $set: { lookupCodeHash: lookupHash(pin) } })
     passwords.demo_malek_status_lookup_code = pin
     await writeFile(credentialsFile, JSON.stringify(passwords, null, 2), { mode: 0o600 })
