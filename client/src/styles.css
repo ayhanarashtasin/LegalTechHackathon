@@ -96,6 +96,44 @@ html {
   position: relative;
   z-index: 6;
 }
+
+.header-auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  position: relative;
+  z-index: 6;
+  flex-shrink: 0;
+}
+.header-auth-btn {
+  padding: 0.45rem 1.05rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  white-space: nowrap;
+  font-family: inherit;
+  line-height: 1.25;
+}
+.header-signin-btn {
+  background: #ffffff;
+  color: #1b1e1d;
+  border: 1px solid #c8c7bf;
+}
+.header-signin-btn:hover {
+  background: #f4f3ef;
+  border-color: #1b1e1d;
+}
+.header-signup-btn {
+  background: #1b1e1d;
+  color: #ffffff;
+  border: 1px solid #1b1e1d;
+}
+.header-signup-btn:hover {
+  background: #333835;
+}
+
 .prototype-label { border: 1px solid #d3d1c8; padding: .2rem .55rem; border-radius: 4px; color: #4b504d; font-size: .8rem; }
 .account { display: flex; align-items: center; gap: 1rem; margin-left: auto; }
 .quiet-button, .text-button { color: #222724; background: white; border-color: #777e79; }
@@ -280,15 +318,15 @@ thead th { font-size: .8rem; color: #4e5751; }
 .lang-switch button:hover:not([aria-pressed="true"]) { background: #f2f1ed; }
 
 /* ==========================================================================
-   LANDING HERO REDESIGN (EDITORIAL CLEAN AESTHETIC)
+   LANDING HERO & CASE PROGRESS TRACKER
    ========================================================================== */
 .landing-hero-panel {
-  max-width: 38rem;
-  margin: 3rem auto;
-  padding: 3rem 2.5rem;
+  max-width: 58rem;
+  margin: 2rem auto 3.5rem;
+  padding: clamp(1.75rem, 4vw, 2.75rem) clamp(1.25rem, 3.5vw, 2.5rem);
   background: #ffffff;
   border: 1px solid #e3e2dc;
-  border-radius: 8px;
+  border-radius: 10px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
   text-align: center;
 }
@@ -303,7 +341,7 @@ thead th { font-size: .8rem; color: #4e5751; }
 .landing-hero-body .citizen-door {
   font-size: 1.05rem;
   color: #5b6560;
-  margin-bottom: 2rem;
+  margin-bottom: 1.75rem;
 }
 .landing-hero-body .citizen-door a {
   color: #1b1e1d;
@@ -311,40 +349,532 @@ thead th { font-size: .8rem; color: #4e5751; }
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.landing-auth-buttons {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  margin: 1.75rem 0 2rem 0;
+
+/* ==========================================================================
+   CITIZEN CASE PROGRESS TRACKER (PARCEL-STYLE)
+   ========================================================================== */
+.case-tracker-card {
+  background: #ffffff;
+  border: 1px solid #e3e2dc;
+  border-radius: 8px;
+  padding: clamp(1.25rem, 3vw, 1.85rem);
+  text-align: left;
+  margin-top: 1.25rem;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.02);
 }
-.landing-btn {
-  padding: 0.85rem 2rem;
-  font-size: 1rem;
+.case-tracker-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+.case-tracker-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
+  background: #f7f6f3;
+  border: 1px solid #e3e2dc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1b1e1d;
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+}
+.case-tracker-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1b1e1d;
+  margin: 0 0 0.3rem 0;
+  letter-spacing: -0.01em;
+}
+.case-tracker-lead {
+  font-size: 0.92rem;
+  color: #5b6560;
+  margin: 0;
+  line-height: 1.45;
+}
+.case-tracker-form {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+.case-tracker-input-box {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.case-tracker-search-icon {
+  position: absolute;
+  left: 0.85rem;
+  color: #777e79;
+  pointer-events: none;
+}
+.case-tracker-input {
+  width: 100%;
+  padding: 0.75rem 2.2rem 0.75rem 2.6rem;
+  font-size: 0.95rem;
+  border: 1px solid #c8c7bf;
+  border-radius: 6px;
+  font-family: inherit;
+  color: #1b1e1d;
+  background: #fbfbfa;
+  transition: all 0.15s ease-in-out;
+}
+.case-tracker-input:focus {
+  outline: none;
+  border-color: #1b1e1d;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(27, 30, 29, 0.08);
+}
+.case-tracker-clear-btn {
+  position: absolute;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  font-size: 0.85rem;
+  color: #777e79;
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+}
+.case-tracker-clear-btn:hover {
+  color: #1b1e1d;
+  background: #f0efea;
+}
+.case-tracker-btn {
+  padding: 0.75rem 1.6rem;
+  font-size: 0.95rem;
   font-weight: 600;
   border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
-  min-width: 8.5rem;
-}
-.landing-signin-btn {
   background: #1b1e1d;
   color: #ffffff;
   border: 1px solid #1b1e1d;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease-in-out;
 }
-.landing-signin-btn:hover {
+.case-tracker-btn:hover:not(:disabled) {
   background: #333835;
   transform: translateY(-1px);
 }
-.landing-signup-btn {
-  background: #ffffff;
-  color: #1b1e1d;
-  border: 1px solid #c8c7bf;
+.case-tracker-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
-.landing-signup-btn:hover {
+
+.case-tracker-samples {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+  font-size: 0.82rem;
+}
+.case-tracker-samples-label {
+  color: #777e79;
+  font-weight: 500;
+  margin-right: 0.2rem;
+}
+.case-tracker-chip {
   background: #f7f6f3;
-  border-color: #1b1e1d;
-  transform: translateY(-1px);
+  border: 1px solid #e3e2dc;
+  border-radius: 4px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8rem;
+  font-family: monospace;
+  color: #333835;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
+.case-tracker-chip:hover {
+  background: #eae9e3;
+  border-color: #1b1e1d;
+  color: #1b1e1d;
+}
+
+.case-tracker-alert {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+/* Tracking Result Details */
+.case-tracker-result {
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eaeaea;
+  animation: fadeIn 0.25s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tracker-result-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid #f2f1ed;
+}
+.tracker-id-cluster {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.tracker-badge-id {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.3rem 0.7rem;
+  background: #1b1e1d;
+  color: #ffffff;
+  border-radius: 5px;
+  letter-spacing: 0.02em;
+}
+.tracker-badge-case {
+  font-family: monospace;
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 0.3rem 0.65rem;
+  background: #f7f6f3;
+  color: #1b1e1d;
+  border: 1px solid #deded9;
+  border-radius: 5px;
+}
+.tracker-badge-urgent {
+  font-size: 0.76rem;
+  font-weight: 750;
+  padding: 0.25rem 0.6rem;
+  background: #fdebec;
+  color: #9f2f2d;
+  border: 1px solid #f8c8cb;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tracker-status-cluster {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.tracker-status-pill {
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 0.28rem 0.75rem;
+  border-radius: 9999px;
+}
+.tracker-status-pill.status-accepted {
+  background: #edf3ec;
+  color: #346538;
+  border: 1px solid #c7e0c5;
+}
+.tracker-status-pill.status-submitted {
+  background: #fbf3db;
+  color: #956400;
+  border: 1px solid #fae8b4;
+}
+.tracker-channel-pill {
+  font-size: 0.82rem;
+  color: #5b6560;
+  background: #f7f6f3;
+  border: 1px solid #e3e2dc;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+}
+
+/* Action Banner */
+.tracker-action-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: 6px;
+  background: #fbfbfa;
+  border: 1px solid #e3e2dc;
+  margin-bottom: 1.5rem;
+  font-size: 0.92rem;
+  color: #222724;
+}
+.tracker-hearing-banner {
+  background: #f0f7f2;
+  border-color: #badcc2;
+  color: #1f5427;
+}
+.tracker-banner-icon {
+  font-size: 1.15rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 0.05rem;
+}
+.tracker-banner-sub {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.88rem;
+  color: #346538;
+}
+
+/* Visual Stepper (6-phase parcel progress) */
+.tracker-milestones-section {
+  margin-bottom: 1.75rem;
+}
+.tracker-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1b1e1d;
+  margin: 0 0 1rem 0;
+  letter-spacing: -0.01em;
+}
+.tracker-stepper {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.5rem;
+  position: relative;
+  margin: 1.25rem 0;
+}
+.stepper-step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.stepper-track-line {
+  position: absolute;
+  top: 13px;
+  left: -50%;
+  width: 100%;
+  height: 2px;
+  background: #e3e2dc;
+  z-index: 1;
+}
+.stepper-step:first-child .stepper-track-line {
+  display: none;
+}
+.stepper-step.step-completed .stepper-track-line {
+  background: #2e7d32;
+}
+.stepper-marker {
+  position: relative;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: #ffffff;
+  border: 2px solid #c8c7bf;
+  color: #777e79;
+  margin-bottom: 0.5rem;
+}
+.stepper-step.step-completed .stepper-marker {
+  background: #2e7d32;
+  border-color: #2e7d32;
+  color: #ffffff;
+}
+.stepper-step.step-current .stepper-marker {
+  background: #1b1e1d;
+  border-color: #1b1e1d;
+  color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(27, 30, 29, 0.15);
+}
+.stepper-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+.stepper-title {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: #1b1e1d;
+  line-height: 1.25;
+  margin-bottom: 0.2rem;
+}
+.stepper-desc {
+  font-size: 0.72rem;
+  color: #5b6560;
+  line-height: 1.35;
+  margin-bottom: 0.35rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.stepper-date {
+  font-size: 0.7rem;
+  color: #777e79;
+  font-family: monospace;
+  margin-bottom: 0.35rem;
+}
+.stepper-tag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.stepper-tag.tag-completed {
+  background: #edf3ec;
+  color: #346538;
+}
+.stepper-tag.tag-current {
+  background: #fbf3db;
+  color: #956400;
+}
+.stepper-tag.tag-upcoming {
+  background: #f7f6f3;
+  color: #777e79;
+}
+
+/* Key Details Bento Grid */
+.tracker-details-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.85rem;
+  margin-bottom: 1.75rem;
+}
+.tracker-detail-card {
+  background: #fbfbfa;
+  border: 1px solid #eaeaea;
+  border-radius: 6px;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tracker-detail-card .detail-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #787774;
+  font-weight: 600;
+}
+.tracker-detail-card .detail-value {
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: #111111;
+  word-break: break-word;
+}
+
+/* Chronological Timeline Log */
+.tracker-events-section {
+  margin-bottom: 1.5rem;
+}
+.tracker-timeline {
+  border-left: 2px solid #eaeaea;
+  margin-left: 0.85rem;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+}
+.timeline-item {
+  position: relative;
+}
+.timeline-dot {
+  position: absolute;
+  left: -1.7rem;
+  top: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1b1e1d;
+  border: 2px solid #ffffff;
+}
+.timeline-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+.timeline-title {
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: #1b1e1d;
+}
+.timeline-date {
+  font-size: 0.78rem;
+  color: #777e79;
+  font-family: monospace;
+}
+.timeline-desc {
+  font-size: 0.85rem;
+  color: #4e5751;
+  margin: 0;
+  line-height: 1.45;
+}
+
+/* Footer Notice */
+.tracker-footer-note {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  background: #f7f6f3;
+  border: 1px solid #eaeaea;
+  font-size: 0.84rem;
+  color: #5b6560;
+  margin-top: 1.25rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 900px) {
+  .tracker-stepper {
+    grid-template-columns: repeat(3, 1fr);
+    row-gap: 1.5rem;
+  }
+  .stepper-track-line {
+    display: none;
+  }
+  .tracker-details-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .case-tracker-form {
+    flex-direction: column;
+  }
+  .case-tracker-btn {
+    width: 100%;
+  }
+  .tracker-stepper {
+    grid-template-columns: 1fr;
+    text-align: left;
+  }
+  .stepper-step {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.75rem;
+    text-align: left;
+  }
+  .stepper-content {
+    align-items: flex-start;
+  }
+  .tracker-details-grid {
+    grid-template-columns: 1fr;
+  }
+  .header-auth-actions {
+    gap: 0.4rem;
+  }
+  .header-auth-btn {
+    padding: 0.35rem 0.75rem;
+    font-size: 0.82rem;
+  }
+}
+
 
 /* ==========================================================================
    AUTH MODAL (CITIZEN / OFFICER / ADMIN TABS)

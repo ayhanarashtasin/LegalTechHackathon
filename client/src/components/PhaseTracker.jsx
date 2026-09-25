@@ -9,18 +9,18 @@ export default function PhaseTracker({ application = null, caseRecord = null, la
   const hasMediation = Boolean(mediation?.stage)
   const isSettled = mediation?.outcome === 'AGREEMENT_REACHED' || caseRecord?.status === 'SETTLED' || caseRecord?.outcome
 
-  // Determine current active step (1 to 6) per Flowchart B2
+  // Determine current active phase (1 to 6)
   let currentStep = 0
   if (hasApplication) {
     if (isTerminated || isSettled) {
       currentStep = 6
-    } else if (hasLawyer) {
+    } else if (isAccepted && hasLawyer) {
       currentStep = 5
-    } else if (hasMediation || pathway) {
+    } else if (isAccepted && (hasMediation || (pathway && pathway !== 'NONE'))) {
       currentStep = 4
     } else if (isAccepted) {
       currentStep = 3
-    } else if (reviewState === 'READY_FOR_DECISION' || status === 'SUBMITTED') {
+    } else if (status === 'SUBMITTED' || reviewState === 'READY_FOR_DECISION' || reviewState === 'NEEDS_INFORMATION' || reviewState === 'PENDING_REVIEW') {
       currentStep = 2
     } else {
       currentStep = 1

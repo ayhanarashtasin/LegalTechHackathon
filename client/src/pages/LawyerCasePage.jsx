@@ -75,8 +75,13 @@ export default function LawyerCasePage({ session }) {
   }
 
   function respond(decision) {
-    send(`/api/lawyers/assignments/${record.assignmentId}/respond`, { decision, reason: responseReason },
-      decision === 'ACCEPT' ? bi('Assignment accepted. You are now the official legal aid counsel for this case.', 'নিয়োগ গ্রহণ করা হয়েছে। আপনি এই মামলার আনুষ্ঠানিক আইনি সহায়তা আইনজীবী।') : bi('Assignment declined. The DLAO has been notified.', 'আপনি মামলাটি নিতে অস্বীকার করেছেন। ডিএলএও কর্মকর্তাকে জানানো হয়েছে।'))
+    const finalReason = responseReason.trim().length >= 10
+      ? responseReason.trim()
+      : (decision === 'ACCEPT'
+          ? 'Panel lawyer accepted appointment to provide legal aid representation.'
+          : 'Panel lawyer declined appointment due to schedule conflict or caseload.')
+    send(`/api/lawyers/assignments/${record.assignmentId}/respond`, { decision, reason: finalReason },
+      decision === 'ACCEPT' ? bi('Assignment accepted. You are now the official legal aid counsel for this case.', 'নিয়োগ গ্রহণ করা হয়েছে। আপনি এই মামলার আনুষ্ঠানিক আইনি সহায়তা আইনজীবী।') : bi('Assignment rejected. The DLAO has been notified.', 'নিয়োগ প্রত্যাখ্যান করা হয়েছে। ডিএলএও কর্মকর্তাকে জানানো হয়েছে।'))
   }
 
   function submitUpdate(event, update) {
@@ -170,9 +175,14 @@ export default function LawyerCasePage({ session }) {
 
   const pending = record.assignmentStatus === 'PENDING'
   const accepted = record.assignmentStatus === 'ACCEPTED'
+  const isUrgent = Boolean(
+    record.urgent ||
+    record.priorityDecision === 'URGENT' ||
+    (record.priorityDecision !== 'ROUTINE' && record.flags?.some((f) => f.code === 'URGENT_RECOMMENDATION'))
+  )
   const openUpdates = (record.updates || []).filter(({ status }) => status === 'PENDING' || status === 'MISSED')
 
-  // Calculate lawyer workflow stage (1 to 5 per Flowchart B1 Steps 5-10)
+  // Calculate lawyer workflow stage (1 to 5)
   let lawyerStage = 1
   if (accepted) {
     if (outcomeRecord) {
@@ -195,7 +205,7 @@ export default function LawyerCasePage({ session }) {
   return (
     <section aria-labelledby="case-title">
       {back}
-      <div className="record-head">
+      <div className={`record-head ${isUrgent ? 'urgent-record' : ''}`} style={isUrgent ? { padding: '1rem', borderRadius: '6px' } : {}}>
         <div>
           <p className="eyebrow"><Bi en="Panel Lawyer Case Record" bn="প্যানেল আইনজীবী মামলা নথি" /></p>
           <h1 id="case-title">{record.caseId}</h1>
@@ -204,17 +214,27 @@ export default function LawyerCasePage({ session }) {
             {record.applicantName && <> · <strong><Bi en="Beneficiary:" bn="সুবিধাভোগী:" /> {record.applicantName}</strong></>}
           </p>
         </div>
-        <Badge code={record.assignmentStatus} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {isUrgent && <span className="urgent-flag">{say('URGENT')}</span>}
+          <Badge code={record.assignmentStatus} />
+        </div>
       </div>
+
+      {isUrgent && (
+        <div className="urgent-record" style={{ padding: '0.75rem 1rem', borderRadius: '6px', margin: '1rem 0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span className="urgent-flag" style={{ margin: 0 }}>{say('URGENT')}</span>
+          <span><strong><Bi en="Urgent Case:" bn="জরুরি মামলা:" /></strong> <Bi en="Priority case flagged by DLAO / AI assessment. Expedited representation requested." bn="ডিএলএও কর্মকর্তা বা এআই মূল্যায়নে চিহ্নিত অগ্রাধিকারমূলক মামলা। দ্রুত পদক্ষেপ গ্রহণ করুন।" /></span>
+        </div>
+      )}
 
       {error && <p role="alert" className="error">{error}</p>}
       {notice && <p role="status" className="success">{notice}</p>}
 
-      {/* Flowchart B1 / B2 Panel Lawyer Lifecycle Tracker */}
+      {/* Panel Lawyer Lifecycle Tracker */}
       <div className="phase-tracker-card" style={{ margin: '1rem 0 1.5rem 0' }} aria-label="Panel Lawyer Workflow">
         <div className="phase-tracker-header">
           <div>
-            <span className="phase-tracker-badge">Flowchart B1 / B2: Panel Lawyer Workflow</span>
+            <span className="phase-tracker-badge">Panel Lawyer Assignment Workflow</span>
             <h3 className="phase-tracker-title"><Bi en="Legal Aid Representation & Case Management" bn="আইনি সহায়তা প্রতিনিধিত্ব ও মামলা পরিচালনা" /></h3>
           </div>
           <div className="phase-tracker-summary">
@@ -256,7 +276,7 @@ export default function LawyerCasePage({ session }) {
       </div>
 
       {/* Summary Card */}
-      <section className="card" aria-labelledby="summary-title" style={{ marginBottom: '1.25rem' }}>
+      <section className={`card ${isUrgent ? 'urgent-record' : ''}`} aria-labelledby="summary-title" style={{ marginBottom: '1.25rem' }}>
         <h2 id="summary-title"><Bi en="At a glance" bn="এক নজরে" /></h2>
         <dl className="facts">
           <div><dt><Bi en="Case status" bn="মামলার অবস্থা" /></dt><dd><Term code={record.status} /></dd></div>
@@ -272,32 +292,32 @@ export default function LawyerCasePage({ session }) {
         </dl>
       </section>
 
-      {/* Step 5: Respond to assignment offer */}
+      {/* Respond to assignment offer */}
       {pending && (
-        <section className="card" aria-labelledby="decision-title">
-          <h2 id="decision-title"><Bi en="Step 1: Respond to Assignment Offer (DBLA Appointment)" bn="ধাপ ১: নিয়োগ প্রস্তাবে উত্তর দিন (ডিবিএলএ নিয়োগ)" /></h2>
+        <section className={`card ${isUrgent ? 'urgent-record' : ''}`} aria-labelledby="decision-title">
+          <h2 id="decision-title"><Bi en="Step 1: Respond to Assignment Offer (DBLA Appointment)" bn="ধাপ ১: নিয়োগ প্রস্তাবে সিদ্ধান্ত দিন (ডিবিএলএ নিয়োগ)" /></h2>
           <p className="muted"><Bi en="As per DBLA procedure, the case remains under DLAO jurisdiction until you formally accept assignment." bn="ডিবিএলএ কার্যপদ্ধতি অনুযায়ী আপনি আনুষ্ঠানিকভাবে নিয়োগ গ্রহণ না করা পর্যন্ত মামলাটির দায়িত্ব আপনার উপর বর্তাবে না।" /></p>
-          <label htmlFor="assignment-response-reason"><Bi en="Reason for accepting or declining" bn="গ্রহণ বা প্রত্যাখ্যানের কারণ" /></label>
-          <textarea id="assignment-response-reason" value={responseReason} onChange={(event) => setResponseReason(event.target.value)} minLength="10" maxLength="500" placeholder="State your acceptance confirmation or reason for declining..." required />
-          <div className="choice-row" style={{ marginTop: '0.75rem' }}>
-            <button type="button" disabled={busy || responseReason.trim().length < 10} onClick={() => respond('ACCEPT')}>
-              <Bi en="Accept Assignment (Take Case)" bn="নিয়োগ গ্রহণ করুন (মামলার দায়িত্ব নিন)" />
+          <label htmlFor="assignment-response-reason"><Bi en="Reason or notes (optional)" bn="কারণ বা মন্তব্য (ঐচ্ছিক)" /></label>
+          <textarea id="assignment-response-reason" value={responseReason} onChange={(event) => setResponseReason(event.target.value)} maxLength="500" placeholder="Optional notes for your decision..." />
+          <div className="choice-row" style={{ marginTop: '0.75rem', display: 'flex', gap: '0.75rem' }}>
+            <button type="button" disabled={busy} onClick={() => respond('ACCEPT')}>
+              <Bi en="Accept" bn="গ্রহণ করুন" />
             </button>
-            <button type="button" className="secondary-button" disabled={busy || responseReason.trim().length < 10} onClick={() => respond('DECLINE')}>
-              <Bi en="Decline Assignment" bn="প্রত্যাখ্যান করুন" />
+            <button type="button" className="secondary-button" style={{ borderColor: 'var(--color-danger, #b3261e)', color: 'var(--color-danger, #b3261e)' }} disabled={busy} onClick={() => respond('DECLINE')}>
+              <Bi en="Reject" bn="প্রত্যাখ্যান করুন" />
             </button>
           </div>
         </section>
       )}
 
-      {/* Accepted Workflows (Steps 6, 7, 8, 9, 10 per Flowchart B1) */}
+      {/* Accepted Workflows (Steps 2 to 5) */}
       {!pending && (
         <div className="card panels">
-          {/* Step 6: Case Information & Client Consultation */}
+          {/* Step 2: Case Information & Client Consultation */}
           <section className="panel" aria-labelledby="consult-title">
             <div className="panel-body">
               <h2 id="consult-title" className="panel-heading"><Bi en="Step 2: Case Information & Client Consultation" bn="ধাপ ২: মামলা পর্যালোচনা ও মক্কেলের পরামর্শ" /></h2>
-              <p className="muted"><Bi en="Per Flowchart B1 Step 6: Review case details, conduct initial client interview/consultation, formulate legal strategy, and record consultation notes." bn="ফ্লোচার্ট ধাপ ৬ অনুযায়ী মক্কেলের সাথে সাক্ষাৎ/পরামর্শ করুন এবং মামলার কৌশলগত নোট লিপিবদ্ধ করুন।" /></p>
+              <p className="muted"><Bi en="Review case details, conduct initial client interview/consultation, formulate legal strategy, and record consultation notes." bn="মক্কেলের সাথে সাক্ষাৎ/পরামর্শ করুন এবং মামলার কৌশলগত নোট লিপিবদ্ধ করুন।" /></p>
 
               <AddForm en="Record Client Consultation" bn="মক্কেলের পরামর্শ লিপিবদ্ধ করুন">
                 <form onSubmit={saveConsultation} className="form-stack inline-form">
@@ -336,11 +356,11 @@ export default function LawyerCasePage({ session }) {
             </div>
           </section>
 
-          {/* Step 7: Court / Legal Representation & Hearing Tracking */}
+          {/* Step 3: Court / Legal Representation & Hearing Tracking */}
           <section className="panel" aria-labelledby="court-rep-title">
             <div className="panel-body">
               <h2 id="court-rep-title" className="panel-heading"><Bi en="Step 3: Court / Legal Representation & Hearings" bn="ধাপ ৩: আদালতে প্রতিনিধিত্ব ও শুনানি ট্র্যাকিং" /></h2>
-              <p className="muted"><Bi en="Per Flowchart B1 Step 7: File case/documents in court, represent applicant in hearings, update hearing dates, and record hearing outcomes." bn="ফ্লোচার্ট ধাপ ৭ অনুযায়ী মামলা দায়ের করুন, শুনানিতে হাজিরা দিন এবং পরবর্তী শুনানির তারিখ হালনাগাদ করুন।" /></p>
+              <p className="muted"><Bi en="File case documents in court, represent applicant in hearings, update hearing dates, and record hearing outcomes." bn="আদালতে মামলা দায়ের করুন, শুনানিতে হাজিরা দিন এবং পরবর্তী শুনানির তারিখ হালনাগাদ করুন।" /></p>
 
               {/* Court filing details */}
               <div style={{ background: '#fdfbf7', border: '1px solid #e8e2d2', borderRadius: '6px', padding: '1rem', margin: '0.75rem 0' }}>
@@ -419,11 +439,11 @@ export default function LawyerCasePage({ session }) {
             {(record.updates || []).filter(({ report }) => report).map((update) => <div className="version-history" key={update._id}><h3><Bi en="Update" bn="আপডেট" /> {num(update.sequence)} <Badge code={update.status} /></h3><p>{update.report}</p><p><Bi en="Next step:" bn="পরবর্তী ধাপ:" /> {update.nextAction}</p><small>{when(update.submittedAt)}</small></div>)}
           </div></section>
 
-          {/* Step 8 & Phase 6: Case Outcome & Completion Output */}
+          {/* Step 4: Case Outcome & Completion Output */}
           <section className="panel" aria-labelledby="outcome-title">
             <div className="panel-body">
               <h2 id="outcome-title" className="panel-heading"><Bi en="Step 4: Case Outcome & Completion Output" bn="ধাপ ৪: মামলার রায় ও সমাপ্তি প্রতিবেদন দাখিল" /></h2>
-              <p className="muted"><Bi en="Per Flowcharts B1 (Step 8) and B2 (Phase 6): When case is disposed or resolved, record the legal outcome (Judgment/Settlement) and submit your formal completion output." bn="মামলা নিষ্পত্তি হলে রায়ের বিবরণ ও দায়িত্ব সমাপ্তি প্রতিবেদন দাখিল করুন।" /></p>
+              <p className="muted"><Bi en="When case is disposed or resolved, record the legal outcome (Judgment/Settlement) and submit your formal completion output." bn="মামলা নিষ্পত্তি হলে রায়ের বিবরণ ও দায়িত্ব সমাপ্তি প্রতিবেদন দাখিল করুন।" /></p>
 
               {outcomeRecord ? (
                 <div className="success" style={{ margin: '0.75rem 0' }}>
@@ -466,11 +486,11 @@ export default function LawyerCasePage({ session }) {
             </div>
           </section>
 
-          {/* Step 9 & Phase 6: Lawyer Fee / Payment Claim Processing */}
+          {/* Step 5: Lawyer Fee / Payment Claim Processing */}
           <section className="panel" aria-labelledby="fee-claim-title">
             <div className="panel-body">
               <h2 id="fee-claim-title" className="panel-heading"><Bi en="Step 5: Payment / Lawyer Fee Claim Processing" bn="ধাপ ৫: ফি দাবি ও পেমেন্ট প্রক্রিয়াকরণ" /></h2>
-              <p className="muted"><Bi en="Per Flowcharts B1 (Step 9) and B2 (Phase 6): Process lawyer fee as per DBLA rules. Submit interim or final completion bills for officer verification and government disbursement." bn="ডিবিএলএ বিধি মোতাবেক কাজের স্তর অনুযায়ী অন্তর্বর্তী বা চূড়ান্ত ফি দাবি দাখিল করুন।" /></p>
+              <p className="muted"><Bi en="Process lawyer fee as per DBLA rules. Submit interim or final completion bills for officer verification and government disbursement." bn="ডিবিএলএ বিধি মোতাবেক কাজের স্তর অনুযায়ী অন্তর্বর্তী বা চূড়ান্ত ফি দাবি দাখিল করুন।" /></p>
 
               {/* Status display */}
               <div style={{ background: '#faf9f6', border: '1px solid #e3e2dc', borderRadius: '6px', padding: '0.85rem 1rem', margin: '0.75rem 0' }}>

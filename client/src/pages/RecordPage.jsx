@@ -68,7 +68,13 @@ export default function RecordPage({ session }) {
     try { return JSON.parse(localStorage.getItem(`dlas_reject_${applicationId}`)) } catch { return null }
   })
   const [activePathway, setActivePathway] = useState(() => {
-    try { return localStorage.getItem(`dlas_pathway_${applicationId}`) || 'MEDIATION' } catch { return 'MEDIATION' }
+    try { return localStorage.getItem(`dlas_pathway_${applicationId}`) || '' } catch { return '' }
+  })
+  const [resolvedThroughPathway, setResolvedThroughPathway] = useState(() => {
+    try { return localStorage.getItem(`dlas_resolved_${applicationId}`) || '' } catch { return '' }
+  })
+  const [beneficiaryRequestsLawyer, setBeneficiaryRequestsLawyer] = useState(() => {
+    try { return localStorage.getItem(`dlas_requests_lawyer_${applicationId}`) || '' } catch { return '' }
   })
   const [adviceTopic, setAdviceTopic] = useState('LEGAL_RIGHTS')
   const [adviceNotes, setAdviceNotes] = useState('')
@@ -76,7 +82,7 @@ export default function RecordPage({ session }) {
   const [adviceRecords, setAdviceRecords] = useState(() => {
     try { return JSON.parse(localStorage.getItem(`dlas_advice_${applicationId}`)) || [] } catch { return [] }
   })
-  const [closureOutcome, setClosureOutcome] = useState('COURT_JUDGMENT')
+  const [closureOutcome, setClosureOutcome] = useState('COURT_JUDGMENT_FAVOUR')
   const [closureDate, setClosureDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [closureRef, setClosureRef] = useState('')
   const [closureNotes, setClosureNotes] = useState('')
@@ -126,13 +132,14 @@ export default function RecordPage({ session }) {
 
   async function submitAcceptance(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason }, bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
+    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason.trim() || 'Application accepted and eligible for government legal aid.' }, bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
     if (result) setAcceptReason('')
   }
 
   async function submitPriority(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
+    const autoReason = `Priority determination set to ${priorityDecision} by DLAO officer.`
+    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason.trim() || autoReason }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
     if (result) setPriorityReason('')
   }
 
@@ -194,7 +201,17 @@ export default function RecordPage({ session }) {
   function handleSavePathway(pathway) {
     setActivePathway(pathway)
     try { localStorage.setItem(`dlas_pathway_${applicationId}`, pathway) } catch {}
-    setNotice(bi(`Active service pathway set to: ${pathway}`, `সক্রিয় সেবার মাধ্যম নির্ধারণ করা হয়েছে: ${pathway}`))
+    setNotice(bi(`Active service pathway set to: ${pathway === 'ADVICE' ? 'Advice (Legal guidance)' : pathway === 'MEDIATION' ? 'Mediation (In-person / ODR)' : 'Direct Legal Aid / Litigation'}`, `সক্রিয় সেবার মাধ্যম নির্ধারণ করা হয়েছে।`))
+  }
+
+  function handleSetResolved(value) {
+    setResolvedThroughPathway(value)
+    try { localStorage.setItem(`dlas_resolved_${applicationId}`, value) } catch {}
+  }
+
+  function handleSetRequestsLawyer(value) {
+    setBeneficiaryRequestsLawyer(value)
+    try { localStorage.setItem(`dlas_requests_lawyer_${applicationId}`, value) } catch {}
   }
 
   function handleAddAdvice(event) {
@@ -212,6 +229,9 @@ export default function RecordPage({ session }) {
     setAdviceRecords(updated)
     try { localStorage.setItem(`dlas_advice_${applicationId}`, JSON.stringify(updated)) } catch {}
     setAdviceNotes('')
+    if (adviceResolved) {
+      handleSetResolved('YES')
+    }
     setNotice(bi(adviceResolved ? 'Legal advice provided and recorded. Issue marked resolved.' : 'Legal advice session recorded in case file.', 'আইনি পরামর্শ লিপিবদ্ধ করা হয়েছে।'))
   }
 
@@ -227,7 +247,8 @@ export default function RecordPage({ session }) {
     }
     setClosureRecord(outcomeData)
     try { localStorage.setItem(`dlas_closure_${applicationId}`, JSON.stringify(outcomeData)) } catch {}
-    setNotice(bi('Case outcome recorded and case officially marked closed in records.', 'মামলার চূড়ান্ত নিষ্পত্তি ও নথি সমাপ্তি নথিভুক্ত হয়েছে।'))
+    handleSetResolved('YES')
+    setNotice(bi('Outcome recorded and case officially marked closed in records.', 'মামলার চূড়ান্ত নিষ্পত্তি ও নথি সমাপ্তি নথিভুক্ত হয়েছে।'))
   }
 
   const record = data?.record
@@ -252,7 +273,7 @@ export default function RecordPage({ session }) {
       {loading && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
       {ready && <>
         <div style={{ marginBottom: '1.25rem' }}>
-          <PhaseTracker application={record} pathway={activePathway} />
+          <PhaseTracker application={record} pathway={activePathway} caseRecord={closureRecord} />
         </div>
         <p className="safety-note next-step"><strong><Bi en="Next step" bn="পরবর্তী ধাপ" /></strong> {tr(record.nextTask?.nextAction) || bi('No open task', 'কোনো চলমান কাজ নেই')}{record.nextTask && <small> · <Term code={record.nextTask.ownerRole} /></small>}</p>
 
@@ -262,7 +283,7 @@ export default function RecordPage({ session }) {
             <p><strong><Bi en="Rejection Reason:" bn="নামঞ্জুরের কারণ:" /></strong> {rejectionRecord.reason}</p>
             <p><small><Bi en="Rejected by:" bn="কর্মকর্তা:" /> {rejectionRecord.officer} · {when(rejectionRecord.rejectionDate)}</small></p>
             <div style={{ marginTop: '0.75rem', padding: '0.65rem 0.85rem', background: '#fff', border: '1px solid #ebccd1', borderRadius: '4px' }}>
-              <strong><Bi en="Statutory Right to Appeal (DBLA Process Step 9-10):" bn="বিধিবদ্ধ আপিলের অধিকার (ডিবিএলএ ধাপ ৯-১০):" /></strong>
+              <strong><Bi en="Statutory Right to Appeal:" bn="বিধিবদ্ধ আপিলের অধিকার:" /></strong>
               <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.85rem', color: '#555' }}>
                 <Bi en="The applicant may appeal this rejection to the District Legal Aid Committee within 30 days. Formal rejection notice communicated." bn="আবেদনকারী ৩০ কার্যদিবসের মধ্যে জেলা লিগ্যাল এইড কমিটির সভাপতি বরাবরে আপিল দায়ের করতে পারবেন। আবেদনকারীকে নোটিশ পাঠানো হয়েছে।" />
               </p>
@@ -298,58 +319,71 @@ export default function RecordPage({ session }) {
         </div>
 
         <div className="card panels">
-          {officer && record.status === 'SUBMITTED' && <Panel id="decision-title" en="Phase 2: Verification & Eligibility Decision" bn="ধাপ ২: যাচাইকরণ ও আইনি সহায়তা সিদ্ধান্ত" hint={say(record.reviewState)} open>
-            <div style={{ marginBottom: '1rem', padding: '0.85rem 1rem', background: '#fdfbf7', border: '1px solid #ece4d0', borderLeft: '4px solid #b8860b', borderRadius: '4px' }}>
-              <strong><Bi en="Flowchart B2 Phase 2 Checklist (By DLAO):" bn="ফ্লোচার্ট ধাপ ২ যাচাই তালিকা (ডিএলএও):" /></strong>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', marginTop: '0.5rem', fontSize: '0.85rem' }}>
-                <div>✓ <Bi en="Identity & NID Verified" bn="পরিচয় ও এনআইডি যাচাইকৃত" /></div>
-                <div>✓ <Bi en="Supporting Documents Inspected" bn="সংযুক্ত প্রমাণাদি নিরীক্ষিত" /></div>
-                <div>✓ <Bi en="Vulnerability & Safety Addressed" bn="ঝুঁকি ও সুরক্ষা বিবেচনাধীন" /></div>
-                <div>✓ <Bi en="DBLA Means-Test Qualified (≤ 1.5L BDT/yr)" bn="ডিবিএলএ আয়সীমা উত্তীর্ণ (≤ ১.৫ লাখ/বছর)" /></div>
-              </div>
-            </div>
+          {officer && <Panel id="priority-title" en="Priority" bn="অগ্রাধিকার" hint={record.priorityDecision ? say(record.priorityDecision) : record.urgencyReasons.length ? bi('Flagged, decide', 'চিহ্নিত, সিদ্ধান্ত দিন') : bi('Not set', 'নির্ধারিত নয়')} open={record.urgencyReasons.length > 0 && !record.priorityDecision}>
+            <p className="muted"><Bi en="The system flags. You decide." bn="সিস্টেম চিহ্নিত করে, সিদ্ধান্ত আপনার।" /></p>
+            {record.urgencyReasons.length ? <><h3><Bi en="Why flagged" bn="কেন চিহ্নিত" /></h3><ul>{record.urgencyReasons.map((reason) => <li key={reason}>{tr(reason)}</li>)}</ul></> : <p><Bi en="No urgency signs recorded." bn="জরুরি পরিস্থিতির কোনো ইঙ্গিত নথিতে নেই।" /></p>}
+            <form onSubmit={submitPriority} className="form-stack inline-form">
+              <label htmlFor="priority-decision"><Bi en="Priority decision" bn="অগ্রাধিকারের সিদ্ধান্ত" /></label>
+              <select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}>
+                <option value="URGENT">{say('URGENT')}</option>
+                <option value="ROUTINE">{say('ROUTINE')}</option>
+              </select>
+              <button type="submit"><Bi en="Save priority" bn="অগ্রাধিকার সংরক্ষণ" /></button>
+            </form>
+          </Panel>}
 
-            <p className="muted"><Bi en="Assess eligibility according to official DBLA rules. If eligible, accept and generate Case ID. If ineligible, reject with reason and provide statutory appeal guidance." bn="সরকারি নীতিমালা অনুযায়ী যোগ্যতা মূল্যায়ন করুন। যোগ্য হলে গ্রহণ করে মামলা নম্বর দিন। অযোগ্য হলে কারণসহ বাতিল ও আপিলের নির্দেশনা দিন।" /></p>
+          {officer && record.status === 'SUBMITTED' && <Panel id="decision-title" en="Decision" bn="সিদ্ধান্ত" hint={say(record.reviewState)} open>
+            <p className="muted" style={{ margin: '0 0 1rem 0' }}>
+              <Bi en="1. Review, then 2. accept. Review is not proof of identity." bn="১. প্রথমে পর্যালোচনা, তারপর ২. গ্রহণ। পর্যালোচনা পরিচয়ের প্রমাণ নয়।" />
+            </p>
 
-            <div className="action-grid">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+              {/* Column 1: 1. Review */}
               <form onSubmit={submitReview} className="form-stack">
-                <h3><Bi en="1. Review Application" bn="১. আবেদন পর্যালোচনা" /></h3>
+                <h3><Bi en="1. Review" bn="১. পর্যালোচনা" /></h3>
                 <label htmlFor="review-state"><Bi en="Review outcome" bn="পর্যালোচনার ফল" /></label>
                 <select id="review-state" value={reviewState} onChange={(event) => setReviewState(event.target.value)}>
                   <option value="READY_FOR_DECISION">{say('READY_FOR_DECISION')}</option>
                   <option value="NEEDS_INFORMATION">{say('NEEDS_INFORMATION')}</option>
                   {record.reviewState !== 'PENDING_REVIEW' && <option value="PENDING_REVIEW">{bi('Back to pending review', 'আবার পর্যালোচনায় ফেরত')}</option>}
                 </select>
-                <label htmlFor="review-reason"><Bi en="Reason / Findings" bn="পর্যালোচনার বিবরণ / কারণ" /></label>
-                <textarea id="review-reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} minLength="10" maxLength="1000" required />
+                <label htmlFor="review-reason"><Bi en="Reason" bn="কারণ" /></label>
+                <textarea id="review-reason" value={reviewReason} onChange={(event) => setReviewReason(event.target.value)} minLength="10" maxLength="1000" placeholder="Review findings..." required />
                 <button type="submit">{reviewState === 'PENDING_REVIEW' || record.reviewState === 'READY_FOR_DECISION' ? <Bi en="Record override" bn="পরিবর্তন সংরক্ষণ" /> : <Bi en="Record review" bn="পর্যালোচনা সংরক্ষণ" />}</button>
               </form>
 
+              {/* Column 2: 2. Accept */}
               <div className="form-stack">
-                <h3><Bi en="2. Legal Aid Decision" bn="২. আইনি সহায়তা সিদ্ধান্ত" /></h3>
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <button type="button" className={!showRejectForm ? 'primary-button' : 'secondary-button'} onClick={() => setShowRejectForm(false)} style={{ flex: 1 }}>
-                    <Bi en="Eligible: Accept (Yes)" bn="যোগ্য: গ্রহণ (হ্যাঁ)" />
-                  </button>
-                  <button type="button" className={showRejectForm ? 'warn-badge' : 'secondary-button'} onClick={() => setShowRejectForm(true)} style={{ flex: 1 }}>
-                    <Bi en="Ineligible: Reject (No)" bn="অযোগ্য: নামঞ্জুর (না)" />
-                  </button>
-                </div>
-
+                <h3><Bi en="2. Accept" bn="২. গ্রহণ" /></h3>
                 {!showRejectForm ? (
                   <form onSubmit={submitAcceptance} className="form-stack">
-                    <label htmlFor="accept-reason"><Bi en="Eligibility & Case Opening Reason" bn="গ্রহণ ও মামলা খোলার কারণ" /></label>
-                    <textarea id="accept-reason" value={acceptReason} onChange={(event) => setAcceptReason(event.target.value)} minLength="10" maxLength="1000" placeholder="State eligibility grounds and merits for legal aid..." required />
-                    <button type="submit" disabled={record.reviewState !== 'READY_FOR_DECISION'}><Bi en="Accept & Create Case ID (DLAS-YYYY-XXXXX)" bn="গ্রহণ করুন ও মামলা নম্বর প্রদান করুন" /></button>
+                    <button type="submit" disabled={record.reviewState !== 'READY_FOR_DECISION'}>
+                      <Bi en="Accept application" bn="আবেদন গ্রহণ করুন" />
+                    </button>
+                    {record.reviewState !== 'READY_FOR_DECISION' && (
+                      <small className="muted" style={{ display: 'block', marginTop: '0.25rem' }}>
+                        <Bi en="Step 1 review must be set to 'Ready for decision' before accepting." bn="আবেদন গ্রহণের পূর্বে ধাপ ১-এ 'পর্যালোচনা সম্পন্ন' হিসেবে চিহ্নিত করতে হবে।" />
+                      </small>
+                    )}
+                    <button type="button" className="secondary-button" onClick={() => setShowRejectForm(true)} style={{ marginTop: '0.75rem', color: '#c9302c', borderColor: '#e0b4b4' }}>
+                      <Bi en="Ineligible? Reject application" bn="অযোগ্য? আবেদন নামঞ্জুর করুন" />
+                    </button>
                   </form>
                 ) : (
                   <form onSubmit={handleRejection} className="form-stack">
-                    <label htmlFor="reject-reason"><Bi en="Rejection Reason (Required)" bn="নামঞ্জুরের সুনির্দিষ্ট কারণ (বাধ্যতামূলক)" /></label>
-                    <textarea id="reject-reason" value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} minLength="10" maxLength="1000" placeholder="Specify why the applicant does not qualify (e.g., income ceiling exceeded, lack of prima facie case, or outside DLAS mandate)..." required />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label htmlFor="reject-reason"><strong><Bi en="Rejection Reason (Required)" bn="নামঞ্জুরের সুনির্দিষ্ট কারণ (বাধ্যতামূলক)" /></strong></label>
+                      <button type="button" className="secondary-button" onClick={() => setShowRejectForm(false)} style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem' }}>
+                        <Bi en="Back to Accept" bn="গ্রহণে ফেরত" />
+                      </button>
+                    </div>
+                    <textarea id="reject-reason" value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} minLength="10" maxLength="1000" placeholder="Specify why the applicant does not qualify per DBLA criteria..." required />
                     <p className="muted" style={{ fontSize: '0.8rem', margin: '0.2rem 0' }}>
                       <Bi en="Applicant will be notified of statutory appeal right to District Legal Aid Committee." bn="আবেদনকারীকে জেলা লিগ্যাল এইড কমিটিতে আপিলের বিধি মোতাবেক তথ্য জানানো হবে।" />
                     </p>
-                    <button type="submit" style={{ background: '#c9302c', borderColor: '#ac2925', color: '#fff' }}><Bi en="Confirm Rejection & Close Application" bn="নামঞ্জুর নিশ্চিত করুন ও আবেদন সমাপ্ত করুন" /></button>
+                    <button type="submit" style={{ background: '#c9302c', borderColor: '#ac2925', color: '#fff' }}>
+                      <Bi en="Confirm Rejection & Close Application" bn="নামঞ্জুর নিশ্চিত করুন ও আবেদন সমাপ্ত করুন" />
+                    </button>
                   </form>
                 )}
               </div>
@@ -375,82 +409,340 @@ export default function RecordPage({ session }) {
 
           {officer && record.status === 'ACCEPTED' && (
             <Panel id="pathway-title" en="Phase 4: Legal Aid Service Pathways" bn="ধাপ ৪: আইনি সহায়তা সেবার মাধ্যম নির্ধারণ" hint={say(activePathway)} open>
-              <p className="muted"><Bi en="Per Flowchart B2: Determine appropriate service pathway. Record all activities, documents, and outcomes. If advice or mediation does not resolve the issue, proceed to panel lawyer litigation." bn="ফ্লোচার্ট অনুযায়ী উপযুক্ত সেবার মাধ্যম নির্ধারণ করুন। পরামর্শ বা মধ্যস্থতায় বিষয় নিষ্পত্তি না হলে প্যানেল আইনজীবী মামলায় স্থানান্তর করুন।" /></p>
+              
+              <div style={{ marginBottom: '1rem' }}>
+                <h3 style={{ margin: '0 0 0.3rem 0', fontSize: '1.05rem', fontWeight: 600 }}>
+                  <Bi en="Determine appropriate service pathway" bn="উপযুক্ত সেবার মাধ্যম নির্ধারণ করুন" />
+                </h3>
+                <p className="muted" style={{ margin: 0, fontSize: '0.88rem' }}>
+                  <Bi en="Choose one pathway: Advice, Mediation, or Direct Legal Aid / Litigation." bn="একটি মাধ্যম নির্বাচন করুন: পরামর্শ, মধ্যস্থতা, অথবা সরাসরি আইনি সহায়তা / মামলা।" />
+                </p>
+              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', margin: '1rem 0' }}>
+              {/* 3 Pathway Cards (Single choice) */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
                 <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSavePathway('ADVICE')}
-                  style={{ cursor: 'pointer', padding: '1rem', border: activePathway === 'ADVICE' ? '2px solid #222724' : '1px solid #e3e2dc', borderRadius: '6px', background: activePathway === 'ADVICE' ? '#faf9f6' : '#fff' }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSavePathway('ADVICE') }}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '1.1rem',
+                    border: activePathway === 'ADVICE' ? '2px solid #1f6c9f' : '1px solid #e3e2dc',
+                    borderRadius: '8px',
+                    background: activePathway === 'ADVICE' ? '#e1f3fe' : '#ffffff',
+                    transition: 'all 0.15s ease-in-out',
+                  }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong><Bi en="1. Legal Advice" bn="১. আইনি পরামর্শ" /></strong>
+                    <strong style={{ fontSize: '0.98rem', color: activePathway === 'ADVICE' ? '#1f6c9f' : '#111' }}>
+                      <Bi en="Advice" bn="আইনি পরামর্শ" />
+                    </strong>
                     {activePathway === 'ADVICE' && <Badge code="ACTIVE" />}
                   </div>
-                  <p style={{ margin: '0.4rem 0 0 0', fontSize: '0.85rem', color: '#666' }}>
-                    <Bi en="Direct officer legal guidance, rights counseling, and statutory remedies." bn="কর্মকর্তা কর্তৃক সরাসরি আইনি পরামর্শ, অধিকার সংক্রান্ত দিকনির্দেশনা।" />
+                  <div style={{ fontSize: '0.84rem', color: '#666', marginTop: '0.2rem' }}>
+                    <Bi en="(Legal guidance)" bn="(সরাসরি আইনি দিকনির্দেশনা)" />
+                  </div>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.82rem', color: '#555', lineHeight: 1.4 }}>
+                    <Bi en="Direct legal guidance, rights counseling, and statutory remedies provided by DLAO." bn="কর্মকর্তা কর্তৃক সরাসরি আইনি পরামর্শ ও অধিকার সংক্রান্ত দিকনির্দেশনা।" />
                   </p>
                 </div>
 
                 <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSavePathway('MEDIATION')}
-                  style={{ cursor: 'pointer', padding: '1rem', border: activePathway === 'MEDIATION' ? '2px solid #222724' : '1px solid #e3e2dc', borderRadius: '6px', background: activePathway === 'MEDIATION' ? '#faf9f6' : '#fff' }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSavePathway('MEDIATION') }}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '1.1rem',
+                    border: activePathway === 'MEDIATION' ? '2px solid #5a3e7a' : '1px solid #e3e2dc',
+                    borderRadius: '8px',
+                    background: activePathway === 'MEDIATION' ? '#f5effb' : '#ffffff',
+                    transition: 'all 0.15s ease-in-out',
+                  }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong><Bi en="2. ADR / Mediation" bn="২. মধ্যস্থতা / সালিশ" /></strong>
+                    <strong style={{ fontSize: '0.98rem', color: activePathway === 'MEDIATION' ? '#5a3e7a' : '#111' }}>
+                      <Bi en="Mediation" bn="মধ্যস্থতা" />
+                    </strong>
                     {activePathway === 'MEDIATION' && <Badge code="ACTIVE" />}
                   </div>
-                  <p style={{ margin: '0.4rem 0 0 0', fontSize: '0.85rem', color: '#666' }}>
-                    <Bi en="Alternative dispute resolution (In-person ADR or Online ODR session)." bn="বিকল্প বিরোধ নিষ্পত্তি (সরাসরি সালিশ বা ওডিআর অনলাইন মধ্যস্থতা)।" />
+                  <div style={{ fontSize: '0.84rem', color: '#666', marginTop: '0.2rem' }}>
+                    <Bi en="(In-person / ODR)" bn="(সরাসরি / অনলাইন ওডিআর)" />
+                  </div>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.82rem', color: '#555', lineHeight: 1.4 }}>
+                    <Bi en="Alternative dispute resolution via pre-trial in-person ADR or Online Dispute Resolution sessions." bn="বিকল্প বিরোধ নিষ্পত্তি: সরাসরি সালিশ বা অনলাইন ওডিআর অধিবেশন।" />
                   </p>
                 </div>
 
                 <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => handleSavePathway('PANEL_LAWYER')}
-                  style={{ cursor: 'pointer', padding: '1rem', border: activePathway === 'PANEL_LAWYER' ? '2px solid #222724' : '1px solid #e3e2dc', borderRadius: '6px', background: activePathway === 'PANEL_LAWYER' ? '#faf9f6' : '#fff' }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSavePathway('PANEL_LAWYER') }}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '1.1rem',
+                    border: activePathway === 'PANEL_LAWYER' ? '2px solid #28562d' : '1px solid #e3e2dc',
+                    borderRadius: '8px',
+                    background: activePathway === 'PANEL_LAWYER' ? '#edf3ec' : '#ffffff',
+                    transition: 'all 0.15s ease-in-out',
+                  }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong><Bi en="3. Panel Lawyer Litigation" bn="৩. প্যানেল আইনজীবী ও মামলা" /></strong>
+                    <strong style={{ fontSize: '0.98rem', color: activePathway === 'PANEL_LAWYER' ? '#28562d' : '#111' }}>
+                      <Bi en="Direct Legal Aid / Litigation" bn="সরাসরি আইনি সহায়তা / মামলা" />
+                    </strong>
                     {activePathway === 'PANEL_LAWYER' && <Badge code="ACTIVE" />}
                   </div>
-                  <p style={{ margin: '0.4rem 0 0 0', fontSize: '0.85rem', color: '#666' }}>
-                    <Bi en="Direct legal aid litigation representation in court via appointed panel advocate." bn="আদালতে মোকদ্দমা দায়ের ও পরিচালনার জন্য প্যানেল আইনজীবী নিয়োগ।" />
+                  <div style={{ fontSize: '0.84rem', color: '#666', marginTop: '0.2rem' }}>
+                    <Bi en="(Where applicable)" bn="(যেখানে প্রযোজ্য)" />
+                  </div>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.82rem', color: '#555', lineHeight: 1.4 }}>
+                    <Bi en="Court litigation representation via appointed state-funded panel lawyer." bn="আদালতে মোকদ্দমা দায়ের ও পরিচালনার জন্য প্যানেল আইনজীবী নিয়োগ।" />
                   </p>
                 </div>
               </div>
 
-              {activePathway === 'ADVICE' && (
-                <div style={{ borderTop: '1px solid #ecebe6', paddingTop: '1rem', marginTop: '1rem' }}>
-                  <h3><Bi en="Provide Legal Advice (Record Activity)" bn="আইনি পরামর্শ প্রদান (কার্যবিবরণী লিপিবদ্ধ)" /></h3>
-                  <form onSubmit={handleAddAdvice} className="form-stack inline-form">
-                    <label htmlFor="advice-topic"><Bi en="Advice Category" bn="পরামর্শের ক্ষেত্র" /></label>
-                    <select id="advice-topic" value={adviceTopic} onChange={(e) => setAdviceTopic(e.target.value)}>
-                      <option value="FAMILY_RIGHTS">{bi('Family & Maintenance Rights', 'পারিবারিক ও ভরণপোষণ অধিকার')}</option>
-                      <option value="LAND_DISPUTE">{bi('Land & Property Rights', 'জমিজমা ও সম্পত্তি সংক্রান্ত')}</option>
-                      <option value="LABOUR_WAGES">{bi('Labour & Wage Protection', 'শ্রমিক ও মজুরি সুরক্ষা')}</option>
-                      <option value="CRIMINAL_DEFENSE">{bi('Criminal Defense & Bail', 'ফৌজদারি প্রতিকার ও জামিন')}</option>
-                      <option value="CIVIL_REMEDY">{bi('General Civil Remedies', 'সাধারণ দেওয়ানি প্রতিকার')}</option>
-                    </select>
-                    <label htmlFor="advice-notes"><Bi en="Legal Advice Given" bn="প্রদত্ত আইনি পরামর্শের বিবরণ" /></label>
-                    <textarea id="advice-notes" value={adviceNotes} onChange={(e) => setAdviceNotes(e.target.value)} minLength="10" maxLength="1000" placeholder="Summarize legal advice given to citizen, applicable laws, and recommended actions..." required />
-                    <label className="checkbox-label" htmlFor="advice-resolved" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <input id="advice-resolved" type="checkbox" checked={adviceResolved} onChange={(e) => setAdviceResolved(e.target.checked)} />
-                      <Bi en="Issue resolved through advice? (Check if no further court/mediation action is needed)" bn="পরামর্শের মাধ্যমেই কি সমস্যার সমাধান হয়েছে? (হ্যাঁ হলে টিক দিন)" />
-                    </label>
-                    <button type="submit" className="secondary-button"><Bi en="Log Advice Session" bn="পরামর্শ সংরক্ষণ করুন" /></button>
-                  </form>
+              {/* Provide service container */}
+              <div style={{ background: '#fdfbf7', border: '1px solid #ece4d0', borderRadius: '8px', padding: '1.1rem 1.25rem', marginBottom: '1.5rem' }}>
+                <div style={{ borderBottom: '1px solid #ece4d0', paddingBottom: '0.6rem', marginBottom: '1rem' }}>
+                  <h4 style={{ margin: '0 0 0.2rem 0', fontSize: '1rem', color: '#222' }}>
+                    <Bi en="Provide service" bn="সেবা প্রদান" />
+                  </h4>
+                  <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+                    <Bi en="(Record all activities, documents and communications)" bn="(সকল কার্যক্রম, নথি ও যোগাযোগের তথ্য লিপিবদ্ধ করুন)" />
+                  </p>
+                </div>
 
-                  {adviceRecords.length > 0 && (
-                    <div className="version-history" style={{ marginTop: '1rem' }}>
-                      <h4><Bi en="Logged Advice Records" bn="সংরক্ষিত পরামর্শের ইতিহাস" /></h4>
-                      <ol className="timeline compact">
-                        {adviceRecords.map((adv) => (
-                          <li key={adv.id}>
-                            <strong><Term code={adv.topic} /></strong> {adv.resolved && <Badge code="RESOLVED" />}
-                            <p>{adv.notes}</p>
-                            <small>{adv.officer} · {when(adv.date)}</small>
-                          </li>
-                        ))}
-                      </ol>
+                {activePathway === 'ADVICE' && (
+                  <div>
+                    <form onSubmit={handleAddAdvice} className="form-stack inline-form">
+                      <label htmlFor="advice-topic"><Bi en="Advice Category" bn="পরামর্শের ক্ষেত্র" /></label>
+                      <select id="advice-topic" value={adviceTopic} onChange={(e) => setAdviceTopic(e.target.value)}>
+                        <option value="FAMILY_RIGHTS">{bi('Family & Maintenance Rights', 'পারিবারিক ও ভরণপোষণ অধিকার')}</option>
+                        <option value="LAND_DISPUTE">{bi('Land & Property Rights', 'জমিজমা ও সম্পত্তি সংক্রান্ত')}</option>
+                        <option value="LABOUR_WAGES">{bi('Labour & Wage Protection', 'শ্রমিক ও মজুরি সুরক্ষা')}</option>
+                        <option value="CRIMINAL_DEFENSE">{bi('Criminal Defense & Bail', 'ফৌজদারি প্রতিকার ও জামিন')}</option>
+                        <option value="CIVIL_REMEDY">{bi('General Civil Remedies', 'সাধারণ দেওয়ানি প্রতিকার')}</option>
+                      </select>
+                      <label htmlFor="advice-notes"><Bi en="Legal Advice Given (Activities, guidance & documents provided)" bn="প্রদত্ত আইনি পরামর্শ (কার্যক্রম, পরামর্শ ও প্রদত্ত তথ্যাদি)" /></label>
+                      <textarea id="advice-notes" value={adviceNotes} onChange={(e) => setAdviceNotes(e.target.value)} minLength="10" maxLength="1000" placeholder="Summarize legal advice given to citizen, applicable laws, documents examined, and recommended actions..." required />
+                      <label className="checkbox-label" htmlFor="advice-resolved" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <input id="advice-resolved" type="checkbox" checked={adviceResolved} onChange={(e) => setAdviceResolved(e.target.checked)} />
+                        <Bi en="Issue resolved through this advice? (Citizen confirmed no further action needed)" bn="এই পরামর্শের মাধ্যমেই কি সমাধান হয়েছে? (নাগরিক নিশ্চিত করেছেন আর পদক্ষেপ দরকার নেই)" />
+                      </label>
+                      <button type="submit" className="secondary-button"><Bi en="Log Advice & Service Activities" bn="পরামর্শ ও কার্যক্রম সংরক্ষণ করুন" /></button>
+                    </form>
+
+                    {adviceRecords.length > 0 && (
+                      <div className="version-history" style={{ marginTop: '1.25rem' }}>
+                        <h5><Bi en="Logged Advice & Activity Records" bn="সংরক্ষিত পরামর্শ ও কার্যক্রমের ইতিহাস" /></h5>
+                        <ol className="timeline compact">
+                          {adviceRecords.map((adv) => (
+                            <li key={adv.id}>
+                              <strong><Term code={adv.topic} /></strong> {adv.resolved && <Badge code="RESOLVED" />}
+                              <p>{adv.notes}</p>
+                              <small>{adv.officer} · {when(adv.date)}</small>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activePathway === 'MEDIATION' && (
+                  <div>
+                    <MediationPanel applicationId={applicationId} session={session} role="DLAO_OFFICER" />
+                  </div>
+                )}
+
+                {activePathway === 'PANEL_LAWYER' && (
+                  <div style={{ padding: '0.85rem 1rem', background: '#edf3ec', border: '1px solid #b7dab9', borderRadius: '6px', fontSize: '0.9rem', color: '#28562d' }}>
+                    <strong><Bi en="Direct Legal Aid / Litigation Pathway Active" bn="সরাসরি আইনি সহায়তা / মামলা মাধ্যম সক্রিয়" /></strong>
+                    <p style={{ margin: '0.3rem 0 0 0' }}>
+                      <Bi en="Proceed to Phase 5 below: Financial eligibility means-test will be performed, followed by panel lawyer allocation and court case processing." bn="নিম্নে ধাপ ৫ অনুসরণ করুন: আর্থিক সচ্ছলতা যাচাইয়ের পর প্যানেল আইনজীবী নিয়োগ ও আদালতের মোকদ্দমা কার্যক্রম পরিচালিত হবে।" />
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Decision Branch: Issue resolved through advice / mediation? */}
+              {(activePathway === 'ADVICE' || activePathway === 'MEDIATION') && (
+                <div style={{ margin: '1.5rem 0', padding: '1.25rem', border: '2px solid #4a5568', borderRadius: '8px', background: '#ffffff' }}>
+                  <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                    <div style={{ display: 'inline-block', padding: '0.2rem 0.6rem', background: '#f0f2f5', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 600, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
+                      <Bi en="Decision Point" bn="সিদ্ধান্ত গ্রহণ" />
+                    </div>
+                    <h4 style={{ margin: 0, fontSize: '1.08rem', color: '#1a202c' }}>
+                      <Bi en="Issue resolved through advice / mediation?" bn="পরামর্শ বা মধ্যস্থতার মাধ্যমে কি সমস্যার সমাধান হয়েছে?" />
+                    </h4>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleSetResolved('YES')}
+                      style={{
+                        minWidth: '160px',
+                        padding: '0.65rem 1.25rem',
+                        fontSize: '0.92rem',
+                        fontWeight: 600,
+                        background: resolvedThroughPathway === 'YES' ? '#28562d' : '#f7f6f3',
+                        color: resolvedThroughPathway === 'YES' ? '#ffffff' : '#28562d',
+                        border: '2px solid #28562d',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✓ <Bi en="Yes: Resolved" bn="হ্যাঁ: সমাধান হয়েছে" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetResolved('NO')}
+                      style={{
+                        minWidth: '160px',
+                        padding: '0.65rem 1.25rem',
+                        fontSize: '0.92rem',
+                        fontWeight: 600,
+                        background: resolvedThroughPathway === 'NO' ? '#a94442' : '#f7f6f3',
+                        color: resolvedThroughPathway === 'NO' ? '#ffffff' : '#a94442',
+                        border: '2px solid #a94442',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✕ <Bi en="No: Not Resolved" bn="না: সমাধান হয়নি" />
+                    </button>
+                  </div>
+
+                  {/* BRANCH YES: Record outcome */}
+                  {resolvedThroughPathway === 'YES' && (
+                    <div style={{ marginTop: '1.25rem', padding: '1.1rem', border: '1px solid #b7dab9', borderRadius: '6px', background: '#edf5ee' }}>
+                      <h4 style={{ margin: '0 0 0.3rem 0', color: '#28562d' }}>
+                        ✓ <Bi en="Record outcome (Settlement / Dismissal / Resolved)" bn="ফলাফল লিপিবদ্ধ করুন (আপস / খারিজ / সমাধান)" />
+                      </h4>
+                      <p style={{ margin: '0 0 0.85rem 0', fontSize: '0.85rem', color: '#4a5568' }}>
+                        <Bi en="Record the formal resolution in records to complete case processing." bn="নথিতে আনুষ্ঠানিক নিষ্পত্তি লিপিবদ্ধ করে মামলা সমাপ্ত করুন।" />
+                      </p>
+
+                      {closureRecord ? (
+                        <div style={{ background: '#ffffff', padding: '0.85rem 1rem', border: '1px solid #b7dab9', borderRadius: '6px' }}>
+                          <strong><Bi en="Outcome Recorded & Case Closed in Records:" bn="নিষ্পত্তি লিপিবদ্ধ ও মামলা সমাপ্ত:" /></strong>
+                          <dl className="details compact" style={{ marginTop: '0.5rem' }}>
+                            <div><dt><Bi en="Outcome" bn="ফলাফল" /></dt><dd><Term code={closureRecord.outcome} /></dd></div>
+                            <div><dt><Bi en="Disposal Date" bn="নিষ্পত্তির তারিখ" /></dt><dd>{closureRecord.date}</dd></div>
+                            <div><dt><Bi en="Reference" bn="স্মারক নম্বর" /></dt><dd>{closureRecord.referenceNo || bi('Not recorded', 'নেই')}</dd></div>
+                            <div><dt><Bi en="Summary Notes" bn="বিবরণ" /></dt><dd>{closureRecord.notes || bi('Standard resolution', 'নিয়মিত নিষ্পত্তি')}</dd></div>
+                            <div><dt><Bi en="Closed by" bn="সমাপ্ত করেছেন" /></dt><dd>{closureRecord.closedBy} · {when(closureRecord.closedAt)}</dd></div>
+                          </dl>
+                        </div>
+                      ) : (
+                        <form onSubmit={handleSaveClosure} className="form-stack inline-form" style={{ background: '#ffffff', padding: '1rem', borderRadius: '6px', border: '1px solid #d4e7d5' }}>
+                          <label htmlFor="outcome-select"><Bi en="Outcome Type" bn="ফলাফলের ধরন" /></label>
+                          <select id="outcome-select" value={closureOutcome} onChange={(e) => setClosureOutcome(e.target.value)}>
+                            <option value="ADR_SETTLEMENT">{bi('Settlement (আপস নিষ্পত্তি)', 'আপস নিষ্পত্তি')}</option>
+                            <option value="RESOLVED">{bi('Resolved through Advice / Guidance (আইনি পরামর্শে সমাধান)', 'আইনি পরামর্শে সমাধান')}</option>
+                            <option value="COURT_JUDGMENT_DISMISSED">{bi('Dismissal / Rejected (খারিজ)', 'মামলা খারিজ')}</option>
+                            <option value="WITHDRAWN">{bi('Withdrawn by Citizen (আবেদন প্রত্যাহার)', 'আবেদন প্রত্যাহার')}</option>
+                          </select>
+
+                          <label htmlFor="outcome-date"><Bi en="Date of Resolution" bn="নিষ্পত্তির তারিখ" /></label>
+                          <input id="outcome-date" type="date" value={closureDate} onChange={(e) => setClosureDate(e.target.value)} required />
+
+                          <label htmlFor="outcome-ref"><Bi en="Deed / Settlement / Order Ref No. (Optional)" bn="আপসপত্র / স্মারক নম্বর (ঐচ্ছিক)" /></label>
+                          <input id="outcome-ref" value={closureRef} onChange={(e) => setClosureRef(e.target.value)} placeholder="e.g. ADR Deed 2026/04 or Legal Advice File #88" />
+
+                          <label htmlFor="outcome-notes"><Bi en="Outcome Summary & Notes" bn="ফলাফলের সারসংক্ষেপ" /></label>
+                          <textarea id="outcome-notes" value={closureNotes} onChange={(e) => setClosureNotes(e.target.value)} minLength="10" maxLength="1000" placeholder="Describe the terms of settlement, advice outcomes, or resolution details..." required />
+
+                          <button type="submit" style={{ background: '#28562d', borderColor: '#1f4523', color: '#ffffff' }}>
+                            <Bi en="Save Outcome & Close Case" bn="ফলাফল সংরক্ষণ করুন ও মামলা সমাপ্ত করুন" />
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+
+                  {/* BRANCH NO: Beneficiary requests Panel Lawyer? */}
+                  {resolvedThroughPathway === 'NO' && (
+                    <div style={{ marginTop: '1.25rem', padding: '1.1rem', border: '1px solid #e2ded5', borderRadius: '6px', background: '#faf9f6' }}>
+                      <div style={{ marginBottom: '0.85rem' }}>
+                        <h4 style={{ margin: '0 0 0.3rem 0', color: '#111', fontSize: '1.02rem' }}>
+                          <Bi en="Beneficiary requests Panel Lawyer?" bn="সুবিধাভোগী কি প্যানেল আইনজীবী চান?" />
+                        </h4>
+                        <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+                          <Bi en="The dispute was not resolved through advice or mediation. Inquire whether the applicant wishes to pursue court litigation through a panel lawyer." bn="পরামর্শ বা মধ্যস্থতায় সমস্যার সমাধান হয়নি। আবেদনকারী প্যানেল আইনজীবীর মাধ্যমে আদালতে মামলা পরিচালনা করতে চান কিনা তা নিশ্চিত করুন।" />
+                        </p>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleSetRequestsLawyer('NO')}
+                          style={{
+                            padding: '0.6rem 1.1rem',
+                            fontWeight: 600,
+                            fontSize: '0.88rem',
+                            background: beneficiaryRequestsLawyer === 'NO' ? '#c9302c' : '#ffffff',
+                            color: beneficiaryRequestsLawyer === 'NO' ? '#ffffff' : '#c9302c',
+                            border: '1.5px solid #c9302c',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✕ <Bi en="No: Beneficiary does not want lawyer" bn="না: আবেদনকারী আইনজীবী চান না" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSetRequestsLawyer('YES')}
+                          style={{
+                            padding: '0.6rem 1.1rem',
+                            fontWeight: 600,
+                            fontSize: '0.88rem',
+                            background: beneficiaryRequestsLawyer === 'YES' ? '#1f6c9f' : '#ffffff',
+                            color: beneficiaryRequestsLawyer === 'YES' ? '#ffffff' : '#1f6c9f',
+                            border: '1.5px solid #1f6c9f',
+                            borderRadius: '5px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✓ <Bi en="Yes: Beneficiary requests Panel Lawyer" bn="হ্যাঁ: আবেদনকারী প্যানেল আইনজীবী চান" />
+                        </button>
+                      </div>
+
+                      {/* If NO -> Continue other applicable pathway (e.g. referral, close) */}
+                      {beneficiaryRequestsLawyer === 'NO' && (
+                        <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #d9534f', borderRadius: '6px', background: '#fff5f5' }}>
+                          <h5 style={{ margin: '0 0 0.35rem 0', color: '#c9302c', fontSize: '0.95rem' }}>
+                            <Bi en="Continue other applicable pathway (e.g., referral, close)" bn="অন্যান্য প্রযোজ্য মাধ্যম গ্রহণ করুন (যেমন: রেফারেল, সমাপ্তি)" />
+                          </h5>
+                          <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', color: '#555' }}>
+                            <Bi en="Beneficiary does not seek court litigation. You may refer this case to an external agency / legal aid clinic or proceed to formal closure." bn="আবেদনকারী আদালতে মামলা চান না। মামলাটি অন্য কোনো সংস্থায় রেফার করুন অথবা আনুষ্ঠানিকভাবে সমাপ্ত করুন।" />
+                          </p>
+                          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <a href="#referrals-title" className="secondary-button" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                              <Bi en="Open Referral Process" bn="রেফারেল প্রক্রিয়া খুলুন" />
+                            </a>
+                            <a href="#closure-panel-title" className="secondary-button" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                              <Bi en="Close Case Without Litigation" bn="মামলা সমাপ্ত করুন" />
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* If YES -> Leads to Phase 5 */}
+                      {beneficiaryRequestsLawyer === 'YES' && (
+                        <div style={{ marginTop: '1rem', padding: '0.85rem 1rem', border: '1px solid #b7dab9', borderRadius: '6px', background: '#edf5ee', color: '#28562d', fontSize: '0.88rem' }}>
+                          <strong>✓ <Bi en="Beneficiary requested Panel Lawyer litigation." bn="সুবিধাভোগী প্যানেল আইনজীবী নিয়োগের অনুরোধ জানিয়েছেন।" /></strong>
+                          <p style={{ margin: '0.25rem 0 0 0' }}>
+                            <Bi en="Proceed to Phase 5 below: Perform financial status means-check, then allocate and assign an approved panel advocate." bn="নিম্নে ধাপ ৫ দেখুন: আর্থিক অসচ্ছলতা যাচাই করুন, তারপর অনুমোদিত প্যানেল আইনজীবী নির্বাচন ও নিয়োগ দিন।" />
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -458,9 +750,33 @@ export default function RecordPage({ session }) {
             </Panel>
           )}
 
+          {/* Phase 5: Panel Lawyer Process (If Required) */}
+          {officer && record.status === 'ACCEPTED' && (activePathway === 'PANEL_LAWYER' || beneficiaryRequestsLawyer === 'YES' || data?.tasks?.some(t => t.title?.includes('LAWYER'))) && (
+            <LawyerManagement
+              applicationId={applicationId}
+              token={session.token}
+              onChanged={() => setRefresh((value) => value + 1)}
+            />
+          )}
+
+          {officer && record.status === 'ACCEPTED' && !(activePathway === 'PANEL_LAWYER' || beneficiaryRequestsLawyer === 'YES' || data?.tasks?.some(t => t.title?.includes('LAWYER'))) && (
+            <div style={{ margin: '0.5rem 0 1rem 0', textAlign: 'right' }}>
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => {
+                  handleSavePathway('PANEL_LAWYER')
+                }}
+                style={{ fontSize: '0.85rem' }}
+              >
+                <Bi en="Open Phase 5: Panel Lawyer Process →" bn="ধাপ ৫: প্যানেল আইনজীবী প্রক্রিয়া খুলুন →" />
+              </button>
+            </div>
+          )}
+
           {officer && record.status === 'ACCEPTED' && (
             <Panel id="closure-panel-title" en="Phase 6: Case Outcome & Closure (Court / DLAO / Finance)" bn="ধাপ ৬: মামলার চূড়ান্ত নিষ্পত্তি ও সমাপ্তি" hint={closureRecord ? bi('Closed in Records', 'নথিতে সমাপ্ত') : bi('Active Case', 'চলমান মামলা')}>
-              <p className="muted"><Bi en="Per Flowcharts B1 (Steps 8-10) and B2 (Phase 6): Record final legal outcome, verify completion reports, complete payment disbursement to panel lawyer, and formally close the case in records." bn="ফ্লোচার্ট অনুযায়ী মামলার রায়/আপস নিষ্পত্তি লিপিবদ্ধ করুন, আইনজীবীর ফি অনুমোদন নিশ্চিত করুন এবং নথিতে মামলা সমাপ্ত করুন।" /></p>
+              <p className="muted"><Bi en="Record final legal outcome, verify completion reports, complete payment disbursement to panel lawyer, and formally close the case in records." bn="মামলার রায়/আপস নিষ্পত্তি লিপিবদ্ধ করুন, আইনজীবীর ফি অনুমোদন নিশ্চিত করুন এবং নথিতে মামলা সমাপ্ত করুন।" /></p>
 
               {closureRecord ? (
                 <div className="success" style={{ margin: '1rem 0' }}>
@@ -517,15 +833,7 @@ export default function RecordPage({ session }) {
             </AddForm>
           </Panel>
 
-          {officer && <Panel id="priority-title" en="Priority" bn="অগ্রাধিকার" hint={record.priorityDecision ? say(record.priorityDecision) : record.urgencyReasons.length ? bi('Flagged, decide', 'চিহ্নিত, সিদ্ধান্ত দিন') : bi('Not set', 'নির্ধারিত নয়')} open={record.urgencyReasons.length > 0 && !record.priorityDecision}>
-            <p className="muted"><Bi en="The system flags. You decide." bn="সিস্টেম চিহ্নিত করে, সিদ্ধান্ত আপনার।" /></p>
-            {record.urgencyReasons.length ? <><h3><Bi en="Why flagged" bn="কেন চিহ্নিত" /></h3><ul>{record.urgencyReasons.map((reason) => <li key={reason}>{tr(reason)}</li>)}</ul></> : <p><Bi en="No urgency signs recorded." bn="জরুরি পরিস্থিতির কোনো ইঙ্গিত নথিতে নেই।" /></p>}
-            <form onSubmit={submitPriority} className="form-stack inline-form">
-              <label htmlFor="priority-decision"><Bi en="Priority decision" bn="অগ্রাধিকারের সিদ্ধান্ত" /></label><select id="priority-decision" value={priorityDecision} onChange={(event) => setPriorityDecision(event.target.value)}><option value="URGENT">{say('URGENT')}</option><option value="ROUTINE">{say('ROUTINE')}</option></select>
-              <label htmlFor="priority-reason"><Bi en="Reason" bn="কারণ" /></label><textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required />
-              <button type="submit"><Bi en="Save priority" bn="অগ্রাধিকার সংরক্ষণ" /></button>
-            </form>
-          </Panel>}
+
 
           {record.assistance && <Panel id="assistance-title" en="Assisted intake" bn="সহায়তায় আবেদন" hint={say(record.assistance.caseType)}>
             <dl className="details compact">
@@ -541,7 +849,6 @@ export default function RecordPage({ session }) {
             <p className="muted"><Bi en="Original and translation are kept apart. The helper's phone is not the applicant's." bn="আবেদনকারীর মূল বক্তব্য ও অনুবাদ আলাদা রাখা হয়েছে। সহায়তাকারীর ফোন নম্বর আবেদনকারীর যোগাযোগ নম্বর হিসেবে ব্যবহার করবেন না।" /></p>
           </Panel>}
 
-          {officer && record.status === 'ACCEPTED' && <LawyerManagement applicationId={applicationId} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
           {officer && record.status === 'ACCEPTED' && <TriagePanel applicationId={applicationId} token={session.token} />}
 
           <Panel id="docs-title" en="Documents" bn="নথি" hint={data.documents.length ? bi(`${data.documents.length} on file`, `${num(data.documents.length)}টি আছে`) : none()}>
@@ -578,7 +885,6 @@ export default function RecordPage({ session }) {
           </Panel>
 
           {officer && <ReferralPanel applicationId={applicationId} officeCode={record.officeCode} accepted={record.status === 'ACCEPTED'} referrals={data.referrals} documents={data.documents} token={session.token} change={change} />}
-          {officer && record.caseId && <MediationPanel applicationId={applicationId} session={session} role="DLAO_OFFICER" />}
           {officer && record.status === 'ACCEPTED' && <RelatedIncidentPanel applicationId={applicationId} token={session.token} />}
           {officer && <DuplicateReview applicationId={applicationId} token={session.token} />}
 

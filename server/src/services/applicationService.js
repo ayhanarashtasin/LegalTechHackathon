@@ -891,11 +891,22 @@ export async function getCase(caseId, actor) {
   const assignment = actor.assignments.some(({ role, officeCode }) => role === 'PANEL_LAWYER' && officeCode === record.officeCode)
     && await LawyerAssignment.findOne({ caseId, lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).lean()
   if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This case is not assigned to this user.')
-  if (assignment.status === 'PENDING') return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: 'PENDING' }
-  const [appRecord, documents] = await Promise.all([
-    Application.findOne({ applicationId: record.applicationId }).populate('applicantPersonId', 'name').lean(),
-    Document.find({ applicationId: record.applicationId, sensitivity: 'STANDARD' }).sort({ createdAt: 1 }).limit(20).select('label currentVersion').lean(),
-  ])
+  const appRecord = await Application.findOne({ applicationId: record.applicationId }).populate('applicantPersonId', 'name').lean()
+  const isUrgent = appRecord?.priorityDecision === 'URGENT' ||
+    (appRecord?.priorityDecision !== 'ROUTINE' && appRecord?.flags?.some((f) => f.code === 'URGENT_RECOMMENDATION')) ||
+    (Boolean(appRecord?.urgencyReasons && appRecord.urgencyReasons.length > 0 && appRecord?.priorityDecision !== 'ROUTINE'))
+
+  if (assignment.status === 'PENDING') {
+    return {
+      caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: 'PENDING',
+      urgent: Boolean(isUrgent), priorityDecision: appRecord?.priorityDecision ?? null,
+      applicantName: appRecord?.applicantPersonId?.name ?? null,
+      legalNeed: appRecord?.legalNeed ?? null,
+      complaintType: appRecord?.complaintType ?? null,
+      vulnerability: appRecord?.vulnerability ?? [],
+    }
+  }
+  const documents = await Document.find({ applicationId: record.applicationId, sensitivity: 'STANDARD' }).sort({ createdAt: 1 }).limit(20).select('label currentVersion').lean()
   // ponytail: first 20 standard documents for the demo; add paging when case files grow beyond the prototype.
   const versions = await DocumentVersion.find({ applicationId: record.applicationId, documentId: { $in: documents.map(({ _id }) => _id) } })
     .sort({ version: -1 }).select('+textContent version label qualityState contentHash documentId').lean()
@@ -906,6 +917,8 @@ export async function getCase(caseId, actor) {
     LawyerPaymentEvent.findOne({ assignmentId: assignment._id }).sort({ createdAt: -1 }).select('stage status reason createdAt').lean(),
   ])
   return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: assignment.status,
+    urgent: Boolean(isUrgent),
+    priorityDecision: appRecord?.priorityDecision ?? null,
     applicantName: appRecord?.applicantPersonId?.name ?? null,
     legalNeed: appRecord?.legalNeed ?? null,
     complaintType: appRecord?.complaintType ?? null,
@@ -1027,3 +1040,249 @@ export async function listDocumentVersions(documentId, actor) {
   await getDocument(documentId, actor)
   return DocumentVersion.find({ documentId }).sort({ version: 1 }).select('version label qualityState note createdAt').lean()
 }
+
+export async function trackApplicationStatus(rawIdentifier) {
+  const input = String(rawIdentifier || '').trim()
+  if (!input) {
+    throw new HttpError(400, 'BAD_REQUEST', 'Please enter an Application ID or Case ID.')
+  }
+  const upper = input.toUpperCase()
+
+  let application = await Application.findOne({
+    $or: [
+      { applicationId: upper },
+      { caseId: upper },
+      { applicationId: input },
+      { caseId: input },
+    ],
+  }).lean()
+
+  if (!application && /^\d+$/.test(input)) {
+    const padded = input.padStart(6, '0')
+    application = await Application.findOne({
+      $or: [
+        { applicationId: `APP-2026-${padded}` },
+        { caseId: `CAS-2026-${padded}` },
+      ],
+    }).lean()
+  }
+
+  if (!application) {
+    throw new HttpError(404, 'NOT_FOUND', `No application or case found for ID "${input}".`)
+  }
+
+  const [person, caseRecord, facts, rawAssignment, mediation, openTask] = await Promise.all([
+    application.applicantPersonId
+      ? Person.findById(application.applicantPersonId).select('displayName identityStatus').lean()
+      : null,
+    application.caseId
+      ? Case.findOne({ caseId: application.caseId }).lean()
+      : null,
+    CaseFact.find({
+      applicationId: application.applicationId,
+      field: { $in: ['complaint.type', 'complaint.legal_need', 'safety.urgent', 'triage.case_category'] },
+    }).sort({ revision: -1 }).lean(),
+    application.caseId
+      ? LawyerAssignment.findOne({ caseId: application.caseId, active: true })
+          .populate('lawyerUserId', 'displayName username')
+          .lean()
+      : null,
+    Mediation.findOne({ applicationId: application.applicationId })
+      .populate('mediatorUserId', 'displayName')
+      .lean(),
+    Task.findOne({ applicationId: application.applicationId, status: 'OPEN' })
+      .sort({ createdAt: 1 })
+      .lean(),
+  ])
+
+  const factMap = latestValues(facts)
+  const isUrgent = application.priorityDecision === 'URGENT' || factMap['safety.urgent'] === 'YES'
+
+  let lawyer = null
+  if (rawAssignment) {
+    lawyer = {
+      status: rawAssignment.status,
+      lawyerName: rawAssignment.lawyerUserId?.displayName || 'Panel Lawyer',
+      assignedAt: rawAssignment.createdAt,
+      acceptedAt: rawAssignment.acceptedAt || null,
+    }
+  }
+
+  // Determine current phase (1 to 6)
+  let currentPhase = 1
+  if (application.status === 'SUBMITTED') {
+    currentPhase = 2
+  } else if (application.status === 'ACCEPTED') {
+    if (caseRecord?.nextHearingAt) {
+      currentPhase = 5
+    } else if (lawyer?.status === 'ACCEPTED' || mediation?.status === 'AGREED' || mediation?.status === 'IN_PROGRESS') {
+      currentPhase = 4
+    } else if (lawyer || mediation) {
+      currentPhase = 4
+    } else {
+      currentPhase = 3
+    }
+  }
+
+  const stages = [
+    {
+      phase: 1,
+      title: 'Intake Registered',
+      titleBn: 'আবেদন গ্রহণ',
+      description: `Intake registered via ${application.channel || 'Voice Hotline 16699'}.`,
+      descriptionBn: `${application.channel || 'ভয়েস হেল্পলাইন ১৬৬৯৯'} এর মাধ্যমে আবেদন নিবন্ধিত হয়েছে।`,
+      status: currentPhase >= 1 ? (currentPhase === 1 ? 'CURRENT' : 'COMPLETED') : 'UPCOMING',
+      date: application.createdAt,
+    },
+    {
+      phase: 2,
+      title: 'DLAO Assessment',
+      titleBn: 'প্রাথমিক মূল্যায়ন',
+      description: application.reviewState === 'READY_FOR_DECISION' || currentPhase > 2
+        ? 'DLAO officer verified eligibility, facts, and safe contact.'
+        : 'DLAO officer screening eligibility and case background.',
+      descriptionBn: application.reviewState === 'READY_FOR_DECISION' || currentPhase > 2
+        ? 'কর্মকর্তা কর্তৃক প্রাথমিক যাচাই ও মূল্যায়ন সম্পন্ন হয়েছে।'
+        : 'কর্মকর্তা আবেদন ও তথ্যাদি যাচাই করছেন।',
+      status: currentPhase > 2 ? 'COMPLETED' : (currentPhase === 2 ? 'CURRENT' : 'UPCOMING'),
+      date: application.reviewState === 'READY_FOR_DECISION' ? application.updatedAt : null,
+    },
+    {
+      phase: 3,
+      title: 'Decision & Legal Aid Approval',
+      titleBn: 'সহায়তা অনুমোদন ও সিদ্ধান্ত',
+      description: application.status === 'ACCEPTED'
+        ? `Legal aid granted. Formal Case ID ${application.caseId || 'assigned'} opened.`
+        : 'Awaiting formal legal aid acceptance and case opening.',
+      descriptionBn: application.status === 'ACCEPTED'
+        ? `আইনি সহায়তা মঞ্জুর করা হয়েছে। মামলা নম্বর: ${application.caseId || 'বরাদ্দকৃত'}।`
+        : 'আইনি সহায়তা অনুমোদনের সিদ্ধান্ত প্রক্রিয়াধীন।',
+      status: currentPhase > 3 ? 'COMPLETED' : (currentPhase === 3 ? 'CURRENT' : 'UPCOMING'),
+      date: application.acceptedAt || (application.status === 'ACCEPTED' ? application.updatedAt : null),
+    },
+    {
+      phase: 4,
+      title: 'Service & Lawyer Assignment',
+      titleBn: 'আইনজীবী নিয়োগ / মধ্যস্থতা',
+      description: lawyer
+        ? (lawyer.status === 'ACCEPTED'
+            ? `Panel Lawyer ${lawyer.lawyerName} assigned and representation accepted.`
+            : `Panel Lawyer ${lawyer.lawyerName} nominated (acceptance pending).`)
+        : (mediation ? 'Assigned to Alternative Dispute Resolution (Mediation).' : 'Appointing panel advocate or mediation officer.'),
+      descriptionBn: lawyer
+        ? (lawyer.status === 'ACCEPTED'
+            ? `প্যানেল আইনজীবী ${lawyer.lawyerName} দায়িত্ব গ্রহণ করেছেন।`
+            : `প্যানেল আইনজীবী ${lawyer.lawyerName} কে দায়িত্ব দেওয়া হয়েছে।`)
+        : (mediation ? 'আপস-মীমাংসা ও মধ্যস্থতায় পাঠানো হয়েছে।' : 'প্যানেল আইনজীবী নিয়োগ প্রক্রিয়াধীন।'),
+      status: currentPhase > 4 ? 'COMPLETED' : (currentPhase === 4 ? 'CURRENT' : 'UPCOMING'),
+      date: lawyer?.acceptedAt || lawyer?.assignedAt || null,
+    },
+    {
+      phase: 5,
+      title: 'Court Proceedings & Hearings',
+      titleBn: 'আদালত কার্যক্রম ও শুনানি',
+      description: caseRecord?.nextHearingAt
+        ? `Next court appearance scheduled on ${new Date(caseRecord.nextHearingAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.`
+        : 'Legal briefs, court petitions, and appearance scheduling.',
+      descriptionBn: caseRecord?.nextHearingAt
+        ? `আদালতে শুনানির পরবর্তী তারিখ: ${new Date(caseRecord.nextHearingAt).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' })}।`
+        : 'মামলার নথিপত্র প্রস্তুতকরণ ও শুনানির তারিখ নির্ধারণ।',
+      status: currentPhase > 5 ? 'COMPLETED' : (currentPhase === 5 ? 'CURRENT' : 'UPCOMING'),
+      date: caseRecord?.nextHearingAt || null,
+    },
+    {
+      phase: 6,
+      title: 'Resolution & Case Closed',
+      titleBn: 'নিষ্পত্তি ও সমাপ্তি',
+      description: currentPhase === 6
+        ? 'Case concluded through legal judgment, settlement, or decree.'
+        : 'Final decree, settlement compliance, or formal case closure.',
+      descriptionBn: currentPhase === 6
+        ? 'আইনি সহায়তা প্রক্রিয়া সমাপ্ত হয়েছে।'
+        : 'চূড়ান্ত রায়, মীমাংসা বাস্তবায়ন ও নথি সমাপ্তি।',
+      status: currentPhase === 6 ? 'COMPLETED' : 'UPCOMING',
+      date: null,
+    },
+  ]
+
+  const updates = []
+  if (caseRecord?.nextHearingAt) {
+    updates.push({
+      id: 'hearing',
+      date: caseRecord.nextHearingAt,
+      type: 'HEARING',
+      title: 'Court Hearing Scheduled',
+      titleBn: 'আদালতে শুনানির তারিখ নির্ধারিত',
+      description: `Next court hearing set for ${new Date(caseRecord.nextHearingAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}. Required Action: ${caseRecord.nextAction || 'Court attendance & petition filing'}.`,
+      descriptionBn: `শুনানির তারিখ: ${new Date(caseRecord.nextHearingAt).toLocaleDateString('bn-BD', { day: 'numeric', month: 'short', year: 'numeric' })}। করণীয়: ${caseRecord.nextAction || 'আদালতে উপস্থিতি ও আবেদন দাখিল'}।`,
+    })
+  }
+
+  if (lawyer) {
+    updates.push({
+      id: 'lawyer',
+      date: lawyer.acceptedAt || lawyer.assignedAt || application.updatedAt,
+      type: 'LAWYER',
+      title: lawyer.status === 'ACCEPTED' ? 'Panel Lawyer Accepted Representation' : 'Panel Lawyer Nominated',
+      titleBn: lawyer.status === 'ACCEPTED' ? 'প্যানেল আইনজীবী দায়িত্ব গ্রহণ করেছেন' : 'প্যানেল আইনজীবী মনোনীত হয়েছেন',
+      description: `Advocate ${lawyer.lawyerName} assigned to provide legal aid representation.`,
+      descriptionBn: `আইনি সহায়তার জন্য অ্যাডভোকেট ${lawyer.lawyerName} কে দায়িত্ব অর্পণ করা হয়েছে।`,
+    })
+  }
+
+  if (application.status === 'ACCEPTED') {
+    updates.push({
+      id: 'accepted',
+      date: application.acceptedAt || application.updatedAt,
+      type: 'DECISION',
+      title: 'Application Accepted for Legal Aid',
+      titleBn: 'আইনি সহায়তা আবেদন মঞ্জুর হয়েছে',
+      description: `Case ID ${application.caseId || 'assigned'} officially registered at ${application.officeCode} DLAO office.`,
+      descriptionBn: `মামলা নম্বর ${application.caseId || 'বরাদ্দকৃত'} (${application.officeCode} জেলা লিগ্যাল এইড অফিস) আনুষ্ঠানিকভাবে খোলা হয়েছে।`,
+    })
+  }
+
+  if (application.reviewState === 'READY_FOR_DECISION') {
+    updates.push({
+      id: 'review',
+      date: application.updatedAt,
+      type: 'REVIEW',
+      title: 'Assessment & Eligibility Review Complete',
+      titleBn: 'প্রাথমিক যাচাই ও যোগ্যতা নিশ্চিত',
+      description: 'DLAO officer completed initial review and confirmed applicant eligibility.',
+      descriptionBn: 'কর্মকর্তা কর্তৃক তথ্যাদি যাচাই এবং আবেদনকারীর যোগ্যতা অনুমোদন নিশ্চিত করা হয়েছে।',
+    })
+  }
+
+  updates.push({
+    id: 'intake',
+    date: application.createdAt,
+    type: 'INTAKE',
+    title: 'Application Registered in DLAS',
+    titleBn: 'আবেদন নিবন্ধন সম্পন্ন',
+    description: `Intake recorded via ${application.channel || 'Voice Hotline 16699'}. Assigned ID ${application.applicationId}.`,
+    descriptionBn: `${application.channel || 'ভয়েস হেল্পলাইন ১৬৬৯৯'} এর মাধ্যমে আবেদন লিপিবদ্ধ হয়েছে। ট্র্যাকিং আইডি: ${application.applicationId}।`,
+  })
+
+  return {
+    applicationId: application.applicationId,
+    caseId: application.caseId || null,
+    status: application.status,
+    reviewState: application.reviewState,
+    currentPhase,
+    isUrgent,
+    priorityDecision: application.priorityDecision || 'ROUTINE',
+    applicantName: person?.displayName || 'Applicant',
+    officeCode: application.officeCode,
+    legalNeed: factMap['complaint.legal_need'] || factMap['complaint.type'] || 'Legal Assistance',
+    channel: application.channel,
+    submittedAt: application.createdAt,
+    acceptedAt: application.acceptedAt || null,
+    nextHearingAt: caseRecord?.nextHearingAt || null,
+    nextAction: caseRecord?.nextAction || openTask?.nextAction || null,
+    lawyer,
+    stages,
+    updates,
+  }
+}
+

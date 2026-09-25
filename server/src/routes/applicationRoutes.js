@@ -1,11 +1,12 @@
 import { Router } from 'express'
-import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, search, submit, updateSafeContact } from '../controllers/applicationController.js'
+import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, search, submit, trackStatus, updateSafeContact } from '../controllers/applicationController.js'
 import { addDocument, approveDocumentBriefing, generateBriefing, readBriefing, readDocuments, readEvidenceAccess } from '../controllers/documentController.js'
 import { readForApplication, routingDecision, send } from '../controllers/referralController.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { applicationIdParam, validateAdviceOutcome, factIdParam, taskIdParam, validateAcceptance, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEmptyBody, validateFact, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask } from '../validators/requests.js'
 
 const router = Router()
+router.get('/track/:identifier', trackStatus)
 router.use(requireAuth)
 router.post('/', requireRole('DLAO_OFFICER', 'CASE_SUPPORT', 'HELPLINE_AGENT'), validateSubmission, submit)
 router.post('/status-lookup', requireRole('HELPLINE_AGENT'), validateStatusLookup, helplineStatus)

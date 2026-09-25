@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api } from '../services/api.js'
 import { bi, num, say, tr, when } from '../components/Bi.jsx'
@@ -149,10 +149,30 @@ export default function Dashboard({ session }) {
   if (!role) return <p role="alert">{bi('No active provider role is assigned to this account.', 'এই অ্যাকাউন্টে কোনো সক্রিয় ভূমিকা নেই।')}</p>
   const staff = role === 'DLAO_OFFICER' || role === 'CASE_SUPPORT'
   const canSubmit = staff || role === 'HELPLINE_AGENT' || role === 'UDC_OPERATOR'
-  const isUrgent = (record) => record.priorityDecision === 'URGENT' || (record.priorityDecision !== 'ROUTINE' && record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION'))
+  const isUrgent = (record) => Boolean(record.urgent || record.priorityDecision === 'URGENT' || (record.priorityDecision !== 'ROUTINE' && record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION')))
   const isPending = (record) => !isUrgent(record) && record.status !== 'ACCEPTED'
-  const filtered = workspace?.records.filter((record) => (queue === 'ALL' || record.flags?.some((flag) => flag.code === queue)) && (!filter || [record.applicationId, record.caseId, record.applicantName].some((value) => value?.toLowerCase().includes(filter.toLowerCase())))) || []
-  const visible = [...filtered].sort((a, b) => {
+
+  // Deduplicate by normalized applicant name or identifier so no duplicate profiles appear in queue
+  const deduplicated = useMemo(() => {
+    if (!workspace?.records) return []
+    const seen = new Set()
+    const list = []
+    for (const record of workspace.records) {
+      const key = (record.applicantName || record.applicationId).trim().toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        list.push(record)
+      }
+    }
+    return list
+  }, [workspace?.records])
+
+  const filtered = deduplicated.filter((record) =>
+    (queue === 'ALL' || record.flags?.some((flag) => flag.code === queue)) &&
+    (!filter || [record.applicationId, record.caseId, record.applicantName].some((value) => value?.toLowerCase().includes(filter.toLowerCase())))
+  )
+
+  const sorted = [...filtered].sort((a, b) => {
     const aUrgent = isUrgent(a) ? 1 : 0
     const bUrgent = isUrgent(b) ? 1 : 0
     if (bUrgent !== aUrgent) return bUrgent - aUrgent
@@ -160,6 +180,8 @@ export default function Dashboard({ session }) {
     const bPending = isPending(b) ? 1 : 0
     return bPending - aPending
   })
+
+  const visible = sorted
   const report = workspace?.report
 
   return <section aria-labelledby="dashboard-title">
@@ -188,10 +210,10 @@ export default function Dashboard({ session }) {
       {!loading && workspace?.records.length > 0 && visible.length === 0 && <p className="empty-state">{bi('No records match these filters.', 'নির্বাচিত শর্তে কোনো রেকর্ড পাওয়া যায়নি।')}</p>}
       {!loading && role === 'HELPLINE_AGENT' && visible.map((record) => <AdviceCallback key={record.applicationId} request={record} token={session.token} onDone={(message) => { setNotice(message); setRefresh((value) => value + 1) }} />)}
       {!loading && role !== 'HELPLINE_AGENT' && visible.length > 0 && <ul className="record-list">{visible.map((record) => <li key={record.referralId ?? record.assignmentId ?? record.applicationId}>{role === 'PANEL_LAWYER'
-        ? <Link to={`/cases/${record.caseId}`}><strong>{record.caseId} · {say(record.assignmentStatus)}</strong><span>{bi('Application', 'আবেদন')} {record.applicationId}{record.nextAction ? ` · ${bi('Next:', 'পরবর্তী:')} ${record.nextAction}` : ''}</span>{record.nextHearingAt && <small>{bi('Hearing:', 'শুনানি:')} {when(record.nextHearingAt)}</small>}{record.updates?.map((update) => <small key={update.id}>{bi('Update', 'আপডেট')} {num(update.sequence)}: {say(update.status)} · {bi('due', 'শেষ সময়')} {when(update.dueAt)}</small>)}</Link>
+        ? <Link to={`/cases/${record.caseId}`} className={isUrgent(record) ? 'urgent-record' : ''}><strong>{record.caseId} · {say(record.assignmentStatus)}</strong><span>{record.applicantName ? <>{tr(record.applicantName)} · </> : ''}{bi('Application', 'আবেদন')} {record.applicationId}{record.nextAction ? ` · ${bi('Next:', 'পরবর্তী:')} ${record.nextAction}` : ''}</span>{isUrgent(record) && <small className="urgent-flag">{say('URGENT')}</small>}{record.nextHearingAt && <small>{bi('Hearing:', 'শুনানি:')} {when(record.nextHearingAt)}</small>}{record.updates?.map((update) => <small key={update.id}>{bi('Update', 'আপডেট')} {num(update.sequence)}: {say(update.status)} · {bi('due', 'শেষ সময়')} {when(update.dueAt)}</small>)}</Link>
         : role === 'RECEIVING_DLAO'
           ? <Link to={`/referrals/${record.referralId}`}><strong>{record.caseId}</strong><span>{bi(`Referral from ${record.sendingOfficeCode}`, `${record.sendingOfficeCode} থেকে রেফারেল`)} · {say(record.status)}</span><small>{bi('Acknowledge by', 'প্রাপ্তি স্বীকারের শেষ সময়')} {when(record.dueAt)}{record.overdue ? ` · ${bi('acknowledgement overdue', 'প্রাপ্তি স্বীকার বাকি')}` : ''}</small></Link>
-          : <Link to={`/applications/${record.applicationId}`} className={isUrgent(record) ? 'urgent-record' : isPending(record) ? 'pending-record' : ''}><strong>{record.applicationId}</strong><span>{tr(record.applicantName)} · {say(record.status)} · {say(record.reviewState)}</span>{record.caseId && <small>{record.caseId}</small>}{isUrgent(record) && <small className="urgent-flag">{say('URGENT')}</small>}{record.vulnerability?.length > 0 && <small>{record.vulnerability.map(say).join(' · ')}</small>}{record.complaintType && <small>{bi('Complaint type (AI suggestion):', 'অভিযোগের ধরন (এআইয়ের পরামর্শ):')} {say(record.complaintType)}</small>}{record.flags?.map((flag) => <small key={flag.code}>{say(flag.code)}: {tr(flag.reason)}</small>)}</Link>}</li>)}</ul>}
+          : <Link to={`/applications/${record.applicationId}`} className={isUrgent(record) ? 'urgent-record' : isPending(record) ? 'pending-record' : ''}><strong>{record.applicationId}</strong><span>{tr(record.applicantName)} · {say(record.status)} · {say(record.reviewState)}</span>{record.caseId && <small>{record.caseId}</small>}{isUrgent(record) && <small className="urgent-flag">{say('URGENT')}</small>}{record.priorityDecision === 'ROUTINE' && <small style={{ background: '#edf3ec', color: '#28562d', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>{say('ROUTINE')}</small>}{record.vulnerability?.length > 0 && <small>{record.vulnerability.map(say).join(' · ')}</small>}{record.complaintType && <small>{bi('Complaint type (AI suggestion):', 'অভিযোগের ধরন (এআইয়ের পরামর্শ):')} {say(record.complaintType)}</small>}{record.flags?.map((flag) => <small key={flag.code}>{say(flag.code)}: {tr(flag.reason)}</small>)}</Link>}</li>)}</ul>}
     </section>
   </section>
 }
