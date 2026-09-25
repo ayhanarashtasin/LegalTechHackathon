@@ -20,12 +20,13 @@ const demoAccounts = new Map([
   ['RECEIVING_DLAO', 'demo.receiving'],
   ['CASE_SUPPORT', 'demo.support'],
   ['CLAO', 'demo.clao'],
+  ['CITIZEN', 'demo.citizen'],
 ])
 const staffLoginEnabled = () => process.env.NODE_ENV !== 'production' || process.env.STAFF_LOGIN_ENABLED === 'true'
 
 export async function getDemoCredentials(role) {
   if (process.env.NODE_ENV === 'production') throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Demo authentication is disabled in production.')
-  const username = demoAccounts.get(role)
+  const username = demoAccounts.get(role) || (Array.from(demoAccounts.values()).includes(role) ? role : null)
   if (!username) throw new HttpError(404, 'DEMO_ACCOUNT_NOT_FOUND', 'That demo role is not available.')
 
   let credentials

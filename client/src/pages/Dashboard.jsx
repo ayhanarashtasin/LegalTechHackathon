@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api } from '../services/api.js'
 import { bi, num, say, tr, when } from '../components/Bi.jsx'
@@ -152,20 +152,15 @@ export default function Dashboard({ session }) {
   const isUrgent = (record) => Boolean(record.urgent || record.priorityDecision === 'URGENT' || (record.priorityDecision !== 'ROUTINE' && record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION')))
   const isPending = (record) => !isUrgent(record) && record.status !== 'ACCEPTED'
 
-  // Deduplicate by normalized applicant name or identifier so no duplicate profiles appear in queue
-  const deduplicated = useMemo(() => {
-    if (!workspace?.records) return []
-    const seen = new Set()
-    const list = []
-    for (const record of workspace.records) {
-      const key = (record.applicantName || record.applicationId).trim().toLowerCase()
-      if (!seen.has(key)) {
-        seen.add(key)
-        list.push(record)
-      }
-    }
-    return list
-  }, [workspace?.records])
+  // Show each record once. Keyed by record ID, never by name: two applicants may share a name,
+  // and possible duplicates are a DLAO officer's decision in Duplicate review.
+  const seen = new Set()
+  const deduplicated = (workspace?.records ?? []).filter((record) => {
+    const key = record.referralId ?? record.assignmentId ?? record.applicationId
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 
   const filtered = deduplicated.filter((record) =>
     (queue === 'ALL' || record.flags?.some((flag) => flag.code === queue)) &&

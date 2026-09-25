@@ -28,9 +28,9 @@ export default function AuthModal({
   const [officerUsername, setOfficerUsername] = useState(OFFICER_ROLES[0].id)
   const [officerPassword, setOfficerPassword] = useState('1234')
 
-  // Keep a new registration's sign-in details only in this open modal.
-  const [citizenLoginId, setCitizenLoginId] = useState('')
-  const [citizenLoginPassword, setCitizenLoginPassword] = useState('')
+  // Keep a new registration's sign-in details, defaulting to demo.citizen / 1234
+  const [citizenLoginId, setCitizenLoginId] = useState('demo.citizen')
+  const [citizenLoginPassword, setCitizenLoginPassword] = useState('1234')
 
   // Citizen sign-up state
   const [regName, setRegName] = useState('')
@@ -288,6 +288,20 @@ export default function AuthModal({
                   value={citizenLoginPassword}
                   onChange={(e) => setCitizenLoginPassword(e.target.value)}
                 />
+                <p className="auth-hint">
+                  {bi('Auto-filled with demo credentials (demo.citizen / 1234).', 'ডেমো তথ্য স্বয়ংক্রিয় পূরণ হয়েছে (demo.citizen / 1234)।')}
+                  {' '}&bull;{' '}
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => {
+                      setCitizenLoginId('demo.citizen')
+                      setCitizenLoginPassword('1234')
+                    }}
+                  >
+                    {bi('Reset to demo', 'ডেমো তথ্য')}
+                  </button>
+                </p>
               </div>
 
               <div className="auth-action-row">

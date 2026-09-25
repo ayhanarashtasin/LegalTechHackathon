@@ -18,7 +18,9 @@
     "check:document-ai": "node --env-file-if-exists=.env server/src/scripts/checkDocumentAi.js",
     "check:production-static": "npm run build && npm run check:production-static --workspace server",
     "dev:client": "npm run dev --workspace client",
-    "dev:server": "npm run dev --workspace server"
+    "dev:server": "npm run dev --workspace server",
+    "tts:setup": "python tts-service/install.py",
+    "tts": "python tts-service/app.py"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

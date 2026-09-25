@@ -13,9 +13,13 @@ import {
   inviteParty, openParty, read, reviewDocuments, reviewDraft, schedule, sign, signParty, verify,
 } from '../controllers/mediationController.js'
 
+// Party signing is public (the one-time code is the credential), so app.js mounts it at its own path,
+// ahead of the '/api' routers whose requireAuth would otherwise answer first.
+export const partySigningRoutes = Router()
+partySigningRoutes.post('/open', limitPublic(60), validateSigningCode, openParty)
+partySigningRoutes.post('/sign', limitPublic(60), validatePartySignature, signParty)
+
 const router = Router()
-router.post('/mediation-signing/open', limitPublic(60), validateSigningCode, openParty)
-router.post('/mediation-signing/sign', limitPublic(60), validatePartySignature, signParty)
 router.use(requireAuth)
 router.get('/applications/:applicationId/mediation', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR', 'CLAO'), read)
 router.post('/applications/:applicationId/mediation', applicationIdParam, requireRole('DLAO_OFFICER'), validateEmptyMediationBody, create)

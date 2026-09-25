@@ -123,6 +123,6 @@ export async function readAudit(request, response) {
 }
 
 export async function trackStatus(request, response) {
-  response.json(await trackApplicationStatus(request.params.identifier))
+  response.json(await trackApplicationStatus(request.body.identifier, request.body.lookupCode))
 }
 

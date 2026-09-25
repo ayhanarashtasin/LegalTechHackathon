@@ -240,6 +240,9 @@ export default function App() {
               </div>
             )}
           </div>
+        ) : pathname === '/voice' ? (
+          // The 16699 call screen stays a plain phone call: no account buttons.
+          <div className="header-right-spacer" aria-hidden="true" />
         ) : (
           <div className="header-auth-actions">
             <button

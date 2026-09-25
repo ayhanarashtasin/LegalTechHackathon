@@ -3,10 +3,11 @@ import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative
 import { addDocument, approveDocumentBriefing, generateBriefing, readBriefing, readDocuments, readEvidenceAccess } from '../controllers/documentController.js'
 import { readForApplication, routingDecision, send } from '../controllers/referralController.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
-import { applicationIdParam, validateAdviceOutcome, factIdParam, taskIdParam, validateAcceptance, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEmptyBody, validateFact, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask } from '../validators/requests.js'
+import { limitStatusLookup } from '../middleware/rateLimit.js'
+import { applicationIdParam, validateAdviceOutcome, factIdParam, taskIdParam, validateAcceptance, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEmptyBody, validateFact, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask, validateTrackLookup } from '../validators/requests.js'
 
 const router = Router()
-router.get('/track/:identifier', trackStatus)
+router.post('/track', limitStatusLookup, validateTrackLookup, trackStatus)
 router.use(requireAuth)
 router.post('/', requireRole('DLAO_OFFICER', 'CASE_SUPPORT', 'HELPLINE_AGENT'), validateSubmission, submit)
 router.post('/status-lookup', requireRole('HELPLINE_AGENT'), validateStatusLookup, helplineStatus)

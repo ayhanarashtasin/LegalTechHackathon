@@ -64,6 +64,7 @@ test('Step 10: DLAO links common evidence once and reviews duplicate suggestions
   await expand(page, /^Related cases/)
   await page.getByRole('link', { name: 'Fictional fire claims' }).click()
   await expect(page.getByRole('heading', { name: 'Fictional fire claims' })).toBeVisible()
+  await page.getByText('Read common evidence text').click()
   await expect(page.getByText(/Synthetic tabletop exercise only/)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Share existing evidence reference' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Link cases, do not merge' })).toHaveCount(0)

@@ -39,7 +39,7 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
   await page.getByRole('link', { name: new RegExp(caseId) }).click()
   await expect(page.getByRole('heading', { name: 'Respond to assignment offer' })).toBeVisible()
   await page.getByLabel('Reason for accepting or declining').fill('I accept this fictional panel assignment and will report progress.')
-  await page.getByRole('button', { name: 'Accept assignment' }).click()
+  await page.getByRole('button', { name: 'Accept', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'Assignment accepted' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Required progress updates' })).toBeVisible()
   for (const offset of [8000, 10000]) expect((await request.post(`/api/lawyers/applications/${applicationId}/update-schedules`, { headers: officer, data: {

@@ -1,6 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { api } from '../services/api.js'
-import { appendTranscript, applyExtraction, closeMicrophone, digitsFromWords, openMicrophone, spokenDigits, spokenKey, spokenUncertain, spokenYesNo, startRecording } from '../utils/voiceAgent.js'
+import { appendTranscript, applyExtraction, closeMicrophone, digitsFromWords, openMicrophone, playTone, spokenDigits, spokenKey, spokenUncertain, spokenYesNo, startRecording } from '../utils/voiceAgent.js'
 import { activeFields, answer, correct, modeOf, nextField, notices, payload, startCall, steps } from '../utils/voiceScript.js'
 import { getLang, useLang } from '../components/Bi.jsx'
 
@@ -141,21 +141,6 @@ const endClips = (call, { applicationId, lookupCode }) => (modeOf(call) === 'ADV
 const kindOf = (field) => (!field ? 'READBACK' : steps[field].choices ? 'CHOICE' : steps[field].digits ? 'DIGITS' : 'SPOKEN')
 
 const PhoneIcon = () => <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.6 21 3 13.4 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.6a1 1 0 0 1-.25 1z" /></svg>
-
-// Short generated tones (key presses and the "speak now" beep); no audio files needed.
-function playTone(context, frequencies, ms = 120) {
-  if (!context || context.state === 'closed') return
-  const gain = context.createGain()
-  gain.gain.value = 0.06
-  gain.connect(context.destination)
-  for (const frequency of frequencies) {
-    const oscillator = context.createOscillator()
-    oscillator.frequency.value = frequency
-    oscillator.connect(gain)
-    oscillator.start()
-    oscillator.stop(context.currentTime + ms / 1000)
-  }
-}
 
 // Plays recorded clips in order. Resolves true when they finish (a missing clip is skipped), false when stopped.
 function createClipPlayer() {

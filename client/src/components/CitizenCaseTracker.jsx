@@ -1,25 +1,96 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../services/api.js'
 import { bi } from './Bi.jsx'
 
+const MicIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="9" y="2" width="6" height="12" rx="3" />
+    <path d="M5 10a7 7 0 0 0 14 0" />
+    <line x1="12" y1="17" x2="12" y2="22" />
+  </svg>
+)
+const SpeakerIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+    <path d="M19 5a10 10 0 0 1 0 14" />
+  </svg>
+)
+
 export default function CitizenCaseTracker() {
   const [trackingId, setTrackingId] = useState('')
+  const [lookupCode, setLookupCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  // Spoken status (A5): a caller who cannot read asks by voice and hears the status.
+  const [voiceActive, setVoiceActive] = useState(false)
+  const [turn, setTurn] = useState(null) // the caller's current turn: { kind, listening }
+  const [voiceLine, setVoiceLine] = useState(null)
+  const [heard, setHeard] = useState(null) // what Whisper heard in the last turn; never the PIN
+  const [keyed, setKeyed] = useState('') // digits typed instead of said, on a number or PIN turn
+  const [spoken, setSpoken] = useState(null) // { sentence, audioUrl } of the last spoken status, kept to hear again
+  const callRef = useRef(null)
+  const typable = turn?.kind === 'number' || turn?.kind === 'pin'
 
-  async function handleTrack(idToSearch) {
-    const query = (idToSearch || trackingId).trim()
-    if (!query) return
+  useEffect(() => () => callRef.current?.stop(), [])
+  useEffect(() => () => { if (spoken?.audioUrl) URL.revokeObjectURL(spoken.audioUrl) }, [spoken])
+
+  function submitKeyed(event) {
+    event.preventDefault()
+    callRef.current?.type(keyed)
+    setKeyed('')
+  }
+
+  async function toggleVoice() {
+    if (callRef.current) return callRef.current.stop()
+    if (voiceActive) return // still opening the microphone
+    setVoiceActive(true)
+    setError(null)
+    setResult(null)
+    setVoiceLine(null)
+    setHeard(null)
+    setKeyed('')
+    setSpoken(null)
+    try {
+      const { startStatusCall } = await import('../utils/voiceStatusCall.js')
+      callRef.current = await startStatusCall({
+        onLine: setVoiceLine,
+        onTurn: setTurn,
+        onHeard: setHeard,
+        onNumber: setTrackingId,
+        onResult: (data, sentence, audioUrl) => {
+          setResult(data)
+          setTrackingId(data.applicationId)
+          setSpoken({ sentence, audioUrl })
+        },
+      })
+      await callRef.current.done
+    } catch (failure) {
+      setError(['NotAllowedError', 'NotFoundError', 'NotReadableError'].includes(failure.name)
+        ? bi('The microphone is not available. Type the number and tracking code instead.', 'মাইক্রোফোন পাওয়া যায়নি। নম্বর ও ট্র্যাকিং কোড লিখে খুঁজুন।')
+        : failure.message)
+    } finally {
+      callRef.current = null
+      setVoiceActive(false)
+      setTurn(null)
+    }
+  }
+
+  async function handleTrack() {
+    const query = trackingId.trim()
+    if (!query || !lookupCode.trim()) return
     setLoading(true)
     setError(null)
+    setSpoken(null)
     try {
-      const data = await api(`/api/applications/track/${encodeURIComponent(query)}`)
+      // The private tracking code travels in the request body, never in the URL.
+      const data = await api('/api/applications/track', { method: 'POST', body: { identifier: query, lookupCode: lookupCode.trim() } })
       setResult(data)
       setTrackingId(data.applicationId)
     } catch (err) {
       setResult(null)
-      setError(err.message || 'No record found with this Application ID or Case ID.')
+      setError(err.message || bi('No application matched this ID and tracking code.', 'এই নম্বর ও ট্র্যাকিং কোডে কোনো আবেদন পাওয়া যায়নি।'))
     } finally {
       setLoading(false)
     }
@@ -27,18 +98,15 @@ export default function CitizenCaseTracker() {
 
   function onSubmit(e) {
     e.preventDefault()
-    handleTrack(trackingId)
-  }
-
-  function onQuickPick(id) {
-    setTrackingId(id)
-    handleTrack(id)
+    handleTrack()
   }
 
   function onClear() {
     setTrackingId('')
+    setLookupCode('')
     setResult(null)
     setError(null)
+    setSpoken(null)
   }
 
   return (
@@ -80,6 +148,19 @@ export default function CitizenCaseTracker() {
             </button>
           )}
         </div>
+        <div className="case-tracker-input-box case-tracker-code-box">
+          <input
+            type="text"
+            className="case-tracker-input case-tracker-code-input"
+            value={lookupCode}
+            onChange={(e) => setLookupCode(e.target.value)}
+            placeholder={bi('Tracking code', 'ট্র্যাকিং কোড')}
+            aria-label={bi('Tracking code you received when you applied', 'আবেদনের সময় পাওয়া ট্র্যাকিং কোড')}
+            autoComplete="off"
+            spellCheck="false"
+            required
+          />
+        </div>
         <button type="submit" className="case-tracker-btn" disabled={loading}>
           {loading ? (
             <span>{bi('Tracking...', 'খোঁজা হচ্ছে...')}</span>
@@ -89,20 +170,46 @@ export default function CitizenCaseTracker() {
         </button>
       </form>
 
-      <div className="case-tracker-samples" role="group" aria-label={bi('Quick example cases', 'নমুনা মামলাসমূহ')}>
-        <span className="case-tracker-samples-label">{bi('Quick check:', 'নমুনা আইডি:')}</span>
-        <button type="button" className="case-tracker-chip" onClick={() => onQuickPick('APP-2026-000039')}>
-          APP-2026-000039
+      <div className="case-tracker-voice">
+        <button type="button" className={`case-tracker-voice-btn${voiceActive ? ' is-active' : ''}`} onClick={toggleVoice}>
+          <MicIcon />
+          <span>{voiceActive ? bi('Stop', 'বন্ধ করুন') : bi('Ask by Voice', 'বলে জানুন')}</span>
         </button>
-        <button type="button" className="case-tracker-chip" onClick={() => onQuickPick('APP-2026-000040')}>
-          APP-2026-000040
-        </button>
-        <button type="button" className="case-tracker-chip" onClick={() => onQuickPick('CASE-2026-000015')}>
-          CASE-2026-000015
-        </button>
-        <button type="button" className="case-tracker-chip" onClick={() => onQuickPick('APP-2026-000045')}>
-          APP-2026-000045
-        </button>
+        {voiceActive ? (
+          <div className="case-tracker-voice-status">
+            <p className="case-tracker-voice-line">
+              {turn?.listening ? (
+                <>
+                  <span className="case-tracker-listening-dot" aria-hidden="true" />
+                  <span>{bi('Listening…', 'শুনছি…')}</span>
+                </>
+              ) : (
+                <span lang="bn">{voiceLine}</span>
+              )}
+            </p>
+            {heard ? (
+              <p className="case-tracker-voice-heard">
+                {bi('You said:', 'আপনি বললেন:')} <span lang="bn">{heard}</span>
+              </p>
+            ) : null}
+            {typable ? (
+              <form className="case-tracker-voice-keypad" onSubmit={submitKeyed}>
+                <label htmlFor="voice-keypad">{turn.kind === 'pin' ? bi('Or type the PIN', 'অথবা পিন লিখুন') : bi('Or type the number', 'অথবা নম্বর লিখুন')}</label>
+                <input
+                  id="voice-keypad"
+                  type={turn.kind === 'pin' ? 'password' : 'text'}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  spellCheck="false"
+                  value={keyed}
+                  onChange={(event) => setKeyed(event.target.value)}
+                  onFocus={() => callRef.current?.typing()}
+                />
+                <button type="submit" className="case-tracker-voice-btn">{bi('OK', 'ঠিক আছে')}</button>
+              </form>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {error && (
@@ -113,6 +220,17 @@ export default function CitizenCaseTracker() {
 
       {result && (
         <div className="case-tracker-result" aria-live="polite">
+          {spoken ? (
+            <div className="tracker-spoken">
+              {spoken.audioUrl ? (
+                <button type="button" className="case-tracker-voice-btn" onClick={() => new Audio(spoken.audioUrl).play().catch(() => {})}>
+                  <SpeakerIcon />
+                  <span>{bi('Hear Again', 'আবার শুনুন')}</span>
+                </button>
+              ) : null}
+              <p lang="bn">{spoken.sentence}</p>
+            </div>
+          ) : null}
           {/* Top Parcel Summary Card */}
           <div className="tracker-result-topbar">
             <div className="tracker-id-cluster">

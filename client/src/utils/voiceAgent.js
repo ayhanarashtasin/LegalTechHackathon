@@ -41,8 +41,13 @@ const DIGIT_WORDS = [
   ['পাঁচ', 'পাছ', 'five'], ['ছয়', 'ছা', 'ছই', 'six'], ['সাত', 'seven'], ['আট', 'আত', 'eight'], ['নয়', 'নই', 'nine'],
 ]
 const digitOfWord = new Map(DIGIT_WORDS.flatMap((words, digit) => words.map((word) => [outline(word), String(digit)])))
-// Outline twins that are not digits: "নেই" (none) looks like "নই" (nine) once the vowel sign is gone.
-const notDigits = new Set(['নেই'].map((word) => word.normalize('NFD')))
+// Outline twins that are not digits: "নেই" (none) looks like "নই" (nine) once the vowel sign is gone, "চাই" (want)
+// like "ছই" (six), and "দয়া" (please) like "দুয়" (two).
+const notDigits = new Set(['নেই', 'চাই', 'দয়া'].map((word) => word.normalize('NFD')))
+// English digit words as Whisper writes them in Bangla script ("ফোর এইট টু"), since numbers are often read out in
+// English. Matched by exact spelling, not by outline: "থ্রি" shares its outline with "তার" (his), "ফোর" with "পরে".
+const englishDigits = new Map([['ওয়ান', 1], ['টু', 2], ['থ্রি', 3], ['থ্রী', 3], ['ফোর', 4], ['ফাইভ', 5],
+  ['সিক্স', 6], ['সেভেন', 7], ['এইট', 8], ['নাইন', 9]].map(([word, digit]) => [word.normalize('NFD'), String(digit)]))
 const repeats = new Map([['ডাবল', 2], ['double', 2], ['ট্রিপল', 3], ['triple', 3]].map(([word, times]) => [outline(word), times]))
 
 // "আমার নম্বর এক, দুই, শুন্ন" → "120", "ডাবল জিরো" → "00". Other words ("আমার নম্বর হলো") are skipped rather than
@@ -52,7 +57,8 @@ export function digitsFromWords(text) {
   let times = 1
   for (const token of (text ?? '').toLowerCase().split(/[\s,।.;:!?'"()-]+/).filter(Boolean)) {
     if (repeats.has(outline(token))) { times = repeats.get(outline(token)); continue }
-    const digit = /^[0-9০-৯]+$/.test(token) ? asciiDigits(token) : notDigits.has(token.normalize('NFD')) ? undefined : digitOfWord.get(outline(token))
+    const word = token.normalize('NFD')
+    const digit = /^[0-9০-৯]+$/.test(token) ? asciiDigits(token) : notDigits.has(word) ? undefined : englishDigits.get(word) ?? digitOfWord.get(outline(token))
     if (digit !== undefined) digits += digit.repeat(times)
     times = 1
   }
@@ -61,13 +67,49 @@ export function digitsFromWords(text) {
 
 // A yes or no said aloud, matched here like a key press so it never waits on the model. A reply with both ("ঠিক
 // হয়নি", "না না, ঠিক আছে") or neither is left to the model, which sees the whole sentence.
+// A lone "না" can come back from Whisper as "ন".
 const YES_WORDS = new Set(['হ্যাঁ', 'হ্যা', 'হাঁ', 'হা', 'হুম', 'হুঁ', 'জি', 'জ্বি', 'জী', 'ঠিক', 'সঠিক', 'আছে', 'হয়েছে', 'জমা', 'ওকে', 'yes', 'ok', 'okay'].map((word) => word.normalize('NFD')))
-const NO_WORDS = new Set(['না', 'নাহ', 'নাই', 'নেই', 'ভুল', 'হয়নি', 'নয়', 'no'].map((word) => word.normalize('NFD')))
+const NO_WORDS = new Set(['না', 'ন', 'নাহ', 'নাই', 'নেই', 'ভুল', 'হয়নি', 'নয়', 'no'].map((word) => word.normalize('NFD')))
+// A lone "হ্যাঁ" can come back with one stray consonant ("হ্যাদ", "হ্যাক্"); "হ্যালো" and longer words are not a yes.
+const CLIPPED_YES = /^হ্যাঁ?[ক-হ]্?$/
 export function spokenYesNo(text) {
   const tokens = (text ?? '').normalize('NFD').toLowerCase().split(/[\s,।.;:!?'"()-]+/).filter(Boolean)
-  const yes = tokens.some((token) => YES_WORDS.has(token))
+  const yes = tokens.some((token) => YES_WORDS.has(token) || CLIPPED_YES.test(token))
   const no = tokens.some((token) => NO_WORDS.has(token))
   return yes === no ? undefined : yes
+}
+
+// "আমার কেসের অবস্থা জানতে চাই": asking how a case stands, matched by its words like a key press, never by the model.
+// "অবস্থা" is compared by consonant outline, since Whisper writes it অবস্তা, অভোস্থা, or ওবোস্থা. An unmatched reply
+// is asked about again.
+const STATUS_WORDS = /খবর|আপডেট|স্ট্যাটাস|অগ্রগতি|শুনানি|কতদূর|কদ্দূর|status|update|progress|obosth/i
+const STATUS_STEMS = ['অবস্থা', 'ওবস্থা'].map((word) => outline(word))
+export function spokenStatusRequest(text) {
+  const tokens = (text ?? '').split(/[\s,।.;:!?'"()-]+/).filter(Boolean)
+  return STATUS_WORDS.test(text ?? '') || tokens.some((token) => STATUS_STEMS.some((stem) => outline(token).startsWith(stem)))
+}
+
+// The number part of an Application or Case ID, as the tracker takes it: up to six digits, or the ID said whole with
+// its year ("দুই শূন্য দুই ছয় শূন্য শূন্য শূন্য শূন্য তিন নয়"), which keeps the last six.
+export function applicationNumber(digits) {
+  if (/^\d{1,6}$/.test(digits ?? '')) return digits
+  if (/^20\d{8}$/.test(digits ?? '')) return digits.slice(4)
+  return undefined
+}
+
+// Short generated tones (key presses and the "speak now" beep); no audio files needed.
+export function playTone(context, frequencies, ms = 120) {
+  if (!context || context.state === 'closed') return
+  const gain = context.createGain()
+  gain.gain.value = 0.06
+  gain.connect(context.destination)
+  for (const frequency of frequencies) {
+    const oscillator = context.createOscillator()
+    oscillator.frequency.value = frequency
+    oscillator.connect(gain)
+    oscillator.start()
+    oscillator.stop(context.currentTime + ms / 1000)
+  }
 }
 
 // An uncertain safety reply must never be treated as the "no" inside "জানি না".

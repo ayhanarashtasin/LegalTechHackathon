@@ -15,3 +15,17 @@ test('public limiter bounds per-IP memory and evicts the oldest bucket', () => {
   assert.equal(allowed('new-ip'), true)
   assert.equal(allowed('first-ip'), true)
 })
+
+test('each public route counts its own requests', () => {
+  const answers = limitPublic(2)
+  const intakes = limitPublic(1)
+  const passes = (limit) => {
+    try { let passed = false; limit({ ip: 'caller' }, {}, () => { passed = true }); return passed } catch (error) { assert.equal(error.status, 429); return false }
+  }
+
+  assert.equal(passes(answers), true)
+  assert.equal(passes(answers), true)
+  assert.equal(passes(answers), false)
+  assert.equal(passes(intakes), true)
+  assert.equal(passes(intakes), false)
+})

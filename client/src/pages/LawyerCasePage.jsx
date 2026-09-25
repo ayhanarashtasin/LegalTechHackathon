@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../services/api.js'
-import { AddForm, Badge, Bi, Panel, Term, bi, num, say, when } from '../components/Bi.jsx'
+import { AddForm, Badge, Bi, Term, bi, num, say, when } from '../components/Bi.jsx'
 
 export default function LawyerCasePage({ session }) {
   const { caseId } = useParams()
@@ -75,12 +75,7 @@ export default function LawyerCasePage({ session }) {
   }
 
   function respond(decision) {
-    const finalReason = responseReason.trim().length >= 10
-      ? responseReason.trim()
-      : (decision === 'ACCEPT'
-          ? 'Panel lawyer accepted appointment to provide legal aid representation.'
-          : 'Panel lawyer declined appointment due to schedule conflict or caseload.')
-    send(`/api/lawyers/assignments/${record.assignmentId}/respond`, { decision, reason: finalReason },
+    send(`/api/lawyers/assignments/${record.assignmentId}/respond`, { decision, reason: responseReason.trim() },
       decision === 'ACCEPT' ? bi('Assignment accepted. You are now the official legal aid counsel for this case.', 'নিয়োগ গ্রহণ করা হয়েছে। আপনি এই মামলার আনুষ্ঠানিক আইনি সহায়তা আইনজীবী।') : bi('Assignment rejected. The DLAO has been notified.', 'নিয়োগ প্রত্যাখ্যান করা হয়েছে। ডিএলএও কর্মকর্তাকে জানানো হয়েছে।'))
   }
 
@@ -103,7 +98,7 @@ export default function LawyerCasePage({ session }) {
     }
     const updated = [newEntry, ...consultations]
     setConsultations(updated)
-    try { localStorage.setItem(`dlas_lawyer_consult_${caseId}`, JSON.stringify(updated)) } catch {}
+    try { localStorage.setItem(`dlas_lawyer_consult_${caseId}`, JSON.stringify(updated)) } catch { /* Storage may be unavailable. */ }
     setConsultNotes('')
     setNotice(bi('Client consultation & case strategy note recorded.', 'মক্কেলের সাথে পরামর্শ ও কৌশল সংক্রান্ত নোট সংরক্ষিত হয়েছে।'))
   }
@@ -114,7 +109,7 @@ export default function LawyerCasePage({ session }) {
       localStorage.setItem(`dlas_lawyer_court_name_${caseId}`, courtName)
       localStorage.setItem(`dlas_lawyer_court_no_${caseId}`, courtCaseNo)
       localStorage.setItem(`dlas_lawyer_court_stage_${caseId}`, courtStage)
-    } catch {}
+    } catch { /* Storage may be unavailable. */ }
     setNotice(bi('Court filing details updated.', 'আদালতের মামলার তথ্য হালনাগাদ হয়েছে।'))
   }
 
@@ -130,7 +125,7 @@ export default function LawyerCasePage({ session }) {
     }
     const updated = [newHearing, ...hearings]
     setHearings(updated)
-    try { localStorage.setItem(`dlas_lawyer_hearings_${caseId}`, JSON.stringify(updated)) } catch {}
+    try { localStorage.setItem(`dlas_lawyer_hearings_${caseId}`, JSON.stringify(updated)) } catch { /* Storage may be unavailable. */ }
     setHearingNotes('')
     setHearingBench('')
     setNotice(bi('Court hearing appearance recorded in case records.', 'আদালতে শুনানির উপস্থিতি ও বিবরণ নথিভুক্ত হয়েছে।'))
@@ -148,7 +143,7 @@ export default function LawyerCasePage({ session }) {
       submittedBy: session.user.displayName || 'Panel Lawyer',
     }
     setOutcomeRecord(outcomeData)
-    try { localStorage.setItem(`dlas_lawyer_outcome_${caseId}`, JSON.stringify(outcomeData)) } catch {}
+    try { localStorage.setItem(`dlas_lawyer_outcome_${caseId}`, JSON.stringify(outcomeData)) } catch { /* Storage may be unavailable. */ }
     setNotice(bi('Case outcome & lawyer completion output submitted to DLAO.', 'মামলার রায় ও দায়িত্ব সমাপ্তির প্রতিবেদন ডিএলএও অফিসে দাখিল হয়েছে।'))
   }
 
@@ -165,7 +160,7 @@ export default function LawyerCasePage({ session }) {
     }
     const updated = [newClaim, ...feeClaims]
     setFeeClaims(updated)
-    try { localStorage.setItem(`dlas_lawyer_fee_${caseId}`, JSON.stringify(updated)) } catch {}
+    try { localStorage.setItem(`dlas_lawyer_fee_${caseId}`, JSON.stringify(updated)) } catch { /* Storage may be unavailable. */ }
     setFeeNotes('')
     setNotice(bi('Fee bill claim submitted as per DBLA schedule. Awaiting officer verification.', 'ডিবিএলএ বিধি মোতাবেক ফি দাবি দাখিল করা হয়েছে।'))
   }
@@ -297,13 +292,13 @@ export default function LawyerCasePage({ session }) {
         <section className={`card ${isUrgent ? 'urgent-record' : ''}`} aria-labelledby="decision-title">
           <h2 id="decision-title"><Bi en="Step 1: Respond to Assignment Offer (DBLA Appointment)" bn="ধাপ ১: নিয়োগ প্রস্তাবে সিদ্ধান্ত দিন (ডিবিএলএ নিয়োগ)" /></h2>
           <p className="muted"><Bi en="As per DBLA procedure, the case remains under DLAO jurisdiction until you formally accept assignment." bn="ডিবিএলএ কার্যপদ্ধতি অনুযায়ী আপনি আনুষ্ঠানিকভাবে নিয়োগ গ্রহণ না করা পর্যন্ত মামলাটির দায়িত্ব আপনার উপর বর্তাবে না।" /></p>
-          <label htmlFor="assignment-response-reason"><Bi en="Reason or notes (optional)" bn="কারণ বা মন্তব্য (ঐচ্ছিক)" /></label>
-          <textarea id="assignment-response-reason" value={responseReason} onChange={(event) => setResponseReason(event.target.value)} maxLength="500" placeholder="Optional notes for your decision..." />
+          <label htmlFor="assignment-response-reason"><Bi en="Reason for accepting or declining" bn="গ্রহণ বা প্রত্যাখ্যানের কারণ" /></label>
+          <textarea id="assignment-response-reason" value={responseReason} onChange={(event) => setResponseReason(event.target.value)} minLength="10" maxLength="500" required />
           <div className="choice-row" style={{ marginTop: '0.75rem', display: 'flex', gap: '0.75rem' }}>
-            <button type="button" disabled={busy} onClick={() => respond('ACCEPT')}>
+            <button type="button" disabled={busy || responseReason.trim().length < 10} onClick={() => respond('ACCEPT')}>
               <Bi en="Accept" bn="গ্রহণ করুন" />
             </button>
-            <button type="button" className="secondary-button" style={{ borderColor: 'var(--color-danger, #b3261e)', color: 'var(--color-danger, #b3261e)' }} disabled={busy} onClick={() => respond('DECLINE')}>
+            <button type="button" className="secondary-button" style={{ borderColor: 'var(--color-danger, #b3261e)', color: 'var(--color-danger, #b3261e)' }} disabled={busy || responseReason.trim().length < 10} onClick={() => respond('DECLINE')}>
               <Bi en="Reject" bn="প্রত্যাখ্যান করুন" />
             </button>
           </div>

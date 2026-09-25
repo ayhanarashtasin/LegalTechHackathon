@@ -9,7 +9,8 @@
     "test": "node --env-file-if-exists=.env --test --test-concurrency=1",
     "check:production-static": "node --env-file-if-exists=.env --test src/productionStatic.test.js",
     "seed": "node --env-file-if-exists=.env src/seeds/demoUsers.js",
-    "check:voice": "node --env-file-if-exists=.env src/scripts/checkVoiceAi.js"
+    "check:voice": "node --env-file-if-exists=.env src/scripts/checkVoiceAi.js",
+    "check:voice-status": "node --env-file-if-exists=.env src/scripts/checkVoiceStatus.js"
   },
   "dependencies": {
     "express": "5.2.1",

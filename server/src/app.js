@@ -13,7 +13,7 @@ import referralRoutes from './routes/referralRoutes.js'
 import lawyerRoutes from './routes/lawyerRoutes.js'
 import incidentRoutes from './routes/incidentRoutes.js'
 import triageRoutes from './routes/triageRoutes.js'
-import mediationRoutes from './routes/mediationRoutes.js'
+import mediationRoutes, { partySigningRoutes } from './routes/mediationRoutes.js'
 import citizenRoutes from './routes/citizenRoutes.js'
 import { errorHandler, notFound } from './middleware/errors.js'
 
@@ -70,6 +70,7 @@ app.use('/api/voice', voiceRoutes)
 app.use('/api/assisted', assistedRoutes)
 app.use('/api/referrals', referralRoutes)
 app.use('/api/lawyers', lawyerRoutes)
+app.use('/api/mediation-signing', partySigningRoutes)
 app.use('/api', triageRoutes)
 app.use('/api', mediationRoutes)
 app.use('/api', incidentRoutes)

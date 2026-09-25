@@ -1,5 +1,6 @@
 import mongoose from 'mongoose'
 import { HttpError } from '../utils/httpError.js'
+import { promptKeys, TRANSCRIPT_HINTS } from '../services/spokenStatus.js'
 
 const fail = (message) => { throw new HttpError(400, 'VALIDATION_ERROR', message) }
 // A status code: 24 hex characters for staff-made records, or the 6-digit PIN a 16699 caller hears and can say back.
@@ -70,6 +71,16 @@ export function validateStatusLookup(request, _response, next) {
   if (value.callerVerified !== true) fail('Human caller-verification attestation is required.')
   value.contactChannel ??= 'PHONE'
   if (!['PHONE', 'IN_PERSON'].includes(value.contactChannel)) fail('Status channel is invalid.')
+  next()
+}
+
+// Public tracking needs the caller's own lookup code; a bare number is padded into an Application or Case ID.
+export function validateTrackLookup(request, _response, next) {
+  const value = body(request, ['identifier', 'lookupCode'])
+  value.identifier = typeof value.identifier === 'string' ? value.identifier.trim().toUpperCase() : ''
+  if (!/^(?:(?:APP|CASE)-\d{4}-\d{6}|\d{1,6})$/.test(value.identifier)) fail('Enter an Application ID or Case ID.')
+  value.lookupCode = typeof value.lookupCode === 'string' ? value.lookupCode.trim().toLowerCase() : ''
+  if (!LOOKUP_CODE.test(value.lookupCode)) fail('Enter the tracking code you received when you applied.')
   next()
 }
 
@@ -283,6 +294,31 @@ export function validateAnswerAudio(request, _response, next) {
   if (!fields.length || fields.some((field) => !voiceAnswers[field] && field !== 'confirm') || new Set(fields).size !== fields.length) fail('Unknown question.')
   if (!audioTypes.includes((request.get('content-type') || '').split(';')[0].trim())) fail('Unsupported audio type.')
   if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
+  next()
+}
+
+// One turn of the spoken status call: audio only, transcribed and discarded, optionally primed with a named hint.
+export function validateSpeechAudio(request, _response, next) {
+  const keys = Object.keys(request.query)
+  if (keys.some((key) => key !== 'hint') || (keys.length && !Object.hasOwn(TRANSCRIPT_HINTS, request.query.hint))) fail('Unexpected parameter.')
+  if (!audioTypes.includes((request.get('content-type') || '').split(';')[0].trim())) fail('Unsupported audio type.')
+  if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
+  next()
+}
+
+// The transcript of one opening turn, to be read for a status request; a transcript is short, so a long body is refused.
+export function validateSpokenRequest(request, _response, next) {
+  const value = body(request, ['text'])
+  value.text = text(value.text, 'Text', 1, 500)
+  next()
+}
+
+// Only a fixed prompt can be spoken; the one variable is a read-back number, and it must be digits only.
+export function validateVoicePrompt(request, _response, next) {
+  const value = body(request, ['key', 'digits'], ['key'])
+  if (!promptKeys.includes(value.key)) fail('Unknown prompt.')
+  if ((value.key === 'confirmNumber') !== ('digits' in value)) fail('Unexpected or missing fields.')
+  if ('digits' in value && !/^[0-9]{1,10}$/.test(value.digits)) fail('Digits are invalid.')
   next()
 }
 

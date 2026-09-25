@@ -14,7 +14,7 @@ const intakeChannels = {
   CASE_SUPPORT: 'DLAO',
 }
 const newLookupCode = () => randomBytes(12).toString('hex')
-const lookupHash = (code) => createHash('sha256').update(code).digest('hex')
+export const lookupHash = (code) => createHash('sha256').update(code).digest('hex')
 
 // Demo rules only (urgency criteria await law-team approval); the officer's priorityDecision stays the final priority.
 export function urgencyReasons({ urgentFact, aiSensitive, safetyNeedsReview, restrictedEvidence }) {
@@ -104,9 +104,9 @@ const voiceChannelUser = () => User.findOneAndUpdate(
 )
 
 // 16699 caller's status PIN: six digits, so it can be read out on the call and said back to the helpline.
-// ponytail: 10^6 codes; guessing is bounded by the public rate limit, the 15-minute recording window, and staff-only
-// lookups. Add a per-application attempt lockout before exposing any caller-facing lookup.
-const newVoicePin = () => String(randomInt(0, 1_000_000)).padStart(6, '0')
+// ponytail: 10^6 codes; guessing is bounded by the public rate limit, the per-ID lockout on the caller-facing status
+// lookup (trackApplicationStatus), the 15-minute recording window, and staff-only lookups.
+export const newVoicePin = () => String(randomInt(0, 1_000_000)).padStart(6, '0')
 
 // Sentences for the officer's first task; each is translated on the Bangla screen.
 function voiceReviewSteps({ representative, answers, aiSensitive, safetyNeedsReview }) {
@@ -892,6 +892,24 @@ export async function lookupHelplineStatus(identifier, code, actor, contactChann
   })
 }
 
+// What an assigned panel lawyer sees about each applicant; a human priority decision outranks an urgent safety fact.
+export async function lawyerCaseSummaries(applicationIds) {
+  const [applications, facts] = await Promise.all([
+    Application.find({ applicationId: { $in: applicationIds } }).select('applicationId priorityDecision applicantPersonId').populate('applicantPersonId', 'displayName').lean(),
+    CaseFact.find({ applicationId: { $in: applicationIds }, field: { $in: ['safety.urgent', 'complaint.type', 'complaint.legal_need'] } })
+      .sort({ revision: -1 }).select('applicationId field value').lean(),
+  ])
+  const factsByApplication = Map.groupBy(facts, ({ applicationId }) => applicationId)
+  return new Map(applications.map(({ applicationId, priorityDecision, applicantPersonId }) => {
+    const values = latestValues(factsByApplication.get(applicationId) ?? [])
+    return [applicationId, {
+      applicantName: applicantPersonId?.displayName ?? null, priorityDecision: priorityDecision ?? null,
+      urgent: priorityDecision === 'URGENT' || (priorityDecision !== 'ROUTINE' && values['safety.urgent'] === 'YES'),
+      legalNeed: values['complaint.legal_need'] ?? null, complaintType: values['complaint.type'] ?? null,
+    }]
+  }))
+}
+
 export async function getCase(caseId, actor) {
   const record = await Case.findOne({ caseId }).lean()
   if (!record) throw new HttpError(404, 'NOT_FOUND', 'Case not found.')
@@ -900,19 +918,12 @@ export async function getCase(caseId, actor) {
   const assignment = actor.assignments.some(({ role, officeCode }) => role === 'PANEL_LAWYER' && officeCode === record.officeCode)
     && await LawyerAssignment.findOne({ caseId, lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).lean()
   if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This case is not assigned to this user.')
-  const appRecord = await Application.findOne({ applicationId: record.applicationId }).populate('applicantPersonId', 'name').lean()
-  const isUrgent = appRecord?.priorityDecision === 'URGENT' ||
-    (appRecord?.priorityDecision !== 'ROUTINE' && appRecord?.flags?.some((f) => f.code === 'URGENT_RECOMMENDATION')) ||
-    (Boolean(appRecord?.urgencyReasons && appRecord.urgencyReasons.length > 0 && appRecord?.priorityDecision !== 'ROUTINE'))
+  const summary = (await lawyerCaseSummaries([record.applicationId])).get(record.applicationId)
 
   if (assignment.status === 'PENDING') {
     return {
       caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: 'PENDING',
-      urgent: Boolean(isUrgent), priorityDecision: appRecord?.priorityDecision ?? null,
-      applicantName: appRecord?.applicantPersonId?.name ?? null,
-      legalNeed: appRecord?.legalNeed ?? null,
-      complaintType: appRecord?.complaintType ?? null,
-      vulnerability: appRecord?.vulnerability ?? [],
+      ...summary,
     }
   }
   const documents = await Document.find({ applicationId: record.applicationId, sensitivity: 'STANDARD' }).sort({ createdAt: 1 }).limit(20).select('label currentVersion').lean()
@@ -926,12 +937,7 @@ export async function getCase(caseId, actor) {
     LawyerPaymentEvent.findOne({ assignmentId: assignment._id }).sort({ createdAt: -1 }).select('stage status reason createdAt').lean(),
   ])
   return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: assignment.status,
-    urgent: Boolean(isUrgent),
-    priorityDecision: appRecord?.priorityDecision ?? null,
-    applicantName: appRecord?.applicantPersonId?.name ?? null,
-    legalNeed: appRecord?.legalNeed ?? null,
-    complaintType: appRecord?.complaintType ?? null,
-    vulnerability: appRecord?.vulnerability ?? [],
+    ...summary,
     nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null, updates,
     payment: payment ?? null, documents: documents.map((document) => ({ id: document._id, label: document.label, currentVersion: document.currentVersion, version: latest.get(document._id.toString()) ?? null })) }
 }
@@ -1050,37 +1056,47 @@ export async function listDocumentVersions(documentId, actor) {
   return DocumentVersion.find({ documentId }).sort({ version: 1 }).select('version label qualityState note createdAt').lean()
 }
 
-export async function trackApplicationStatus(rawIdentifier) {
-  const input = String(rawIdentifier || '').trim()
-  if (!input) {
-    throw new HttpError(400, 'BAD_REQUEST', 'Please enter an Application ID or Case ID.')
+// Wrong codes per Application/Case ID from any address, so a 6-digit PIN cannot be guessed by spreading attempts across
+// many IP addresses. Counted per ID string, whether or not it exists, so a lockout does not reveal which IDs are real.
+// ponytail: per-process like the rate limiter; use shared storage before running more than one API instance.
+const LOOKUP_FAILURES_MAX = 10
+const LOOKUP_WINDOW_MS = 60 * 60 * 1000
+const lookupFailures = new Map()
+function recentLookupFailures(id, now) {
+  const recent = (lookupFailures.get(id) ?? []).filter((time) => now - time < LOOKUP_WINDOW_MS)
+  if (recent.length) lookupFailures.set(id, recent)
+  else lookupFailures.delete(id)
+  return recent
+}
+function recordLookupFailure(ids, now) {
+  if (lookupFailures.size >= 10000) {
+    for (const [id, times] of lookupFailures) if (now - times.at(-1) >= LOOKUP_WINDOW_MS) lookupFailures.delete(id)
+    if (lookupFailures.size >= 10000) lookupFailures.delete(lookupFailures.keys().next().value)
   }
-  const upper = input.toUpperCase()
+  for (const id of ids) lookupFailures.set(id, [...recentLookupFailures(id, now), now])
+}
 
-  let application = await Application.findOne({
-    $or: [
-      { applicationId: upper },
-      { caseId: upper },
-      { applicationId: input },
-      { caseId: input },
-    ],
-  }).lean()
-
-  if (!application && /^\d+$/.test(input)) {
-    const padded = input.padStart(6, '0')
-    application = await Application.findOne({
-      $or: [
-        { applicationId: `APP-2026-${padded}` },
-        { caseId: `CAS-2026-${padded}` },
-      ],
-    }).lean()
+// Public tracking: only the holder of the record's own lookup code sees its progress, and a wrong ID or code look the same.
+export async function trackApplicationStatus(identifier, lookupCode) {
+  const year = new Date().getUTCFullYear()
+  const ids = /^\d+$/.test(identifier)
+    ? [`APP-${year}-${identifier.padStart(6, '0')}`, `CASE-${year}-${identifier.padStart(6, '0')}`]
+    : [identifier]
+  const now = Date.now()
+  if (ids.some((id) => recentLookupFailures(id, now).length >= LOOKUP_FAILURES_MAX)) {
+    throw new HttpError(429, 'TOO_MANY_ATTEMPTS', 'Too many wrong codes for this ID. Try again in an hour, or call 16699.')
   }
-
+  const candidates = await Application.find({ $or: [{ applicationId: { $in: ids } }, { caseId: { $in: ids } }] })
+    .select('+lookupCodeHash').limit(2).lean()
+  const supplied = Buffer.from(lookupHash(lookupCode), 'hex')
+  const application = candidates.find(({ lookupCodeHash }) => lookupCodeHash && timingSafeEqual(Buffer.from(lookupCodeHash, 'hex'), supplied))
   if (!application) {
-    throw new HttpError(404, 'NOT_FOUND', `No application or case found for ID "${input}".`)
+    recordLookupFailure(ids, now)
+    throw new HttpError(404, 'NOT_FOUND', 'No application matched this ID and tracking code.')
   }
+  for (const id of ids) lookupFailures.delete(id)
 
-  const [person, caseRecord, facts, rawAssignment, mediation, openTask] = await Promise.all([
+  const [person, caseRecord, facts, rawAssignment, mediation] = await Promise.all([
     application.applicantPersonId
       ? Person.findById(application.applicantPersonId).select('displayName identityStatus').lean()
       : null,
@@ -1098,9 +1114,6 @@ export async function trackApplicationStatus(rawIdentifier) {
       : null,
     Mediation.findOne({ applicationId: application.applicationId })
       .populate('mediatorUserId', 'displayName')
-      .lean(),
-    Task.findOne({ applicationId: application.applicationId, status: 'OPEN' })
-      .sort({ createdAt: 1 })
       .lean(),
   ])
 
@@ -1288,7 +1301,8 @@ export async function trackApplicationStatus(rawIdentifier) {
     submittedAt: application.createdAt,
     acceptedAt: application.acceptedAt || null,
     nextHearingAt: caseRecord?.nextHearingAt || null,
-    nextAction: caseRecord?.nextAction || openTask?.nextAction || null,
+    // Only the applicant-facing case plan; staff task instructions stay internal.
+    nextAction: caseRecord?.nextAction || null,
     lawyer,
     stages,
     updates,

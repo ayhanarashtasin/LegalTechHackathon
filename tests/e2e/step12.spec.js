@@ -42,6 +42,7 @@ test('Step 12: separate parties sign asynchronously, one offline packet syncs, a
   await page.getByRole('button', { name: 'Issue PARTY A code' }).click()
   const partyACode = await page.locator('code.signing-code').first().textContent()
   await page.getByRole('button', { name: 'Issue PARTY B code' }).click()
+  await expect(page.locator('code.signing-code')).toHaveCount(2)
   const partyBCode = await page.locator('code.signing-code').last().textContent()
   expect(partyACode).not.toBe(partyBCode)
   const partyAContext = await browser.newContext({ baseURL })

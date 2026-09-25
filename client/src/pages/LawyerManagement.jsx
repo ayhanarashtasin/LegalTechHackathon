@@ -97,7 +97,6 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
   const paymentAssignments = data?.assignments.filter(({ status }) => status === 'ACCEPTED' || status === 'REASSIGNED') ?? []
   const pendingAssignments = data?.assignments.filter(({ active, status }) => active && status === 'PENDING') ?? []
   const approvedRequests = data?.changeRequests.filter(({ status }) => status === 'APPROVED') ?? []
-  const openRequests = data?.changeRequests.filter(({ status }) => status === 'OPEN') ?? []
   const holds = data?.panelLawyers.filter(({ hold }) => hold?.newAssignmentHold) ?? []
   const hint = activeAssignments[0]?.lawyerName ?? (pendingAssignments.length ? bi('Offer pending', 'আইনজীবীর উত্তরের অপেক্ষায়') : data && bi('No lawyer yet', 'এখনো আইনজীবী নেই'))
 

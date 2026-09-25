@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import { Application, Case, ContactAttempt, LawyerAssignment, LawyerChangeRequest, LawyerPaymentEvent, LawyerUpdate, PanelLawyerHold, RoleAssignment, Task, User } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
-import { advance, officeApplication, verifyHelplineLookup } from './applicationService.js'
+import { advance, lawyerCaseSummaries, officeApplication, verifyHelplineLookup } from './applicationService.js'
 import { appendAudit } from './auditService.js'
 
 const reviewRole = 'DLAO_OFFICER'
@@ -78,28 +78,22 @@ export async function getLawyerWorklist(actor) {
     .sort({ updatedAt: -1 }).limit(25).lean()
   const ids = assignments.map(({ _id }) => _id)
   const appIds = assignments.map(({ applicationId }) => applicationId)
-  const [cases, updates, payments, applications] = await Promise.all([
+  const [cases, updates, payments, summaries] = await Promise.all([
     Case.find({ caseId: { $in: assignments.map(({ caseId }) => caseId) } }).select('caseId status nextHearingAt nextAction').lean(),
     LawyerUpdate.find({ assignmentId: { $in: ids }, status: { $ne: 'CANCELLED' } }).sort({ dueAt: 1 }).lean(),
     LawyerPaymentEvent.find({ assignmentId: { $in: ids } }).sort({ createdAt: -1 }).select('assignmentId stage status reason createdAt').lean(),
-    Application.find({ applicationId: { $in: appIds } }).select('applicationId priorityDecision urgencyReasons flags applicantName').lean(),
+    lawyerCaseSummaries(appIds),
   ])
   const caseById = new Map(cases.map((record) => [record.caseId, record]))
-  const appById = new Map(applications.map((app) => [app.applicationId, app]))
   const updatesByAssignment = Map.groupBy(updates, (update) => update.assignmentId.toString())
   const paymentByAssignment = new Map()
   for (const payment of payments) if (!paymentByAssignment.has(payment.assignmentId.toString())) paymentByAssignment.set(payment.assignmentId.toString(), payment)
   return { records: assignments.map((assignment) => {
     const record = caseById.get(assignment.caseId)
-    const app = appById.get(assignment.applicationId)
+    const summary = summaries.get(assignment.applicationId)
     const accepted = assignment.status === 'ACCEPTED'
-    const isUrgent = app?.priorityDecision === 'URGENT' ||
-      (app?.priorityDecision !== 'ROUTINE' && app?.flags?.some((f) => f.code === 'URGENT_RECOMMENDATION')) ||
-      (Boolean(app?.urgencyReasons && app.urgencyReasons.length > 0 && app?.priorityDecision !== 'ROUTINE'))
     return { assignmentId: assignment._id, applicationId: assignment.applicationId, caseId: assignment.caseId,
-      applicantName: app?.applicantName ?? null,
-      urgent: Boolean(isUrgent),
-      priorityDecision: app?.priorityDecision ?? null,
+      applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, priorityDecision: summary?.priorityDecision ?? null,
       assignmentStatus: assignment.status, caseStatus: accepted ? record?.status ?? 'OPEN' : null,
       nextHearingAt: accepted ? record?.nextHearingAt ?? null : null, nextAction: accepted ? record?.nextAction ?? null : null,
       updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt })) : [],

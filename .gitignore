@@ -7,5 +7,8 @@ test-results/
 **/.env*
 !**/.env.example
 **/.demo-credentials.json
+tts-service/.venv/
+tts-service/models/
+__pycache__/
 .DS_Store
 Thumbs.db

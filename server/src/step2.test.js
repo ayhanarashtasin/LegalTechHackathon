@@ -510,6 +510,27 @@ test('Step 6 queue, human priority override, case reconstruction, and bounded he
   assert.ok(audit.data.events.some((event) => event.action === 'HELPLINE_STATUS_LOOKUP'))
 })
 
+test('public case tracking shows progress only to the holder of the record lookup code', async () => {
+  const officer = await actor('track.officer', 'DLAO_OFFICER')
+  const helpline = await actor('track.helpline', 'HELPLINE_AGENT')
+  const submitted = await request('/api/applications', { method: 'POST', token: helpline.token, body: { applicantName: 'Fictional Tracking Applicant' } })
+  const { applicationId, lookupCode } = submitted.data
+  const track = (identifier, code) => request('/api/applications/track', { method: 'POST', body: { identifier, lookupCode: code } })
+  assert.equal((await request('/api/applications/track', { method: 'POST', body: { identifier: applicationId } })).status, 400)
+  assert.equal((await track(applicationId, '0'.repeat(24))).data.error.code, 'NOT_FOUND')
+  const tracked = await track(applicationId, lookupCode)
+  assert.equal(tracked.status, 200)
+  assert.equal(tracked.data.applicationId, applicationId)
+  assert.equal(tracked.data.currentPhase, 2)
+  assert.equal('lookupCodeHash' in tracked.data, false)
+  assert.equal((await track(String(Number(applicationId.slice(-6))), lookupCode.toUpperCase())).data.applicationId, applicationId)
+  await request(`/api/applications/${applicationId}/review`, { method: 'POST', token: officer.token, body: { reviewState: 'READY_FOR_DECISION', reason: 'Officer reviewed the fictional tracking record.' } })
+  const accepted = await request(`/api/applications/${applicationId}/accept`, { method: 'POST', token: officer.token, body: { reason: 'Officer accepted the fictional tracking record.' } })
+  const byCase = await track(accepted.data.caseId, lookupCode)
+  assert.equal(byCase.data.caseId, accepted.data.caseId)
+  assert.equal(byCase.data.currentPhase, 3)
+})
+
 test('Step 7 assisted offline sync is idempotent, provenance-safe, and conflicts require human resolution', async () => {
   const udc = await actor('test7.udc', 'UDC_OPERATOR')
   const otherUdc = await actor('test7.otherudc', 'UDC_OPERATOR')

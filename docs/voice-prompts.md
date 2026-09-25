@@ -66,3 +66,20 @@ Record one extra clip of a fictional caller answering, for testing Bangla transc
 
 - `npm run check:voice --workspace server -- path/to/sample.webm` transcribes it and shows what the AI extracted.
 - `LIVE_VOICE_SAMPLE=path/to/sample.wav npm run test:e2e` runs the opt-in browser test that speaks that clip into the page.
+
+## Spoken status on the Track card (synthesized, project decision 2026-09-25)
+
+The home page's **Track Application & Case Progress** card has **Ask by Voice / বলে জানুন** for a caller who cannot read (A5 Malek). Unlike the 16699 call, its sentences are **not recorded**: the local BanglaTTS service speaks them, and each is also shown as text. The wording lives in `server/src/services/spokenStatus.js`; the browser can only name one of these prompts, never send its own text.
+
+1. `welcome` — বলুন, আপনি কী জানতে চান? The caller answers in their own words. Status words (অবস্থা by consonant outline, খবর, আপডেট, শুনানি, …) are matched in the browser; only when none match does the model (`openai/gpt-oss-120b`) say whether it is a status request. Anything short of its clear yes plays `confirmStatus`; "no" ends with `onlyStatus`.
+2. `askNumber`, then `confirmNumber` — the number is read back as digit words and confirmed with yes/no. A number said in the first sentence after "নম্বর" is read back without asking again.
+3. `askPin` — never read back or shown. `pinAgain` plays when six digits were not heard; `notFound` when the ID and PIN do not match.
+4. The status sentence (below), then the call ends. `tryHelpline` ends it after three failed tries or a locked ID; `unavailable` when the lookup fails.
+
+The number and PIN can also be **typed** during the call: focusing the box stops listening for that turn. Each turn's transcript is shown as **আপনি বললেন: …**, except the PIN's.
+
+The status sentence comes from fixed templates over the verified record and says only the stage, hearing date (as Bangla words, Dhaka calendar, never a past date), and an officer's next step if it is written in Bangla. It never says a name, the legal matter, the lawyer, or the office, since the phone may be shared.
+
+**Whisper hints.** Short replies are misheard without context: unprimed, a lone "হ্যাঁ" came back as "হাই" or "হ্যাদ", "না" as "ন", and one "শূন্য" of six was dropped. Yes/no turns are primed with `হ্যাঁ। না। জি। ঠিক আছে।` and number/PIN turns with the Bangla digit words; silence and noise did not turn into a hinted word. English digit words written in Bangla script (ওয়ান, টু, থ্রি, …) count as digits by exact spelling. The model is never used for numbers: from a broken transcript it guessed a wrong PIN rather than admit a missing digit, and rewriting transcripts into "correct" Bangla changed or deleted words.
+
+**Running it.** `npm run tts:setup` once (about 1 GB: CPU PyTorch, BanglaTTS, a 56 MB model downloaded on first start), then `npm run tts` (port 5055) and `TTS_URL=http://127.0.0.1:5055` in `server/.env`. Without it the same sentences appear as text only. `npm run check:voice-status --workspace server` speaks the seeded Malek case and saves the MP3. The Silero model under BanglaTTS is licensed CC BY-NC-SA 4.0: demo use only.

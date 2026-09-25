@@ -72,10 +72,11 @@ Automated evidence: `tests/e2e/step8.spec.js`; API denial/grant audit and escala
 3. For a time-compressed test/demo, schedule two required updates a few seconds apart and let the local timer mark both missed. Inspect the overdue alert and temporary new-assignment hold.
 4. Sign in as the DLAO officer. Review the hold and record a human continue/lift decision. Confirm there is no misconduct finding, automatic reassignment, or payment recovery.
 5. As a helpline agent, enter the caller-provided ID/code, complete the human-verification attestation, select an allowed safe channel, and read only generic status/next action. Record a lawyer-change request only if the applicant asks.
+   To show Malek finding out on his own without reading, start `npm run tts` and, on the home page's Track card, press **Ask by Voice**. After each beep say "আমার কেসের অবস্থা জানতে চাই", his number digit by digit (APP-2026-000006: "শূন্য শূন্য শূন্য শূন্য শূন্য ছয়"), "হ্যাঁ", and his 6-digit PIN from `server/.demo-credentials.json` (`demo_malek_status_lookup_code`). The number and PIN can also be typed. He hears the stage, the hearing date, and the Bangla next step; no name is spoken.
 6. To show the direct citizen route, submit a separate fictional Malek application from a citizen account. Have the DLAO accept it, offer an assignment, and wait for the lawyer to accept. As that citizen, use **Request Change**; the DLAO reviews it, then separately offers a replacement. The old lawyer remains assigned until the replacement accepts.
 7. Record status-only payment events for two work stages, including any work by the prior lawyer after reassignment. Inspect each stage's current status and the full event history. The inactivity alert and payment review remain separate from the citizen's change request and do not establish misconduct or recovery.
 
-Automated evidence: `tests/e2e/step9.spec.js` and `server/src/step9.test.js`. The update timer runs in one API process; no real notification, contact, payment, panel removal, or misconduct determination occurs.
+Automated evidence: `tests/e2e/step9.spec.js` and `server/src/step9.test.js`; spoken status: `tests/e2e/voice-status.spec.js`, `server/src/voiceStatus.test.js`, `server/src/voiceStatusLookup.test.js`, `client/src/utils/voiceStatusCall.test.js`. The update timer runs in one API process; no real notification, contact, payment, panel removal, or misconduct determination occurs.
 
 ## Required bad-day test map
 

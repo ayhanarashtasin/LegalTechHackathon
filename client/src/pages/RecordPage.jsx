@@ -19,6 +19,16 @@ const factStatus = (fact) => ['AI_INFERRED', 'UNKNOWN_OR_UNVERIFIED'].includes(f
   : fact.applicantConfirmed ? 'VICTIM_CONFIRMED' : fact.sourceType === 'REPRESENTATIVE_REPORTED' ? 'REPRESENTATIVE_REPORTED' : null
 
 // Officer-only playback of the full 16699 call. Fetched with the session token, which a bare <audio src> cannot send.
+// The latest mediation or panel-lawyer start in the audit trail, so work begun on another device stays visible.
+function serverPathway(events = []) {
+  let pathway = ''
+  for (const { action } of events) {
+    if (action === 'MEDIATION_REGISTERED') pathway = 'MEDIATION'
+    else if (action === 'PANEL_LAWYER_ASSIGNMENT_OFFERED') pathway = 'PANEL_LAWYER'
+  }
+  return pathway
+}
+
 function CallRecording({ applicationId, token }) {
   const [url, setUrl] = useState(null)
   const [state, setState] = useState('LOADING')
@@ -68,7 +78,7 @@ export default function RecordPage({ session }) {
   const [rejectionRecord, setRejectionRecord] = useState(() => {
     try { return JSON.parse(localStorage.getItem(`dlas_reject_${applicationId}`)) } catch { return null }
   })
-  const [activePathway, setActivePathway] = useState(() => {
+  const [savedPathway, setActivePathway] = useState(() => {
     try { return localStorage.getItem(`dlas_pathway_${applicationId}`) || '' } catch { return '' }
   })
   const [resolvedThroughPathway, setResolvedThroughPathway] = useState(() => {
@@ -133,14 +143,13 @@ export default function RecordPage({ session }) {
 
   async function submitAcceptance(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason.trim() || 'Application accepted and eligible for government legal aid.' }, bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
+    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason }, bi('Application accepted. Case ID created.', 'আবেদন গৃহীত। মামলা নম্বর তৈরি হয়েছে।'))
     if (result) setAcceptReason('')
   }
 
   async function submitPriority(event) {
     event.preventDefault()
-    const autoReason = `Priority determination set to ${priorityDecision} by DLAO officer.`
-    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason.trim() || autoReason }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
+    const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, bi('Priority saved.', 'অগ্রাধিকার সংরক্ষিত।'))
     if (result) setPriorityReason('')
   }
 
@@ -193,7 +202,7 @@ export default function RecordPage({ session }) {
       appealNoticeGiven: true,
       appealDeadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     }
-    try { localStorage.setItem(`dlas_reject_${applicationId}`, JSON.stringify(recordData)) } catch {}
+    try { localStorage.setItem(`dlas_reject_${applicationId}`, JSON.stringify(recordData)) } catch { /* Storage may be unavailable. */ }
     setRejectionRecord(recordData)
     setShowRejectForm(false)
     setNotice(bi('Application rejected. Formal rejection notice and appeal guidance communicated to applicant as per DBLA procedure.', 'আবেদনটি নামঞ্জুর করা হয়েছে। বিধি মোতাবেক আবেদনকারীকে কারণ ও আপিলের নিয়ম জানানো হয়েছে।'))
@@ -201,18 +210,18 @@ export default function RecordPage({ session }) {
 
   function handleSavePathway(pathway) {
     setActivePathway(pathway)
-    try { localStorage.setItem(`dlas_pathway_${applicationId}`, pathway) } catch {}
+    try { localStorage.setItem(`dlas_pathway_${applicationId}`, pathway) } catch { /* Storage may be unavailable. */ }
     setNotice(bi(`Active service pathway set to: ${pathway === 'ADVICE' ? 'Advice (Legal guidance)' : pathway === 'MEDIATION' ? 'Mediation (In-person / ODR)' : 'Direct Legal Aid / Litigation'}`, `সক্রিয় সেবার মাধ্যম নির্ধারণ করা হয়েছে।`))
   }
 
   function handleSetResolved(value) {
     setResolvedThroughPathway(value)
-    try { localStorage.setItem(`dlas_resolved_${applicationId}`, value) } catch {}
+    try { localStorage.setItem(`dlas_resolved_${applicationId}`, value) } catch { /* Storage may be unavailable. */ }
   }
 
   function handleSetRequestsLawyer(value) {
     setBeneficiaryRequestsLawyer(value)
-    try { localStorage.setItem(`dlas_requests_lawyer_${applicationId}`, value) } catch {}
+    try { localStorage.setItem(`dlas_requests_lawyer_${applicationId}`, value) } catch { /* Storage may be unavailable. */ }
   }
 
   function handleAddAdvice(event) {
@@ -228,7 +237,7 @@ export default function RecordPage({ session }) {
     }
     const updated = [newAdvice, ...adviceRecords]
     setAdviceRecords(updated)
-    try { localStorage.setItem(`dlas_advice_${applicationId}`, JSON.stringify(updated)) } catch {}
+    try { localStorage.setItem(`dlas_advice_${applicationId}`, JSON.stringify(updated)) } catch { /* Storage may be unavailable. */ }
     setAdviceNotes('')
     if (adviceResolved) {
       handleSetResolved('YES')
@@ -247,12 +256,14 @@ export default function RecordPage({ session }) {
       closedBy: session.user.displayName || 'DLAO Officer',
     }
     setClosureRecord(outcomeData)
-    try { localStorage.setItem(`dlas_closure_${applicationId}`, JSON.stringify(outcomeData)) } catch {}
+    try { localStorage.setItem(`dlas_closure_${applicationId}`, JSON.stringify(outcomeData)) } catch { /* Storage may be unavailable. */ }
     handleSetResolved('YES')
     setNotice(bi('Outcome recorded and case officially marked closed in records.', 'মামলার চূড়ান্ত নিষ্পত্তি ও নথি সমাপ্তি নথিভুক্ত হয়েছে।'))
   }
 
   const record = data?.record
+  // A pathway chosen on this device wins; otherwise open the one already started on the shared record.
+  const activePathway = savedPathway || serverPathway(data?.audit?.events)
   const canManageIncidents = session.user.assignments.some(({ role, officeCode }) => role === 'DLAO_OFFICER' && officeCode === record?.officeCode)
   const canReadDuplicateSuggestions = session.user.assignments.some(({ role, officeCode }) => ['DLAO_OFFICER', 'CASE_SUPPORT'].includes(role) && officeCode === record?.officeCode)
   const canReviewDuplicates = session.user.assignments.some(({ role, officeCode }) => role === 'DLAO_OFFICER' && officeCode === record?.officeCode)
@@ -332,6 +343,8 @@ export default function RecordPage({ session }) {
                 <option value="URGENT">{say('URGENT')}</option>
                 <option value="ROUTINE">{say('ROUTINE')}</option>
               </select>
+              <label htmlFor="priority-reason"><Bi en="Reason" bn="কারণ" /></label>
+              <textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required />
               <button type="submit"><Bi en="Save priority" bn="অগ্রাধিকার সংরক্ষণ" /></button>
             </form>
           </Panel>}
@@ -361,6 +374,8 @@ export default function RecordPage({ session }) {
                 <h3><Bi en="2. Accept" bn="২. গ্রহণ" /></h3>
                 {!showRejectForm ? (
                   <form onSubmit={submitAcceptance} className="form-stack">
+                    <label htmlFor="accept-reason"><Bi en="Decision reason" bn="সিদ্ধান্তের কারণ" /></label>
+                    <textarea id="accept-reason" value={acceptReason} onChange={(event) => setAcceptReason(event.target.value)} minLength="10" maxLength="1000" required />
                     <button type="submit" disabled={record.reviewState !== 'READY_FOR_DECISION'}>
                       <Bi en="Accept application" bn="আবেদন গ্রহণ করুন" />
                     </button>
