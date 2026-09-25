@@ -25,7 +25,7 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
     nextHearingAt: hearing, nextAction, reason: 'Fictional case plan recorded by a human officer.',
   } })).ok()).toBeTruthy()
   expect((await request.post(`${base}/contact-attempts`, { headers: officer, data: {
-    channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Fictional shop number: another person answered; no case details were disclosed.',
+    channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Fictional shop number: another person answered; no case details were disclosed.', disclosedSensitive: false,
   } })).ok()).toBeTruthy()
   const management = await (await request.get(`/api/lawyers/applications/${applicationId}`, { headers: officer })).json()
   const offer = await request.post(`/api/lawyers/applications/${applicationId}/assignments`, { headers: officer, data: {
@@ -70,6 +70,24 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
   await officePage.getByLabel('Hold review reason').fill('Continue the temporary hold pending human review.')
   await officePage.getByRole('button', { name: 'Continue hold' }).click()
   await expect(officePage.getByRole('status').filter({ hasText: 'Hold continued' })).toBeVisible()
+
+  // Update 2 is still unreported: the officer asks for it from the alert instead of phoning the lawyer.
+  const overdueAlert = officePage.getByRole('region', { name: 'Lawyer update overdue' })
+  for (const text of ['Fictional Malek Step 9 E2E', 'Fictional Panel lawyer', 'overdue today', 'None yet']) await expect(overdueAlert).toContainText(text)
+  await overdueAlert.getByRole('button', { name: 'Request update' }).click()
+  await expect(officePage.getByRole('status').filter({ hasText: 'Reminder added to the lawyer’s worklist' })).toBeVisible()
+  await expect(overdueAlert).toContainText('reminded 1 time')
+  await expect(overdueAlert.getByRole('button', { name: 'Request update' })).toBeDisabled()
+  await overdueAlert.getByRole('button', { name: 'Review lawyer activity' }).click()
+  const activity = officePage.getByRole('region', { name: 'Lawyer activity' })
+  await expect(activity).toContainText('0 on time · 1 late · 1 overdue now')
+  await expect(activity).toContainText('not a finding of misconduct')
+  const lawyerPage = await page.context().newPage()
+  await signIn(lawyerPage, 'PANEL_LAWYER')
+  await expect(lawyerPage.getByRole('link', { name: new RegExp(caseId) })).toContainText('the DLAO asked 1×')
+  await lawyerPage.getByRole('link', { name: new RegExp(caseId) }).click()
+  await expect(lawyerPage.getByRole('note').filter({ hasText: 'The DLAO office has asked for this update' })).toBeVisible()
+  await lawyerPage.close()
 
   const payment = officePage.getByRole('heading', { name: /^Payment status/ }).locator('..')
   await expand(payment, 'Record payment status')

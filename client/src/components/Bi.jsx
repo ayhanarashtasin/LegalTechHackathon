@@ -13,7 +13,7 @@ const words = {
   DLAO: ['DLAO office', 'ডিএলএও অফিস'], WEB: ['Web', 'ওয়েব'], PHONE: ['Phone', 'ফোন'], SMS: ['SMS', 'এসএমএস'], IN_PERSON: ['In person', 'সরাসরি'],
   REMOTE: ['Remote', 'অনলাইনে'], HYBRID: ['Hybrid', 'মিশ্র'],
   BLOCKED_UNSAFE: ['Blocked: unsafe', 'নিরাপদ নয়, যোগাযোগ বন্ধ'], NO_ANSWER: ['No answer', 'কেউ ফোন ধরেননি'],
-  UNKNOWN_PERSON: ['Someone else answered', 'অন্য কেউ ধরেছে'], APPLICANT_REACHED: ['Applicant reached', 'আবেদনকারীর সাথে কথা হয়েছে'],
+  UNKNOWN_PERSON: ['Someone else answered', 'অন্য কেউ ধরেছে'], APPLICANT_REACHED: ['Applicant reached', 'আবেদনকারীর সাথে কথা হয়েছে'], DISCLOSED: ['Yes, disclosed', 'হ্যাঁ, জানানো হয়েছে'],
   DISCLOSE_NOTHING: ['Say nothing about the case', 'মামলার কোনো তথ্য জানাবেন না'], APPROVED_NEUTRAL_ONLY: ['Approved neutral words only', 'শুধু অনুমোদিত সাধারণ কথা বলুন'],
   // Roles
   DLAO_OFFICER: ['DLAO officer', 'ডিএলএও কর্মকর্তা'], CASE_SUPPORT: ['Case support', 'মামলার কাজে সহায়তা'], MEDIATOR: ['Mediator', 'মধ্যস্থতাকারী'],
@@ -85,7 +85,7 @@ const words = {
   RELATED_INCIDENT_GROUP_CREATED: ['Related cases linked', 'সম্পর্কিত মামলা যুক্ত'], RELATED_INCIDENT_EVIDENCE_LINKED: ['Shared evidence linked', 'যৌথ প্রমাণ যুক্ত'],
   PANEL_LAWYER_ASSIGNMENT_OFFERED: ['Lawyer offered the case', 'আইনজীবীকে প্রস্তাব'], PANEL_LAWYER_ACCEPTED: ['Lawyer accepted', 'আইনজীবী গ্রহণ করেছেন'],
   PANEL_LAWYER_DECLINED: ['Lawyer declined', 'আইনজীবী প্রত্যাখ্যান করেছেন'], LAWYER_UPDATE_SCHEDULED: ['Lawyer update scheduled', 'আইনজীবীর আপডেট নির্ধারিত'],
-  LAWYER_UPDATE_MISSED: ['Lawyer update missed', 'আইনজীবী আপডেট দেননি'], LAWYER_PROGRESS_UPDATE_SUBMITTED: ['Lawyer update received', 'আইনজীবীর আপডেট পাওয়া গেছে'],
+  LAWYER_UPDATE_MISSED: ['Lawyer update missed', 'আইনজীবী আপডেট দেননি'], ON_HOLD: ['On hold', 'স্থগিত'], LAWYER_UPDATE_REMINDER_SENT: ['Lawyer reminded about an overdue update', 'আইনজীবীকে বাকি আপডেটের কথা মনে করানো হয়েছে'], LAWYER_PROGRESS_UPDATE_SUBMITTED: ['Lawyer update received', 'আইনজীবীর আপডেট পাওয়া গেছে'],
   LAWYER_NEW_ASSIGNMENT_HOLD_TRIGGERED: ['Lawyer put on hold', 'আইনজীবীকে নতুন মামলা দেওয়া সাময়িক বন্ধ'], LAWYER_ASSIGNMENT_HOLD_REVIEWED: ['Lawyer hold reviewed', 'নতুন মামলা দেওয়ার স্থগিতাদেশ পর্যালোচনা হয়েছে'],
   LAWYER_CHANGE_REQUEST: ['Lawyer change requested', 'আইনজীবী বদলের অনুরোধ'], LAWYER_CHANGE_REQUEST_REVIEWED: ['Lawyer change request reviewed', 'বদলের অনুরোধ পর্যালোচিত'],
   LAWYER_CHANGE_REVIEW_TASK_CREATED: ['Lawyer change review task', 'বদলের অনুরোধ যাচাইয়ের কাজ'], LAWYER_HOLD_REVIEW_TASK_CREATED: ['Lawyer hold review task', 'স্থগিতাদেশ যাচাইয়ের কাজ'],
@@ -116,6 +116,7 @@ const words = {
   'Review new application': ['Review new application', 'নতুন আবেদন পর্যালোচনা করুন'], 'Decide reviewed application': ['Decide reviewed application', 'পর্যালোচিত আবেদনে সিদ্ধান্ত দিন'],
   'Repeat application review': ['Repeat application review', 'আবেদন আবার পর্যালোচনা করুন'], 'Request missing information': ['Request missing information', 'বাকি তথ্য চেয়ে নিন'],
   'Plan next service step': ['Plan next service step', 'পরবর্তী সেবার ধাপ ঠিক করুন'], 'Plan safer follow-up': ['Plan safer follow-up', 'আবার কীভাবে নিরাপদে যোগাযোগ করবেন, তা ঠিক করুন'],
+  'Try the applicant again': ['Try the applicant again', 'আবেদনকারীকে আবার চেষ্টা করুন'], 'Review a disclosure': ['Review a disclosure', 'তথ্য প্রকাশের বিষয়টি পর্যালোচনা করুন'],
   'Urgent human callback requested': ['Urgent human callback requested', 'জরুরি ফোন ফেরত দিতে হবে'],
   'Call back with legal information': ['Call back with legal information', 'ফোন করে আইনগত তথ্য দিন'], 'Review translated assisted intake': ['Review translated assisted intake', 'অনূদিত সহায়তা-আবেদন পর্যালোচনা করুন'],
   'Referral not acknowledged: follow up': ['Referral not acknowledged: follow up', 'রেফারেলের প্রাপ্তি স্বীকার হয়নি: খোঁজ নিন'],
@@ -154,6 +155,13 @@ export function setLang(next) {
 export const bi = (en, bn) => language === 'bn' ? bn : en
 export const num = (value) => language === 'bn' ? String(value).replace(/[0-9]/g, (digit) => '০১২৩৪৫৬৭৮৯'[digit]) : String(value)
 export const say = (code) => code == null || code === '' ? '' : words[code] ? bi(...words[code]) : humanize(String(code))
+// "5 days overdue", or "overdue today" before a whole day has passed; empty before the deadline.
+export function overdueText(dueAt, now = Date.now()) {
+  const late = now - new Date(dueAt).getTime()
+  if (!(late > 0)) return ''
+  const days = Math.floor(late / 86400000)
+  return days < 1 ? bi('overdue today', 'আজ সময় পেরিয়েছে') : bi(`${days} day${days === 1 ? '' : 's'} overdue`, `${num(days)} দিন দেরি`)
+}
 export const when = (value) => value ? new Intl.DateTimeFormat(language === 'bn' ? 'bn-BD' : 'en-BD', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : bi('Not set', 'নির্ধারিত নয়')
 
 // Fixed sentences the server writes into records (task steps, queue flags, triage reasons, system audit reasons).
@@ -176,6 +184,9 @@ const phrases = {
   'Check oral consent, original versus translated account, confirmation, identity, safe contact, and document checklist.': 'মৌখিক সম্মতি, মূল ও অনূদিত বক্তব্য, নিশ্চিতকরণ, পরিচয়, নিরাপদ যোগাযোগ ও নথির তালিকা দেখুন।',
   'Read the return reason and decide the next human step.': 'ফেরতের কারণ পড়ে পরবর্তী ধাপ ঠিক করুন।',
   'An unknown person answered and nothing was disclosed. Choose a safer route or time before trying again.': 'অন্য কেউ ফোন ধরেছিলেন; মামলার কোনো তথ্য জানানো হয়নি। আবার যোগাযোগের আগে নিরাপদ উপায় বা সময় ঠিক করুন।',
+  'An unknown person answered and case details were disclosed. Choose a safer route or time before trying again.': 'অন্য কেউ ফোন ধরেছিলেন এবং মামলার তথ্য জানানো হয়ে গেছে। আবার যোগাযোগের আগে নিরাপদ উপায় বা সময় ঠিক করুন।',
+  'Nobody answered. Try again at the planned time, within the safe-contact window.': 'কেউ ফোন ধরেননি। ঠিক করা সময়ে, নিরাপদ সময়ের মধ্যে আবার চেষ্টা করুন।',
+  'Case details reached someone other than the applicant. Assess the risk to the applicant and update the safe-contact plan before any further contact.': 'আবেদনকারী ছাড়া অন্য কেউ মামলার তথ্য জেনে গেছেন। আবেদনকারীর ঝুঁকি যাচাই করুন এবং আবার যোগাযোগের আগে নিরাপদ যোগাযোগের পরিকল্পনা হালনাগাদ করুন।',
   'Call back only on the recorded safe number at the safe time. Use neutral wording; disclose nothing if someone else answers.': 'নথিতে থাকা নিরাপদ নম্বরে নির্ধারিত সময়েই ফোন করুন। সাধারণ কথা বলুন; অন্য কেউ ধরলে মামলার কোনো তথ্য জানাবেন না।',
   'Review the missed mandatory updates and decide whether to continue or lift the temporary hold. This is not a misconduct finding; reviewer authority is pending policy verification.': 'যেসব বাধ্যতামূলক আপডেট দেওয়া হয়নি, সেগুলো দেখে সাময়িক স্থগিতাদেশ বহাল থাকবে কি না ঠিক করুন। এটি অসদাচরণের রায় নয়; কে এই পর্যালোচনা করবেন, তা নীতিগতভাবে এখনো নিশ্চিত নয়।',
   'Review the overdue update and the safe-contact profile before any follow-up or travel. Do not use an unsafe number.': 'আবার যোগাযোগ বা যাতায়াতের ব্যবস্থা করার আগে বাকি থাকা অগ্রগতির তথ্য ও নিরাপদ যোগাযোগের নিয়ম দেখুন। অনিরাপদ নম্বরে ফোন করবেন না।',
@@ -225,7 +236,7 @@ const templates = [
   [/^(\d+) restricted sensitive-evidence items? (?:is|are) on file\.$/, (count) => `${num(count)}টি সীমিত সংবেদনশীল প্রমাণ আছে।`],
   [/^Human decision: (.+)\.$/, (value) => `কর্মকর্তার সিদ্ধান্ত: ${value === 'not recorded' ? 'এখনো নথিভুক্ত হয়নি' : say(value)}।`],
   [/^(\d+) open tasks? need a human next action\.$/, (count) => `${num(count)}টি চলমান কাজে পরবর্তী পদক্ষেপ দরকার।`],
-  [/^(\d+) mandatory panel-lawyer updates? (?:is|are) overdue or missed; review a safe next step before asking the applicant to travel\.$/, (count) => `আইনজীবীর ${num(count)}টি বাধ্যতামূলক আপডেট বাকি; আবেদনকারীকে আসতে বলার আগে নিরাপদ পরবর্তী ধাপ দেখুন।`],
+  [/^(\d+) mandatory panel-lawyer updates? (?:is|are) overdue \(the oldest by (\d+) days?\); review a safe next step before asking the applicant to travel\.$/, (count, days) => `আইনজীবীর ${num(count)}টি বাধ্যতামূলক আপডেট বাকি (সবচেয়ে পুরোনোটি ${num(days)} দিন দেরিতে); আবেদনকারীকে আসতে বলার আগে নিরাপদ পরবর্তী ধাপ দেখুন।`],
   [/^Oldest open task is (\d+) days old; demo reminder threshold reached\.$/, (days) => `সবচেয়ে পুরোনো অসমাপ্ত কাজটি ${num(days)} দিন ধরে পড়ে আছে; মনে করানোর সময় পেরিয়ে গেছে।`],
   [/^Awaiting acknowledgement from (\S+?)(; the deadline has passed)?\.$/, (office, late) => `${office} অফিস থেকে প্রাপ্তি স্বীকারের অপেক্ষায়${late ? '; সময় পেরিয়ে গেছে' : ''}।`],
   [/^Acknowledged by (\S+); awaiting accept or return\.$/, (office) => `${office} অফিস রেফারেলটি পেয়েছে। এখন তারা গ্রহণ করবে, নাকি ফেরত পাঠাবে, সেই সিদ্ধান্তের অপেক্ষায়।`],
@@ -256,7 +267,7 @@ export function Term({ code }) {
 }
 
 const good = new Set(['VICTIM_CONFIRMED', 'ACCEPTED', 'DONE', 'APPROVED', 'READABLE', 'GRANTED', 'VERIFIED', 'APPLICANT_REACHED', 'SUBMITTED_ON_TIME', 'RECONCILED', 'PAYMENT_RECORDED', 'CERTIFIED_FINAL', 'COMPLETED', 'REVIEWED', 'LIFTED', 'AGREEMENT_REACHED', 'NOT_DUPLICATE'])
-const bad = new Set(['VERIFICATION_REQUIRED', 'UNREADABLE', 'DENIED', 'MISSED', 'RETURNED', 'DISPUTED', 'URGENT', 'BLOCKED_UNSAFE', 'UNKNOWN_PERSON', 'RESTRICTED', 'DIFFERENT', 'DECLINED', 'SUBMITTED_LATE', 'NO_AGREEMENT', 'ABSENT', 'HIGH', 'SAFETY_REVIEW', 'URGENT_REVIEW'])
+const bad = new Set(['DISCLOSED', 'ON_HOLD', 'VERIFICATION_REQUIRED', 'UNREADABLE', 'DENIED', 'MISSED', 'RETURNED', 'DISPUTED', 'URGENT', 'BLOCKED_UNSAFE', 'UNKNOWN_PERSON', 'RESTRICTED', 'DIFFERENT', 'DECLINED', 'SUBMITTED_LATE', 'NO_AGREEMENT', 'ABSENT', 'HIGH', 'SAFETY_REVIEW', 'URGENT_REVIEW'])
 export function Badge({ code }) {
   return <span className={`badge${good.has(code) ? '' : bad.has(code) ? ' warn-badge' : ' wait-badge'}`}><Term code={code} /></span>
 }
@@ -274,6 +285,7 @@ export function Panel({ id, en, bn, hint, open = false, children }) {
 }
 
 // A creation form stays folded until the officer asks for it.
-export function AddForm({ en, bn, children }) {
-  return <details className="add-form"><summary><Bi en={en} bn={bn} /></summary>{children}</details>
+// `open` lets a page open the form for the user (for example, a simulated call that pre-fills it).
+export function AddForm({ en, bn, children, open }) {
+  return <details className="add-form" open={open}><summary><Bi en={en} bn={bn} /></summary>{children}</details>
 }

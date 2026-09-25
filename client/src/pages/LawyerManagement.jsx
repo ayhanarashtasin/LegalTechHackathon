@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api.js'
-import { AddForm, Badge, Bi, Panel, Term, bi, num, say, when } from '../components/Bi.jsx'
+import { AddForm, Badge, Bi, Panel, Term, bi, num, overdueText, say, when } from '../components/Bi.jsx'
 
 const localDate = (value) => {
   if (!value) return ''
@@ -8,9 +8,32 @@ const localDate = (value) => {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 }
 const paymentStages = ['CASE_PREPARATION', 'HEARING_ATTENDANCE', 'CLAIM_REVIEW', 'RECONCILIATION']
+const REMINDER_GAP_MS = 24 * 60 * 60 * 1000 // the server allows one reminder per update per day
+const remindedTimes = (count) => bi(`reminded ${count} time${count === 1 ? '' : 's'}`, `${num(count)} বার মনে করানো হয়েছে`)
+
+// One panel lawyer's record in this office, for a human to review; not a finding about the lawyer.
+function LawyerActivity({ activity }) {
+  const { updates } = activity
+  return <section className="lawyer-activity" aria-label={bi('Lawyer activity', 'আইনজীবীর কাজের হিসাব')}>
+    <h4>{activity.lawyerName}: <Bi en="activity in this office" bn="এই অফিসে কাজের হিসাব" /></h4>
+    <dl className="details compact">
+      <div><dt><Bi en="Cases" bn="মামলা" /></dt><dd>{bi(`${activity.activeCases} active · ${activity.pastCases} past`, `${num(activity.activeCases)}টি চলমান · ${num(activity.pastCases)}টি আগের`)}</dd></div>
+      <div><dt><Bi en="Required updates" bn="বাধ্যতামূলক আপডেট" /></dt><dd>{bi(`${updates.onTime} on time · ${updates.late} late · ${updates.overdue} overdue now · ${updates.upcoming} upcoming`,
+        `${num(updates.onTime)}টি সময়মতো · ${num(updates.late)}টি দেরিতে · ${num(updates.overdue)}টি এখন বাকি · ${num(updates.upcoming)}টি সামনে`)}</dd></div>
+      <div><dt><Bi en="Reminders sent" bn="মনে করানো হয়েছে" /></dt><dd>{num(activity.remindersSent)}</dd></div>
+      <div><dt><Bi en="Last report" bn="শেষ প্রতিবেদন" /></dt><dd>{activity.lastReportAt ? when(activity.lastReportAt) : bi('None yet', 'এখনো নেই')}</dd></div>
+      <div><dt><Bi en="New assignments" bn="নতুন মামলা" /></dt><dd>{activity.hold?.newAssignmentHold ? <><Badge code="ON_HOLD" /> <Term code={activity.hold.reviewState} /></> : bi('Open', 'দেওয়া যাবে')}</dd></div>
+    </dl>
+    {activity.cases.some(({ overdueUpdates }) => overdueUpdates) && <ul className="plain-list">{activity.cases.filter(({ overdueUpdates }) => overdueUpdates).map((item) => <li key={item.caseId}>
+      <strong>{item.caseId}</strong> · {bi(`${item.overdueUpdates} overdue, the oldest ${item.oldestOverdueDays} days`, `${num(item.overdueUpdates)}টি বাকি, সবচেয়ে পুরোনোটি ${num(item.oldestOverdueDays)} দিন দেরিতে`)}
+    </li>)}</ul>}
+    <p className="muted"><Bi en="A pattern for a human to review. It is not a finding of misconduct." bn="এটি একজন মানুষের পর্যালোচনার জন্য একটি চিত্র। এটি অসদাচরণের কোনো সিদ্ধান্ত নয়।" /></p>
+  </section>
+}
 
 export default function LawyerManagement({ applicationId, token, onChanged }) {
   const [data, setData] = useState(null)
+  const [loadedAt, setLoadedAt] = useState(0) // when data arrived: the "now" for days overdue and reminder spacing
   const [refresh, setRefresh] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -26,11 +49,12 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
   const [paymentReason, setPaymentReason] = useState('')
   const [paymentAssignmentId, setPaymentAssignmentId] = useState('')
   const [canBearCosts, setCanBearCosts] = useState(false)
+  const [activity, setActivity] = useState(null) // the lawyer activity summary being reviewed, if any
 
   useEffect(() => {
     const controller = new AbortController()
     api(`/api/lawyers/applications/${applicationId}`, { token, signal: controller.signal })
-      .then(setData).catch((failure) => { if (failure.name !== 'AbortError') setError(failure.message) })
+      .then((result) => { setData(result); setLoadedAt(Date.now()) }).catch((failure) => { if (failure.name !== 'AbortError') setError(failure.message) })
     return () => controller.abort()
   }, [applicationId, token, refresh])
 
@@ -80,6 +104,18 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
       : bi('Request declined with reason.', 'কারণসহ অনুরোধ প্রত্যাখ্যাত।'))
   }
 
+  // "Request update": a reminder on the lawyer's own worklist, recorded on the case, instead of phoning them.
+  async function requestUpdate(update) {
+    if (await mutate(`/api/lawyers/applications/${applicationId}/updates/${update.id}/reminders`, undefined,
+      bi('Reminder added to the lawyer’s worklist. No call, SMS, or email was sent.', 'আইনজীবীর কাজের তালিকায় মনে করিয়ে দেওয়া হয়েছে। কোনো ফোন, এসএমএস বা ইমেইল পাঠানো হয়নি।'))) setActivity(null)
+  }
+
+  async function toggleActivity(lawyerUserId) {
+    if (activity?.lawyerUserId === String(lawyerUserId)) return setActivity(null)
+    setError('')
+    try { setActivity(await api(`/api/lawyers/panel-lawyers/${lawyerUserId}/activity`, { token })) } catch (failure) { setError(failure.message) }
+  }
+
   function reviewHold(lawyerId, decision) {
     mutate(`/api/lawyers/holds/${lawyerId}/review`, { decision, reason: holdReasons[lawyerId] || '' },
       decision === 'LIFT' ? bi('Hold lifted. Current cases unchanged.', 'নতুন মামলা দেওয়ার স্থগিতাদেশ তুলে নেওয়া হয়েছে। চলমান মামলাগুলো আগের মতোই থাকবে।') : bi('Hold continued. Current cases unchanged.', 'নতুন মামলা দেওয়ার স্থগিতাদেশ বহাল আছে। চলমান মামলাগুলো আগের মতোই থাকবে।'))
@@ -98,6 +134,8 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
   const pendingAssignments = data?.assignments.filter(({ active, status }) => active && status === 'PENDING') ?? []
   const approvedRequests = data?.changeRequests.filter(({ status }) => status === 'APPROVED') ?? []
   const holds = data?.panelLawyers.filter(({ hold }) => hold?.newAssignmentHold) ?? []
+  // Overdue, unreported updates of the lawyer who holds the case now; each gets its own alert.
+  const overdueUpdates = data?.updates.filter(({ status, assignmentId }) => status === 'MISSED' && activeAssignments.some(({ id }) => id === assignmentId)) ?? []
   const hint = activeAssignments[0]?.lawyerName ?? (pendingAssignments.length ? bi('Offer pending', 'আইনজীবীর উত্তরের অপেক্ষায়') : data && bi('No lawyer yet', 'এখনো আইনজীবী নেই'))
 
   return <Panel id="lawyer-title" en="Phase 5: Panel Lawyer Process (If Required)" bn="ধাপ ৫: প্যানেল আইনজীবী নিয়োগ ও মামলা পরিচালনা" hint={hint} open>
@@ -105,6 +143,27 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
     {notice && <p role="status" className="success">{notice}</p>}
     {!data && !error && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
     {data && <>
+      {overdueUpdates.map((update) => {
+        const lawyer = activeAssignments.find(({ id }) => id === update.assignmentId)
+        const remindedRecently = update.lastRemindedAt && loadedAt - new Date(update.lastRemindedAt).getTime() < REMINDER_GAP_MS
+        return <section className="escalation-box" key={update.id} aria-label={bi('Lawyer update overdue', 'আইনজীবীর আপডেট বাকি')}>
+          <h3><Bi en="Lawyer update overdue" bn="আইনজীবীর আপডেট বাকি" /></h3>
+          <dl className="details compact">
+            <div><dt><Bi en="Case" bn="মামলা" /></dt><dd>{data.caseId}</dd></div>
+            <div><dt><Bi en="Applicant" bn="আবেদনকারী" /></dt><dd>{data.applicantName || bi('Not recorded', 'লেখা নেই')}</dd></div>
+            <div><dt><Bi en="Lawyer" bn="আইনজীবী" /></dt><dd>{lawyer?.lawyerName}</dd></div>
+            <div><dt><Bi en="Required update" bn="বাধ্যতামূলক আপডেট" /></dt><dd>{num(update.sequence)} · <Bi en="due" bn="শেষ সময়" /> {when(update.dueAt)}</dd></div>
+            <div><dt><Bi en="Overdue" bn="দেরি" /></dt><dd><strong>{overdueText(update.dueAt, loadedAt)}</strong></dd></div>
+            <div><dt><Bi en="Reminders" bn="মনে করানো" /></dt><dd>{update.reminderCount ? <>{remindedTimes(update.reminderCount)} · <Bi en="last" bn="শেষবার" /> {when(update.lastRemindedAt)}</> : bi('None yet', 'এখনো নয়')}</dd></div>
+          </dl>
+          <div className="choice-row">
+            <button type="button" disabled={busy || remindedRecently} onClick={() => requestUpdate(update)}><Bi en="Request update" bn="আপডেট চান" /></button>
+            {lawyer?.lawyerUserId && <button type="button" className="secondary-button" aria-expanded={activity?.lawyerUserId === String(lawyer.lawyerUserId)} onClick={() => toggleActivity(lawyer.lawyerUserId)}><Bi en="Review lawyer activity" bn="আইনজীবীর কাজের হিসাব দেখুন" /></button>}
+          </div>
+          {remindedRecently && <p className="muted"><Bi en="Reminded in the last 24 hours; another reminder is possible after that." bn="গত ২৪ ঘণ্টার মধ্যে মনে করানো হয়েছে; এরপর আবার মনে করানো যাবে।" /></p>}
+        </section>
+      })}
+      {activity && <LawyerActivity activity={activity} />}
       {holds.map(({ id, displayName, hold }) => <section className="escalation-box" key={id} aria-label={bi('Lawyer assignment hold', 'আইনজীবী নিয়োগ স্থগিত')}>
         <h3><Bi en="New assignments on hold: review needed" bn="নতুন মামলা দেওয়া সাময়িক বন্ধ; পর্যালোচনা দরকার" /></h3>
         <p>{displayName}: <Bi en="missed 2 updates in a row. Current cases continue. No misconduct finding." bn="পরপর ২টি আপডেট দেননি। চলমান মামলা চলবে। এটি অসদাচরণের সিদ্ধান্ত নয়।" /></p>
@@ -147,7 +206,7 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
           )}
         </div>
 
-        {data.assignments.length === 0 ? <p className="muted"><Bi en="No lawyer yet." bn="এখনো আইনজীবী নেই।" /></p> : <ul className="plain-list">{data.assignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong> <Badge code={item.status} />{!item.active && <small className="muted"> · <Bi en="past" bn="আগের" /></small>}{item.hold && <p><small><Bi en="Hold" bn="স্থগিত" />: <Term code={item.hold.reviewState} /></small></p>}</div></li>)}</ul>}
+        {data.assignments.length === 0 ? <p className="muted"><Bi en="No lawyer yet." bn="এখনো আইনজীবী নেই।" /></p> : <ul className="plain-list">{data.assignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong> <Badge code={item.status} />{!item.active && <small className="muted"> · <Bi en="past" bn="আগের" /></small>}{item.hold && <p><small><Bi en="Hold" bn="স্থগিত" />: <Term code={item.hold.reviewState} /></small></p>}</div>{item.active && item.lawyerUserId && <button type="button" className="secondary-button" aria-expanded={activity?.lawyerUserId === String(item.lawyerUserId)} onClick={() => toggleActivity(item.lawyerUserId)}><Bi en="Review activity" bn="কাজের হিসাব" /></button>}</li>)}</ul>}
         {pendingAssignments.length > 0 && <p role="status"><Bi en="Waiting for the lawyer to accept or decline." bn="আইনজীবীর উত্তরের অপেক্ষা।" /></p>}
         <AddForm en="Offer to a lawyer" bn="আইনজীবীকে প্রস্তাব দিন">
           <form onSubmit={offerAssignment} className="form-stack inline-form">
@@ -175,7 +234,7 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
       </div>
 
       {activeAssignments.length > 0 && <div className="block"><h3 id="schedule-title"><Bi en="Progress updates" bn="অগ্রগতির আপডেট" /></h3>
-        {data.updates.length === 0 ? <p className="muted"><Bi en="None scheduled." bn="কোনো আপডেট নির্ধারিত নেই।" /></p> : <ol className="timeline compact">{data.updates.map((item) => <li key={item.id}><strong><Bi en="Update" bn="আপডেট" /> {num(item.sequence)}</strong> <Badge code={item.status} /><p>{item.instruction}</p><small><Bi en="Due" bn="শেষ সময়" /> {when(item.dueAt)}{item.missedAt ? ` · ${bi('missed', 'বাদ')} ${when(item.missedAt)}` : ''}{item.nextAction ? ` · ${bi('next', 'পরবর্তী')}: ${item.nextAction}` : ''}</small>{item.report && <p><Bi en="Report:" bn="প্রতিবেদন:" /> {item.report}</p>}</li>)}</ol>}
+        {data.updates.length === 0 ? <p className="muted"><Bi en="None scheduled." bn="কোনো আপডেট নির্ধারিত নেই।" /></p> : <ol className="timeline compact">{data.updates.map((item) => <li key={item.id}><strong><Bi en="Update" bn="আপডেট" /> {num(item.sequence)}</strong> <Badge code={item.status} /><p>{item.instruction}</p><small><Bi en="Due" bn="শেষ সময়" /> {when(item.dueAt)}{item.status === 'MISSED' ? ` · ${overdueText(item.dueAt, loadedAt)}` : item.missedAt ? ` · ${bi('missed', 'বাদ')} ${when(item.missedAt)}` : ''}{item.reminderCount ? ` · ${remindedTimes(item.reminderCount)}` : ''}{item.nextAction ? ` · ${bi('next', 'পরবর্তী')}: ${item.nextAction}` : ''}</small>{item.report && <p><Bi en="Report:" bn="প্রতিবেদন:" /> {item.report}</p>}</li>)}</ol>}
         <AddForm en="Schedule an update" bn="আপডেট নির্ধারণ">
           <form onSubmit={schedule} className="form-stack inline-form">
             <label htmlFor="update-assignment"><Bi en="Lawyer" bn="আইনজীবী" /></label><select id="update-assignment" name="assignmentId" defaultValue={activeAssignments[0]?.id}>{activeAssignments.map((item) => <option key={item.id} value={item.id}>{item.lawyerName}</option>)}</select>

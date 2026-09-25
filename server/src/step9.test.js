@@ -70,7 +70,7 @@ test('Step 9: status, missed updates, temporary hold, separate human reassignmen
     allowedChannels: ['IN_PERSON'], prohibitedChannels: ['PHONE', 'SMS'], safeTimeWindow: 'Caller-initiated in-person lookup only', smsSafe: false, neutralWordingRequired: true,
   } })).status, 201)
   const failedContact = await request(`${base}/contact-attempts`, { method: 'POST', token: officer.token, body: {
-    channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Fictional shop contact attempt: another person answered; nothing about the case was disclosed.',
+    channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Fictional shop contact attempt: another person answered; nothing about the case was disclosed.', disclosedSensitive: false,
   } })
   assert.equal(failedContact.data.disclosedSensitive, false)
   assert.ok((await request(`${base}/tasks`, { token: officer.token })).data.some(({ kind, status }) => kind === 'FOLLOW_UP' && status === 'OPEN'))

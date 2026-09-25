@@ -205,7 +205,13 @@ export const ContactAttempt = model('ContactAttempt', new Schema({
   channel: { type: String, required: true },
   outcome: { type: String, required: true },
   reason: { type: String, required: true },
+  // Who picked up follows from the outcome; the note says who someone else was ("shop owner").
+  answeredBy: { type: String, enum: ['APPLICANT', 'SOMEONE_ELSE', 'NOBODY'] },
+  answeredByNote: String,
+  // Stated by the officer when someone else answered, never assumed.
   disclosedSensitive: { type: Boolean, default: false },
+  statusExplained: Boolean,
+  nextAttemptAt: Date,
   safeContactVersion: Number,
   recordedByUserId: ref('User'),
 }, { timestamps: { createdAt: true, updatedAt: false } }))
@@ -528,6 +534,8 @@ const lawyerUpdateSchema = new Schema({
   report: String,
   nextAction: String,
   recordedByUserId: ref('User', false),
+  // DLAO reminders for an overdue update, shown on the lawyer's own worklist instead of a phone call.
+  reminders: [{ _id: false, at: { type: Date, required: true }, byUserId: ref('User') }],
 }, { timestamps: true })
 lawyerUpdateSchema.index({ assignmentId:  1, sequence: 1 }, { unique: true })
 lawyerUpdateSchema.index({ applicationId: 1, status: 1, dueAt: 1 })

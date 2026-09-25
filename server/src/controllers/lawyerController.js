@@ -1,11 +1,19 @@
 import {
-  assignLawyer, getLawyerManagement, getLawyerWorklist, requestLawyerChange, respondToAssignment,
-  reviewLawyerChange, reviewLawyerHold, scheduleLawyerUpdate, submitLawyerUpdate, updateCasePlan,
+  assignLawyer, getLawyerActivity, getLawyerManagement, getLawyerWorklist, remindLawyerUpdate, requestLawyerChange,
+  respondToAssignment, reviewLawyerChange, reviewLawyerHold, scheduleLawyerUpdate, submitLawyerUpdate, updateCasePlan,
   updateLawyerPaymentStatus,
 } from '../services/lawyerService.js'
 
 export async function worklist(request, response) {
   response.json(await getLawyerWorklist(request.auth))
+}
+
+export async function updateReminder(request, response) {
+  response.status(201).json(await remindLawyerUpdate(request.params.applicationId, request.params.updateId, request.auth))
+}
+
+export async function lawyerActivity(request, response) {
+  response.json(await getLawyerActivity(request.params.lawyerUserId, request.auth))
 }
 
 export async function management(request, response) {

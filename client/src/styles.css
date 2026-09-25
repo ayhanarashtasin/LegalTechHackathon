@@ -2305,3 +2305,14 @@ thead th { font-size: .8rem; color: #4e5751; }
 
 
 
+
+/* Contact log: a yes/no the officer must answer, laid out as one row of choices. */
+.choice-group { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; }
+.choice-group legend { flex-basis: 100%; padding: 0 .25rem; font-weight: 650; }
+.choice-group label { display: inline-flex; align-items: center; gap: .4rem; font-weight: 500; min-height: 44px; }
+.choice-group input { width: auto; min-height: 0; }
+
+/* A panel lawyer's activity summary, opened from an overdue-update alert or the assigned lawyer. */
+.lawyer-activity { border: 1px solid #eaeaea; background: #fbfbfa; border-radius: 7px; padding: 1rem 1.25rem; margin: 1rem 0; }
+.lawyer-activity h4 { margin: 0 0 .5rem; }
+.reminder-note { margin: .4rem 0 0; padding: .45rem .7rem; border-left: 3px solid #956400; background: #fbf3db; color: #5c3d00; font-size: .9rem; }

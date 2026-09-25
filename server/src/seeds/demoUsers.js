@@ -201,7 +201,18 @@ try {
     await acceptApplication(malek.applicationId, 'Fictional Malek scenario accepted by the demo officer.', officerActor)
   }
   if (!await ContactAttempt.exists({ applicationId: malek.applicationId, outcome: 'UNKNOWN_PERSON' })) {
-    await recordContactAttempt(malek.applicationId, { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Fictional shop line: another person answered; neutral wording only and no case facts were disclosed.' }, officerActor)
+    await recordContactAttempt(malek.applicationId, {
+      channel: 'PHONE', outcome: 'UNKNOWN_PERSON', answeredByNote: 'Shop owner', disclosedSensitive: false,
+      nextAttemptAt: new Date(Date.now() + 86400000).toISOString(),
+      reason: 'Fictional shop line: another person answered; neutral wording only and no case facts were disclosed.',
+    }, officerActor)
+  }
+  // The retry at the planned time, so the log shows the whole story: tried, not reached, tried again, reached.
+  if (!await ContactAttempt.exists({ applicationId: malek.applicationId, outcome: 'APPLICANT_REACHED' })) {
+    await recordContactAttempt(malek.applicationId, {
+      channel: 'PHONE', outcome: 'APPLICANT_REACHED', statusExplained: true,
+      reason: 'Fictional retry at the planned time: Malek answered himself; the status and hearing date were explained.',
+    }, officerActor)
   }
   // The next step is in Bangla so the spoken status can read it to Malek, and the hearing is on a court working day
   // (Sunday to Thursday in Dhaka) about two weeks out. A plan an officer changed by hand is kept.

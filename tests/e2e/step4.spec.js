@@ -113,11 +113,22 @@ test('Ripon reports for Moyuri by keyboard; the DLAO sees one pending representa
   await expect(facts.filter({ hasText: 'District' })).toContainText('Joypurhat')
   await expect(facts.filter({ hasText: 'NID known' })).toContainText('No')
 
+  // The simulated call opens the log form with the neutral words; the officer states what happened and plans a retry.
   await page.getByRole('button', { name: 'Simulate call: unknown person answers' }).click()
   const script = page.getByRole('figure', { name: 'Neutral script' }).locator('blockquote')
   await expect(script).toBeVisible()
   for (const secret of [applicationId, 'Moyuri', 'Ripon', 'Joypurhat', 'family dispute', 'legal', 'আইনি', 'লিগ্যাল']) await expect(script).not.toContainText(secret)
-  await expect(page.getByRole('region', { name: /^Contact log/ })).toContainText('Someone else answered')
+  const contactLog = page.getByRole('region', { name: /^Contact log/ })
+  await expect(contactLog.getByLabel(/^Who answered/)).toBeFocused()
+  await contactLog.getByLabel(/^Who answered/).fill('Shop owner')
+  await contactLog.getByRole('radio', { name: 'No, nothing' }).check()
+  const retry = new Date(Date.now() + 86400000)
+  const retryLocal = `${retry.getFullYear()}-${String(retry.getMonth() + 1).padStart(2, '0')}-${String(retry.getDate()).padStart(2, '0')}T15:00`
+  await contactLog.getByLabel('Next attempt').fill(retryLocal)
+  await contactLog.getByRole('button', { name: 'Log attempt' }).click()
+  await expect(contactLog).toContainText('Someone else answered')
+  await expect(contactLog).toContainText('Someone else (Shop owner)')
+  await expect(contactLog.locator('dd').filter({ hasText: /^No$/ })).toHaveCount(1)
   await expect(page.getByRole('region', { name: /^Tasks/ })).toContainText('Plan safer follow-up')
   await expect(page.getByRole('region', { name: /^History/ })).toContainText('Integrity check passed')
 })

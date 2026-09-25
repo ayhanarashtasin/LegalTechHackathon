@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto
 import { Application, AssistanceRecord, AuditEvent, CallRecording, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerPaymentEvent, LawyerUpdate, Mediation, Person, Referral, Representation, RoleAssignment, SafeContactProfile, Task, User, VoiceTranscript } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
+import { daysOverdue } from '../utils/overdue.js'
 import { nextRecordId } from '../utils/recordId.js'
 import { extractionModel, outlineComplaint, speechModel } from './ai/groq.js'
 import { appendAudit, getAuditTrail } from './auditService.js'
@@ -729,7 +730,10 @@ function queueFlags(application, identityStatus, tasks, urgentReasons, referral,
       : referral.status === 'SENT' ? `Awaiting acknowledgement from ${referral.receivingOfficeCode}${new Date(referral.dueAt).getTime() < now ? '; the deadline has passed' : ''}.`
         : `Acknowledged by ${referral.receivingOfficeCode}; awaiting accept or return.` })
   }
-  if (missedUpdates.length) flags.push({ code: 'LAWYER_UPDATE_OVERDUE', reason: `${missedUpdates.length} mandatory panel-lawyer update${missedUpdates.length === 1 ? ' is' : 's are'} overdue or missed; review a safe next step before asking the applicant to travel.` })
+  if (missedUpdates.length) {
+    const oldest = Math.max(...missedUpdates.map(({ dueAt }) => daysOverdue(dueAt, now)))
+    flags.push({ code: 'LAWYER_UPDATE_OVERDUE', reason: `${missedUpdates.length} mandatory panel-lawyer update${missedUpdates.length === 1 ? ' is' : 's are'} overdue (the oldest by ${oldest} day${oldest === 1 ? '' : 's'}); review a safe next step before asking the applicant to travel.` })
+  }
   if (overdue || (tasks.length && oldestOpenDays >= (application.status === 'SUBMITTED' ? 2 : 7))) flags.push({ code: 'OVERDUE', reason: overdue ? 'An open task passed its explicit due date.' : `Oldest open task is ${oldestOpenDays} days old; demo reminder threshold reached.` })
   return flags
 }
@@ -792,7 +796,20 @@ export async function listContactAttempts(applicationId, actor) {
   return ContactAttempt.find({ applicationId }).sort({ createdAt: -1 }).lean()
 }
 
-export async function recordContactAttempt(applicationId, { channel, outcome, reason }, actor) {
+// A contact attempt as it happened, so an officer can later see how often the office tried and what came of it: who
+// answered, whether anything about the case reached someone else (the officer's statement, never assumed), whether
+// the status was explained, and when to try again. An unsuccessful attempt always leaves a follow-up, dated when the
+// officer planned the next attempt; a disclosure leaves its own review task.
+const ANSWERED_BY = { APPLICANT_REACHED: 'APPLICANT', UNKNOWN_PERSON: 'SOMEONE_ELSE', NO_ANSWER: 'NOBODY' }
+function contactFollowUp(outcome, disclosedSensitive) {
+  if (outcome === 'NO_ANSWER') return { title: 'Try the applicant again', nextAction: 'Nobody answered. Try again at the planned time, within the safe-contact window.' }
+  if (outcome !== 'UNKNOWN_PERSON') return null
+  return { title: 'Plan safer follow-up', nextAction: disclosedSensitive
+    ? 'An unknown person answered and case details were disclosed. Choose a safer route or time before trying again.'
+    : 'An unknown person answered and nothing was disclosed. Choose a safer route or time before trying again.' }
+}
+
+export async function recordContactAttempt(applicationId, { channel, outcome, reason, answeredByNote, disclosedSensitive = false, statusExplained, nextAttemptAt }, actor) {
   return mongoose.connection.transaction(async (session) => {
     const application = await officeApplication(applicationId, actor, session)
     const profile = await SafeContactProfile.findOne({ applicationId }).sort({ version: -1 }).session(session)
@@ -800,26 +817,38 @@ export async function recordContactAttempt(applicationId, { channel, outcome, re
       throw new HttpError(409, 'UNSAFE_CONTACT', 'This channel is not permitted by the active safe-contact profile.')
     }
     const updated = await advance(application, session)
+    const nextAttempt = nextAttemptAt ? new Date(nextAttemptAt) : null
     const [attempt] = await ContactAttempt.create([{
-      applicationId, caseId: application.caseId, channel, outcome, reason,
-      disclosedSensitive: false, safeContactVersion: profile?.version,
+      applicationId, caseId: application.caseId, channel, outcome, reason, answeredBy: ANSWERED_BY[outcome], answeredByNote,
+      disclosedSensitive, statusExplained, nextAttemptAt: nextAttempt ?? undefined, safeContactVersion: profile?.version,
       recordedByUserId: actor.userId,
     }], { session })
     // An unknown person answering fails safe: neutral wording only, then a safer follow-up for a human to plan.
     const failedSafe = outcome === 'UNKNOWN_PERSON'
-    const [followUp] = failedSafe ? await Task.create([{
-      applicationId, caseId: application.caseId, kind: 'FOLLOW_UP', title: 'Plan safer follow-up', ownerRole: 'DLAO_OFFICER',
-      nextAction: 'An unknown person answered and nothing was disclosed. Choose a safer route or time before trying again.',
-    }], { session }) : []
+    const followUp = contactFollowUp(outcome, disclosedSensitive)
+    const tasks = [
+      ...(followUp ? [{ ...followUp, dueAt: nextAttempt ?? undefined }] : []),
+      ...(disclosedSensitive ? [{
+        title: 'Review a disclosure', dueAt: new Date(),
+        nextAction: 'Case details reached someone other than the applicant. Assess the risk to the applicant and update the safe-contact plan before any further contact.',
+      }] : []),
+    ]
+    const created = tasks.length ? await Task.create(tasks.map((task) => ({ applicationId, caseId: application.caseId, kind: 'FOLLOW_UP', ownerRole: 'DLAO_OFFICER', ...task })), { session, ordered: true }) : []
+    const followUpTaskId = followUp ? created[0].id : null
+    const disclosureTaskId = disclosedSensitive ? created.at(-1).id : null
     await appendAudit({
       applicationId, caseId: application.caseId, sequence: updated.auditSequence,
       action: 'CONTACT_ATTEMPT_LOGGED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER',
-      newState: { contactAttemptId: attempt.id, channel, outcome, disclosedSensitive: false, failedSafe, followUpTaskId: followUp?.id ?? null, safeContactVersion: profile?.version ?? null },
+      newState: {
+        contactAttemptId: attempt.id, channel, outcome, answeredBy: ANSWERED_BY[outcome] ?? null, disclosedSensitive, statusExplained: statusExplained ?? null,
+        nextAttemptAt: nextAttempt, failedSafe, followUpTaskId, disclosureTaskId, safeContactVersion: profile?.version ?? null,
+      },
       reason,
     }, session)
     return {
-      id: attempt.id, channel, outcome, disclosedSensitive: false, safeContactVersion: profile?.version ?? null,
-      ...(failedSafe ? { neutralScript: NEUTRAL_UNKNOWN_ANSWER, followUpTaskId: followUp.id } : {}),
+      id: attempt.id, channel, outcome, answeredBy: ANSWERED_BY[outcome] ?? null, disclosedSensitive, statusExplained: statusExplained ?? null,
+      nextAttemptAt: nextAttempt, safeContactVersion: profile?.version ?? null, followUpTaskId, disclosureTaskId,
+      ...(failedSafe ? { neutralScript: NEUTRAL_UNKNOWN_ANSWER } : {}),
     }
   })
 }
@@ -831,8 +860,10 @@ export async function getFacts(applicationId, actor) {
 
 export async function getSafeContact(applicationId, actor) {
   await officeApplication(applicationId, actor)
-  return SafeContactProfile.findOne({ applicationId }).sort({ version: -1 })
+  const profile = await SafeContactProfile.findOne({ applicationId }).sort({ version: -1 })
     .select('version allowedChannels prohibitedChannels contactValue safeTimeWindow smsSafe neutralWordingRequired unknownAnswerAction').lean()
+  // The officer needs the neutral words during the call, before the attempt is logged.
+  return profile && { ...profile, neutralScript: NEUTRAL_UNKNOWN_ANSWER }
 }
 
 export async function getTranscript(applicationId, actor) {
@@ -933,12 +964,14 @@ export async function getCase(caseId, actor) {
   const latest = new Map()
   for (const version of versions) if (!latest.has(version.documentId.toString())) latest.set(version.documentId.toString(), version)
   const [updates, payment] = await Promise.all([
-    LawyerUpdate.find({ assignmentId: assignment._id }).sort({ sequence: 1 }).select('sequence dueAt instruction status missedAt submittedAt report nextAction').lean(),
+    LawyerUpdate.find({ assignmentId: assignment._id }).sort({ sequence: 1 }).select('sequence dueAt instruction status missedAt submittedAt report nextAction reminders').lean(),
     LawyerPaymentEvent.findOne({ assignmentId: assignment._id }).sort({ createdAt: -1 }).select('stage status reason createdAt').lean(),
   ])
   return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: assignment.status,
     ...summary,
-    nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null, updates,
+    nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null,
+    // The lawyer sees how often the office reminded them and when, not which officer did.
+    updates: updates.map(({ reminders = [], ...update }) => ({ ...update, reminderCount: reminders.length, lastRemindedAt: reminders.at(-1)?.at ?? null })),
     payment: payment ?? null, documents: documents.map((document) => ({ id: document._id, label: document.label, currentVersion: document.currentVersion, version: latest.get(document._id.toString()) ?? null })) }
 }
 

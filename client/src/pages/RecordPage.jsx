@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, apiUrl } from '../services/api.js'
-import { AddForm, Badge, Bi, Panel, Term, bi, num, say, tr, when } from '../components/Bi.jsx'
+import { AddForm, Badge, Bi, Panel, Term, bi, num, overdueText, say, tr, when } from '../components/Bi.jsx'
 import DocumentReview from './DocumentReview.jsx'
 import ReferralPanel from './ReferralPanel.jsx'
 import LawyerManagement from './LawyerManagement.jsx'
@@ -27,6 +27,30 @@ function serverPathway(events = []) {
     else if (action === 'PANEL_LAWYER_ASSIGNMENT_OFFERED') pathway = 'PANEL_LAWYER'
   }
   return pathway
+}
+
+// Who picked up follows from the outcome; older entries predate the field.
+const ANSWERED_BY = { APPLICANT_REACHED: 'APPLICANT', UNKNOWN_PERSON: 'SOMEONE_ELSE', NO_ANSWER: 'NOBODY' }
+const answeredByLabel = { APPLICANT: ['The applicant', 'আবেদনকারী নিজে'], SOMEONE_ELSE: ['Someone else', 'অন্য কেউ'], NOBODY: ['Nobody', 'কেউ ধরেননি'] }
+// A datetime-local value for "now", so the next attempt cannot be planned in the past.
+const localNow = () => { const now = new Date(); return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
+
+// One line of the contact log: what happened, which number (for officers, when it is the current plan's), who
+// answered, whether anything reached someone else, whether the status was explained, and when to try again.
+function ContactAttemptItem({ attempt, safeContact }) {
+  const answeredBy = attempt.answeredBy ?? ANSWERED_BY[attempt.outcome]
+  const number = ['PHONE', 'SMS'].includes(attempt.channel) && safeContact?.version === attempt.safeContactVersion ? safeContact.contactValue : null
+  return <li><div>
+    <Badge code={attempt.outcome} /> <Term code={attempt.channel} />{number && <> · {number}</>}
+    <p>{attempt.reason}</p>
+    <dl className="details compact">
+      {answeredBy && <div><dt><Bi en="Answered by" bn="কে ধরেছেন" /></dt><dd>{bi(...answeredByLabel[answeredBy])}{attempt.answeredByNote && <> ({attempt.answeredByNote})</>}</dd></div>}
+      {answeredBy === 'SOMEONE_ELSE' && <div><dt><Bi en="Case details disclosed" bn="মামলার তথ্য জানানো হয়েছে" /></dt><dd>{attempt.disclosedSensitive ? <Badge code="DISCLOSED" /> : yesNo(false)}</dd></div>}
+      {answeredBy === 'APPLICANT' && typeof attempt.statusExplained === 'boolean' && <div><dt><Bi en="Status explained" bn="অবস্থা জানানো হয়েছে" /></dt><dd>{yesNo(attempt.statusExplained)}</dd></div>}
+      {attempt.nextAttemptAt && <div><dt><Bi en="Next attempt" bn="পরের চেষ্টা" /></dt><dd>{when(attempt.nextAttemptAt)}</dd></div>}
+    </dl>
+    <small>{when(attempt.createdAt)}</small>
+  </div></li>
 }
 
 function CallRecording({ applicationId, token }) {
@@ -72,7 +96,11 @@ export default function RecordPage({ session }) {
   const [contactChannel, setContactChannel] = useState('PHONE')
   const [contactOutcome, setContactOutcome] = useState('BLOCKED_UNSAFE')
   const [contactReason, setContactReason] = useState('')
-  const [neutralScript, setNeutralScript] = useState('')
+  const [answeredByNote, setAnsweredByNote] = useState('')
+  const [disclosed, setDisclosed] = useState('') // the officer's answer, never a default: 'NO' or 'YES'
+  const [statusExplained, setStatusExplained] = useState('')
+  const [nextAttemptAt, setNextAttemptAt] = useState('')
+  const [contactFormOpen, setContactFormOpen] = useState(undefined)
   const [rejectReason, setRejectReason] = useState('')
   const [showRejectForm, setShowRejectForm] = useState(false)
   const [rejectionRecord, setRejectionRecord] = useState(() => {
@@ -183,13 +211,36 @@ export default function RecordPage({ session }) {
 
   async function submitContact(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: contactChannel, outcome: contactOutcome, reason: contactReason }, bi('Contact attempt logged. Nothing was sent.', 'যোগাযোগের চেষ্টাটি নথিভুক্ত হয়েছে। এখান থেকে কোনো বার্তা পাঠানো হয়নি।'))
-    if (result) setContactReason('')
+    const someoneElse = contactOutcome === 'UNKNOWN_PERSON'
+    const retry = someoneElse || contactOutcome === 'NO_ANSWER'
+    const result = await change(`/api/applications/${applicationId}/contact-attempts`, {
+      channel: contactChannel, outcome: contactOutcome, reason: contactReason,
+      ...(someoneElse ? { disclosedSensitive: disclosed === 'YES', ...(answeredByNote.trim() ? { answeredByNote: answeredByNote.trim() } : {}) } : {}),
+      ...(contactOutcome === 'APPLICANT_REACHED' ? { statusExplained: statusExplained === 'YES' } : {}),
+      ...(retry && nextAttemptAt ? { nextAttemptAt: new Date(nextAttemptAt).toISOString() } : {}),
+    }, someoneElse && disclosed === 'YES'
+      ? bi('Attempt logged. A task to review the disclosure was created.', 'চেষ্টাটি নথিভুক্ত হয়েছে। তথ্য প্রকাশের বিষয়টি পর্যালোচনার জন্য একটি কাজ তৈরি হয়েছে।')
+      : retry ? bi('Attempt logged. The next attempt is on the task list.', 'চেষ্টাটি নথিভুক্ত হয়েছে। পরের চেষ্টার সময় কাজের তালিকায় আছে।')
+        : bi('Contact attempt logged. Nothing was sent.', 'যোগাযোগের চেষ্টাটি নথিভুক্ত হয়েছে। এখান থেকে কোনো বার্তা পাঠানো হয়নি।'))
+    if (result) {
+      setContactReason('')
+      setAnsweredByNote('')
+      setDisclosed('')
+      setStatusExplained('')
+      setNextAttemptAt('')
+      setContactFormOpen(undefined)
+    }
   }
 
-  async function simulateUnknownAnswer() {
-    const result = await change(`/api/applications/${applicationId}/contact-attempts`, { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call to the safe number: an unknown person answered.' }, bi('Nothing was disclosed. A safer follow-up task was created.', 'মামলার কোনো তথ্য জানানো হয়নি। নিরাপদে আবার যোগাযোগের জন্য একটি কাজ তৈরি হয়েছে।'))
-    if (result) setNeutralScript(result.neutralScript)
+  // A simulated call where someone else answers: the form opens with the neutral words to say, and the officer then
+  // states whether anything was disclosed and plans the next attempt. Nothing is logged on their behalf.
+  function simulateUnknownAnswer() {
+    setContactChannel('PHONE')
+    setContactOutcome('UNKNOWN_PERSON')
+    setContactReason('Simulated call to the safe number: an unknown person answered.')
+    setDisclosed('')
+    setContactFormOpen(true)
+    requestAnimationFrame(() => document.getElementById('contact-answered-by')?.focus())
   }
 
   function handleRejection(event) {
@@ -329,7 +380,6 @@ export default function RecordPage({ session }) {
               <div><dt><Bi en="If someone else answers" bn="অন্য কেউ ধরলে" /></dt><dd><Term code={data.safeContact.unknownAnswerAction} /></dd></div>
             </dl>}
             {data.safeContact?.allowedChannels.includes('PHONE') && <button type="button" className="secondary-button" onClick={simulateUnknownAnswer}><Bi en="Simulate call: unknown person answers" bn="পরীক্ষা: অন্য কেউ ধরেছে" /></button>}
-            {neutralScript && <figure className="script-box" aria-label={bi('Neutral script', 'নিরপেক্ষ কথা')}><figcaption><Bi en="Say only this:" bn="শুধু এটুকু বলুন:" /></figcaption><blockquote>{tr(neutralScript)}</blockquote></figure>}
           </section>}
         </div>
 
@@ -841,7 +891,7 @@ export default function RecordPage({ session }) {
 
           <Panel id="tasks-title" en="Tasks" bn="কাজ" hint={openTasks ? bi(`${openTasks} open`, `${num(openTasks)}টি চলমান`) : bi('All done', 'সব সম্পন্ন')} open>
             {data.tasks.length === 0 && <p className="muted">{none()}</p>}
-            <ul className="plain-list">{data.tasks.map((task) => <li key={task._id}><div><strong><Term code={task.title} /></strong> <Badge code={task.status} /><p>{tr(task.nextAction)}</p><small><Term code={task.ownerRole} />{task.dueAt && <> · <Bi en="Due" bn="শেষ সময়" /> {when(task.dueAt)}</>}</small></div>{task.kind === 'MANUAL' && task.status === 'OPEN' && <button type="button" className="secondary-button" onClick={() => change(`/api/applications/${applicationId}/tasks/${task._id}/complete`, undefined, bi('Task completed.', 'কাজ সম্পন্ন।'))}><Bi en="Complete" bn="সম্পন্ন" /></button>}</li>)}</ul>
+            <ul className="plain-list">{data.tasks.map((task) => <li key={task._id}><div><strong><Term code={task.title} /></strong> <Badge code={task.status} /><p>{tr(task.nextAction)}</p><small><Term code={task.ownerRole} />{task.dueAt && <> · <Bi en="Due" bn="শেষ সময়" /> {when(task.dueAt)}</>}{task.status === 'OPEN' && task.dueAt && overdueText(task.dueAt) && <> · <strong>{overdueText(task.dueAt)}</strong></>}</small></div>{task.kind === 'MANUAL' && task.status === 'OPEN' && <button type="button" className="secondary-button" onClick={() => change(`/api/applications/${applicationId}/tasks/${task._id}/complete`, undefined, bi('Task completed.', 'কাজ সম্পন্ন।'))}><Bi en="Complete" bn="সম্পন্ন" /></button>}</li>)}</ul>
             <AddForm en="Add task" bn="কাজ যোগ করুন">
               <form onSubmit={submitTask} className="form-stack inline-form">
                 <label htmlFor="task-title"><Bi en="Task title" bn="কাজের নাম" /></label><input id="task-title" value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} minLength="3" maxLength="120" required />
@@ -889,14 +939,32 @@ export default function RecordPage({ session }) {
 
           {(officer || caseSupport) && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={record.assistance.caseType} documents={data.documents} token={session.token} readOnly={!officer} onChanged={() => setRefresh((value) => value + 1)} />}
 
-          <Panel id="contact-title" en="Contact log" bn="যোগাযোগের রেকর্ড" hint={data.contacts.length ? bi(`${data.contacts.length} attempts`, `${num(data.contacts.length)} বার চেষ্টা`) : none()}>
+          <Panel id="contact-title" en="Contact log" bn="যোগাযোগের রেকর্ড" open={Boolean(contactFormOpen)} hint={data.contacts.length ? bi(`${data.contacts.length} attempts`, `${num(data.contacts.length)} বার চেষ্টা`) : none()}>
             <p className="muted"><Bi en="A log only. Nothing is sent from here." bn="এখানে শুধু যোগাযোগের তথ্য নথিভুক্ত হয়; কোনো বার্তা পাঠানো হয় না।" /></p>
             {data.contacts.length === 0 && <p>{none()}</p>}
-            <ul className="plain-list">{data.contacts.map((attempt) => <li key={attempt._id}><div><Badge code={attempt.outcome} /> <Term code={attempt.channel} /><p>{attempt.reason}</p><small>{when(attempt.createdAt)}</small></div></li>)}</ul>
-            {officer && <AddForm en="Log attempt" bn="চেষ্টা লিখুন">
+            <ul className="plain-list">{data.contacts.map((attempt) => <ContactAttemptItem key={attempt._id} attempt={attempt} safeContact={officer ? data.safeContact : null} />)}</ul>
+            {officer && <AddForm en="Log attempt" bn="চেষ্টা লিখুন" open={contactFormOpen}>
               <form onSubmit={submitContact} className="form-stack inline-form">
                 <label htmlFor="contact-channel"><Bi en="Channel" bn="মাধ্যম" /></label><select id="contact-channel" value={contactChannel} onChange={(event) => setContactChannel(event.target.value)}>{['PHONE', 'SMS', 'WEB', 'IN_PERSON'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
                 <label htmlFor="contact-outcome"><Bi en="Outcome" bn="ফলাফল" /></label><select id="contact-outcome" value={contactOutcome} onChange={(event) => setContactOutcome(event.target.value)}>{['BLOCKED_UNSAFE', 'NO_ANSWER', 'UNKNOWN_PERSON', 'APPLICANT_REACHED'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select>
+                {contactOutcome === 'UNKNOWN_PERSON' && <>
+                  {data.safeContact?.neutralScript && <figure className="script-box" aria-label={bi('Neutral script', 'নিরপেক্ষ কথা')}><figcaption><Bi en="Say only this:" bn="শুধু এটুকু বলুন:" /></figcaption><blockquote>{tr(data.safeContact.neutralScript)}</blockquote></figure>}
+                  <label htmlFor="contact-answered-by"><Bi en="Who answered (optional, e.g. shop owner)" bn="কে ধরেছেন (ইচ্ছামতো, যেমন দোকানদার)" /></label>
+                  <input id="contact-answered-by" value={answeredByNote} onChange={(event) => setAnsweredByNote(event.target.value)} minLength="2" maxLength="80" autoComplete="off" />
+                  <fieldset className="choice-group"><legend><Bi en="Was anything about the case disclosed to them?" bn="তাঁকে কি মামলার কোনো তথ্য জানানো হয়েছে?" /></legend>
+                    <label><input type="radio" name="contact-disclosed" value="NO" checked={disclosed === 'NO'} onChange={() => setDisclosed('NO')} required /> <Bi en="No, nothing" bn="না, কিছুই না" /></label>
+                    <label><input type="radio" name="contact-disclosed" value="YES" checked={disclosed === 'YES'} onChange={() => setDisclosed('YES')} /> <Bi en="Yes, something was disclosed" bn="হ্যাঁ, কিছু জানানো হয়েছে" /></label>
+                  </fieldset>
+                </>}
+                {contactOutcome === 'APPLICANT_REACHED' && <fieldset className="choice-group"><legend><Bi en="Was the status explained?" bn="অবস্থা কি জানানো হয়েছে?" /></legend>
+                  <label><input type="radio" name="contact-explained" value="YES" checked={statusExplained === 'YES'} onChange={() => setStatusExplained('YES')} required /> <Bi en="Yes" bn="হ্যাঁ" /></label>
+                  <label><input type="radio" name="contact-explained" value="NO" checked={statusExplained === 'NO'} onChange={() => setStatusExplained('NO')} /> <Bi en="No" bn="না" /></label>
+                </fieldset>}
+                {(contactOutcome === 'UNKNOWN_PERSON' || contactOutcome === 'NO_ANSWER') && <>
+                  <label htmlFor="contact-next"><Bi en="Next attempt" bn="পরের চেষ্টা" /></label>
+                  <input id="contact-next" type="datetime-local" value={nextAttemptAt} min={localNow()} onChange={(event) => setNextAttemptAt(event.target.value)} aria-describedby="contact-next-hint" required />
+                  <small id="contact-next-hint"><Bi en="Safe time:" bn="নিরাপদ সময়:" /> {data.safeContact?.safeTimeWindow || bi('Not recorded', 'লেখা নেই')}</small>
+                </>}
                 <label htmlFor="contact-reason"><Bi en="What happened" bn="কী হয়েছে" /></label><textarea id="contact-reason" value={contactReason} onChange={(event) => setContactReason(event.target.value)} minLength="5" maxLength="500" required />
                 <button type="submit" className="secondary-button"><Bi en="Log attempt" bn="চেষ্টা লিখুন" /></button>
               </form>

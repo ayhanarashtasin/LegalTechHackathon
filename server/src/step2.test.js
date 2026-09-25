@@ -181,7 +181,7 @@ test('Step 2–3 shared record, workflow, server authority, provenance, and audi
     assert.equal((await request(`/api/applications/${applicationId}/safe-contact`, { method: 'POST', token: officer.token, body: first })).status, 201)
     assert.equal((await request(`/api/applications/${applicationId}/safe-contact`, { method: 'POST', token: officer.token, body: { ...first, safeTimeWindow: 'Demo afternoon' } })).status, 201)
     assert.equal(await models.SafeContactProfile.countDocuments({ applicationId }), 2)
-    const unsafeReached = await request(`/api/applications/${applicationId}/contact-attempts`, { method: 'POST', token: officer.token, body: { channel: 'PHONE', outcome: 'APPLICANT_REACHED', reason: 'This prohibited route must not be recorded as a completed contact.' } })
+    const unsafeReached = await request(`/api/applications/${applicationId}/contact-attempts`, { method: 'POST', token: officer.token, body: { channel: 'PHONE', outcome: 'APPLICANT_REACHED', reason: 'This prohibited route must not be recorded as a completed contact.', statusExplained: true } })
     assert.equal(unsafeReached.status, 409)
     assert.equal(unsafeReached.data.error.code, 'UNSAFE_CONTACT')
     const contact = await request(`/api/applications/${applicationId}/contact-attempts`, { method: 'POST', token: officer.token, body: { channel: 'PHONE', outcome: 'BLOCKED_UNSAFE', reason: 'Phone is prohibited by the current safe-contact profile.' } })
@@ -271,7 +271,7 @@ test('Step 4 voice intake keeps representative provenance, the recording notice,
   assert.match(record.data.nextTask.nextAction, /NID not known: the caller was advised to verify identity at the nearest UDC\. .*No SMS or voicemail\./)
   assert.equal((await request('/api/workspace?role=DLAO_OFFICER', { token: officer.token })).data.records.filter((item) => item.applicationId === applicationId).length, 1)
 
-  const unknown = await request(`/api/applications/${applicationId}/contact-attempts`, { method: 'POST', token: officer.token, body: { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call: an unknown person answered.' } })
+  const unknown = await request(`/api/applications/${applicationId}/contact-attempts`, { method: 'POST', token: officer.token, body: { channel: 'PHONE', outcome: 'UNKNOWN_PERSON', reason: 'Simulated call: an unknown person answered.', disclosedSensitive: false } })
   assert.equal(unknown.status, 201)
   assert.equal(unknown.data.disclosedSensitive, false)
   for (const secret of [applicationId, 'Moyuri', 'Joypurhat', 'legal', 'আইনি']) assert.ok(!unknown.data.neutralScript.includes(secret))

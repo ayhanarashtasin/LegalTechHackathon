@@ -107,10 +107,23 @@ export function validateTask(request, _response, next) {
 }
 
 export function validateContactAttempt(request, _response, next) {
-  const value = body(request, ['channel', 'outcome', 'reason'])
+  const value = body(request, ['channel', 'outcome', 'reason', 'answeredByNote', 'disclosedSensitive', 'statusExplained', 'nextAttemptAt'], ['channel', 'outcome', 'reason'])
   if (!['PHONE', 'SMS', 'WEB', 'IN_PERSON'].includes(value.channel)) fail('Contact channel is invalid.')
   if (!['NO_ANSWER', 'UNKNOWN_PERSON', 'APPLICANT_REACHED', 'BLOCKED_UNSAFE'].includes(value.outcome)) fail('Contact outcome is invalid.')
   value.reason = text(value.reason, 'Contact outcome reason', 5, 500)
+  const someoneElse = value.outcome === 'UNKNOWN_PERSON'
+  // Whether anything about the case reached someone else is the officer's statement, never a default.
+  if (someoneElse !== (typeof value.disclosedSensitive === 'boolean')) fail('Say whether anything about the case was disclosed to the person who answered.')
+  if ((value.outcome === 'APPLICANT_REACHED') !== (typeof value.statusExplained === 'boolean')) fail('Say whether the status was explained to the applicant.')
+  if (value.answeredByNote !== undefined) {
+    if (!someoneElse) fail('Who answered is recorded only when someone else answered.')
+    value.answeredByNote = text(value.answeredByNote, 'Who answered', 2, 80)
+  }
+  if (value.nextAttemptAt !== undefined) {
+    if (!['NO_ANSWER', 'UNKNOWN_PERSON'].includes(value.outcome)) fail('A next attempt is planned only after an unsuccessful attempt.')
+    const at = typeof value.nextAttemptAt === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value.nextAttemptAt) ? Date.parse(value.nextAttemptAt) : NaN
+    if (Number.isNaN(at) || at < Date.now() - 60000 || at > Date.now() + 90 * 86400000) fail('The next attempt must be a date and time within the next 90 days.')
+  }
   next()
 }
 

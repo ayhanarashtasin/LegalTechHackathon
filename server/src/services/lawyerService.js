@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 import { Application, Case, ContactAttempt, LawyerAssignment, LawyerChangeRequest, LawyerPaymentEvent, LawyerUpdate, PanelLawyerHold, RoleAssignment, Task, User } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
+import { daysOverdue } from '../utils/overdue.js'
 import { advance, lawyerCaseSummaries, officeApplication, verifyHelplineLookup } from './applicationService.js'
 import { appendAudit } from './auditService.js'
 
@@ -23,14 +24,18 @@ async function auditApplication(application, session, action, newState, reason, 
   return updated
 }
 
+// How many times the office reminded the lawyer about an update, and when last; the reminding officers stay internal.
+const reminderSummary = (reminders = []) => ({ reminderCount: reminders.length, lastRemindedAt: reminders.at(-1)?.at ?? null })
+
 export async function getLawyerManagement(applicationId, actor) {
   const { caseRecord, application } = await acceptedCase(applicationId, actor)
-  const [assignments, requests, updates, payments, panelRoles] = await Promise.all([
+  const [assignments, requests, updates, payments, panelRoles, summaries] = await Promise.all([
     LawyerAssignment.find({ applicationId }).sort({ createdAt: -1 }).populate('lawyerUserId', 'displayName').lean(),
     LawyerChangeRequest.find({ applicationId }).sort({ createdAt: -1 }).lean(),
     LawyerUpdate.find({ applicationId }).sort({ dueAt: 1 }).lean(),
     LawyerPaymentEvent.find({ applicationId }).sort({ createdAt: -1, _id: -1 }).select('assignmentId stage status reason createdAt').lean(),
     RoleAssignment.find({ role: 'PANEL_LAWYER', officeCode: application.officeCode, active: true }).populate('userId', 'displayName active').lean(),
+    lawyerCaseSummaries([applicationId]),
   ])
   const lawyerIds = [...new Set([
     ...assignments.map(({ lawyerUserId }) => lawyerUserId?._id?.toString()),
@@ -47,7 +52,7 @@ export async function getLawyerManagement(applicationId, actor) {
     paymentsByAssignment.get(assignmentId).push(payment)
   }
   return {
-    applicationId, caseId: caseRecord.caseId,
+    applicationId, caseId: caseRecord.caseId, applicantName: summaries.get(applicationId)?.applicantName ?? null,
     casePlan: { nextHearingAt: caseRecord.nextHearingAt ?? null, nextAction: caseRecord.nextAction ?? '' },
     reviewerRole: reviewRole,
     authorityNotice: 'Demo reviewer routing only. The legally authorised body for a temporary hold is pending policy verification.',
@@ -65,7 +70,9 @@ export async function getLawyerManagement(applicationId, actor) {
         payment: paymentByAssignment.get(assignment._id.toString()) ?? null,
         paymentHistory: paymentsByAssignment.get(assignment._id.toString()) ?? [] }
     }),
-    updates: updates.map(({ _id, assignmentId, sequence, dueAt, instruction, status, missedAt, submittedAt, report, nextAction }) => ({ id: _id, assignmentId, sequence, dueAt, instruction, status, missedAt, submittedAt, report, nextAction })),
+    updates: updates.map(({ _id, assignmentId, sequence, dueAt, instruction, status, missedAt, submittedAt, report, nextAction, reminders }) => ({
+      id: _id, assignmentId, sequence, dueAt, instruction, status, missedAt, submittedAt, report, nextAction, ...reminderSummary(reminders),
+    })),
     changeRequests: requests.map(({ _id, channel, reason, status, reviewReason, reviewedAt, createdAt }) => ({ id: _id, channel, reason, status, reviewReason, reviewedAt, createdAt })),
   }
 }
@@ -96,7 +103,7 @@ export async function getLawyerWorklist(actor) {
       applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, priorityDecision: summary?.priorityDecision ?? null,
       assignmentStatus: assignment.status, caseStatus: accepted ? record?.status ?? 'OPEN' : null,
       nextHearingAt: accepted ? record?.nextHearingAt ?? null : null, nextAction: accepted ? record?.nextAction ?? null : null,
-      updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt })) : [],
+      updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt, reminders }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt, ...reminderSummary(reminders) })) : [],
       payment: accepted ? paymentByAssignment.get(assignment._id.toString()) ?? null : null }
   }) }
 }
@@ -260,6 +267,63 @@ export async function sweepOverdueLawyerUpdates(now = new Date()) {
     if (changed) swept += 1
   }
   return swept
+}
+
+// "Request update" from the officer: a reminder on the lawyer's own worklist, audited and counted, instead of a phone
+// call. Only an overdue update with no report can be requested, at most once a day, while that lawyer holds the case.
+const REMINDER_GAP_MS = 24 * 60 * 60 * 1000
+
+export async function remindLawyerUpdate(applicationId, updateId, actor) {
+  const now = new Date()
+  await sweepOverdueLawyerUpdates(now) // an update just past its deadline counts as overdue here too
+  return mongoose.connection.transaction(async (session) => {
+    const { application } = await acceptedCase(applicationId, actor, session)
+    const update = await LawyerUpdate.findOne({ _id: updateId, applicationId, status: 'MISSED' }).session(session)
+    if (!update) throw new HttpError(409, 'UPDATE_NOT_OVERDUE', 'Only an overdue update without a report can be requested.')
+    const assignment = await LawyerAssignment.findOne({ _id: update.assignmentId, active: true, status: 'ACCEPTED' }).session(session)
+    if (!assignment) throw new HttpError(409, 'NO_ACTIVE_LAWYER', 'This update belongs to a lawyer who no longer holds the case.')
+    const last = update.reminders.at(-1)
+    if (last && now - last.at < REMINDER_GAP_MS) throw new HttpError(409, 'REMINDER_RECENT', 'This lawyer was reminded about this update in the last 24 hours.')
+    update.reminders.push({ at: now, byUserId: actor.userId })
+    await update.save({ session })
+    const overdue = daysOverdue(update.dueAt, now)
+    await auditApplication(application, session, 'LAWYER_UPDATE_REMINDER_SENT', {
+      assignmentId: assignment._id, updateId: update._id, sequence: update.sequence, daysOverdue: overdue, reminderCount: update.reminders.length,
+    }, undefined, actor.userId)
+    return { updateId: update._id, sequence: update.sequence, daysOverdue: overdue, ...reminderSummary(update.reminders) }
+  })
+}
+
+// One panel lawyer's record across the officer's own offices: caseload, how updates were kept, reminders, and any
+// hold. It shows a pattern for a human to review; it is not a finding about the lawyer.
+export async function getLawyerActivity(lawyerUserId, actor) {
+  const offices = actor.assignments.filter(({ role }) => role === 'DLAO_OFFICER').map(({ officeCode }) => officeCode)
+  const panelRole = await RoleAssignment.exists({ userId: lawyerUserId, role: 'PANEL_LAWYER', officeCode: { $in: offices } })
+  // A lawyer outside the officer's offices answers like an unknown one.
+  if (!panelRole) throw new HttpError(404, 'NOT_FOUND', 'No panel lawyer in this office matched.')
+  const [lawyer, assignments, hold] = await Promise.all([
+    User.findById(lawyerUserId).select('displayName').lean(),
+    LawyerAssignment.find({ lawyerUserId, officeCode: { $in: offices } }).select('caseId status active').lean(),
+    PanelLawyerHold.findOne({ lawyerUserId }).select('newAssignmentHold reviewState').lean(),
+  ])
+  const updates = await LawyerUpdate.find({ assignmentId: { $in: assignments.map(({ _id }) => _id) }, status: { $ne: 'CANCELLED' } })
+    .select('assignmentId status dueAt submittedAt reminders').lean()
+  const count = (status) => updates.filter((update) => update.status === status).length
+  const byAssignment = Map.groupBy(updates, ({ assignmentId }) => assignmentId.toString())
+  const now = Date.now()
+  const current = assignments.filter(({ active, status }) => active && ['PENDING', 'ACCEPTED'].includes(status))
+  return {
+    lawyerUserId, lawyerName: lawyer?.displayName ?? 'Unavailable',
+    activeCases: current.length, pastCases: assignments.length - current.length,
+    updates: { onTime: count('SUBMITTED_ON_TIME'), late: count('SUBMITTED_LATE'), overdue: count('MISSED'), upcoming: count('PENDING') },
+    remindersSent: updates.reduce((sum, { reminders }) => sum + (reminders?.length ?? 0), 0),
+    lastReportAt: updates.map(({ submittedAt }) => submittedAt).filter(Boolean).sort((a, b) => b - a)[0] ?? null,
+    hold: hold ? { newAssignmentHold: hold.newAssignmentHold, reviewState: hold.reviewState } : null,
+    cases: current.map(({ _id, caseId, status }) => {
+      const overdue = (byAssignment.get(_id.toString()) ?? []).filter((update) => update.status === 'MISSED')
+      return { caseId, assignmentStatus: status, overdueUpdates: overdue.length, oldestOverdueDays: Math.max(0, ...overdue.map(({ dueAt }) => daysOverdue(dueAt, now))) }
+    }),
+  }
 }
 
 export async function submitLawyerUpdate(assignmentId, updateId, input, actor) {

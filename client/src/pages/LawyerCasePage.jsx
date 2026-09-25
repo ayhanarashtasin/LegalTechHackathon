@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api } from '../services/api.js'
-import { AddForm, Badge, Bi, Term, bi, num, say, when } from '../components/Bi.jsx'
+import { AddForm, Badge, Bi, Term, bi, num, overdueText, say, when } from '../components/Bi.jsx'
 
 export default function LawyerCasePage({ session }) {
   const { caseId } = useParams()
@@ -423,7 +423,8 @@ export default function LawyerCasePage({ session }) {
           <section className="panel" aria-labelledby="updates-title"><div className="panel-body"><h2 id="updates-title" className="panel-heading"><Bi en="Required Progress Updates (DLAO Schedules)" bn="প্রয়োজনীয় অগ্রগতির আপডেট (ডিএলএও নির্ধারিত)" /></h2>
             {openUpdates.length === 0 ? <p className="muted"><Bi en="Nothing due." bn="কোনো আপডেট বাকি নেই।" /></p> : <ul className="plain-list">{openUpdates.map((update) => {
               const draft = drafts[update._id] || {}
-              return <li key={update._id}><div><strong><Bi en="Update" bn="আপডেট" /> {num(update.sequence)}</strong> <Badge code={update.status} /><p>{update.instruction}</p><small><Bi en="Due" bn="শেষ সময়" /> {when(update.dueAt)}</small>
+              return <li key={update._id}><div><strong><Bi en="Update" bn="আপডেট" /> {num(update.sequence)}</strong> <Badge code={update.status} /><p>{update.instruction}</p><small><Bi en="Due" bn="শেষ সময়" /> {when(update.dueAt)}{update.status === 'MISSED' && <> · <strong>{overdueText(update.dueAt)}</strong></>}</small>
+                {update.reminderCount > 0 && <p role="note" className="reminder-note"><Bi en="The DLAO office has asked for this update" bn="ডিএলএও অফিস এই আপডেটটি চেয়েছে" /> ({bi(`${update.reminderCount} time${update.reminderCount === 1 ? '' : 's'}`, `${num(update.reminderCount)} বার`)}, <Bi en="last" bn="শেষবার" /> {when(update.lastRemindedAt)})</p>}
                 <form onSubmit={(event) => submitUpdate(event, update)} className="form-stack inline-form">
                   <label htmlFor={`lawyer-report-${update._id}`}><Bi en="Progress report" bn="অগ্রগতির প্রতিবেদন" /></label><textarea id={`lawyer-report-${update._id}`} value={draft.report || ''} onChange={(event) => setDrafts((current) => ({ ...current, [update._id]: { ...current[update._id], report: event.target.value } }))} minLength="5" maxLength="2000" required />
                   <label htmlFor={`lawyer-next-${update._id}`}><Bi en="Next step" bn="পরবর্তী ধাপ" /></label><input id={`lawyer-next-${update._id}`} value={draft.nextAction || ''} onChange={(event) => setDrafts((current) => ({ ...current, [update._id]: { ...current[update._id], nextAction: event.target.value } }))} minLength="5" maxLength="300" required />
