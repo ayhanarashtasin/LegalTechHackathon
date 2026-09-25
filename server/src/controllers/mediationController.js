@@ -1,7 +1,8 @@
 import {
   advanceMediation, amendSettlementDraft, certifyMediation, claimMediation, createSettlementDraft, getMediation,
   recordAttendance, recordDocumentReview, recordLegalApplicability, recordOutcome, recordScheduling,
-  recordSignature, reviewSettlementDraft, startMediation, verifyMediation,
+  issueSigningInvitation, openPartySigning, recordPartySignature, recordSignature,
+  reviewSettlementDraft, startMediation, verifyMediation,
 } from '../services/mediationService.js'
 
 export async function read(request, response) { response.json(await getMediation(request.params.applicationId, request.auth)) }
@@ -16,6 +17,9 @@ export async function draft(request, response) { response.status(201).json(await
 export async function amendDraft(request, response) { response.json(await amendSettlementDraft(request.params.applicationId, request.body, request.auth)) }
 export async function reviewDraft(request, response) { response.json(await reviewSettlementDraft(request.params.applicationId, request.body, request.auth)) }
 export async function sign(request, response) { response.status(201).json(await recordSignature(request.params.applicationId, request.body, request.auth)) }
+export async function inviteParty(request, response) { response.status(201).json(await issueSigningInvitation(request.params.applicationId, request.body.signerRole, request.auth)) }
+export async function openParty(request, response) { response.json(await openPartySigning(request.body.code)) }
+export async function signParty(request, response) { response.status(201).json(await recordPartySignature(request.body.code, request.body)) }
 export async function verify(request, response) { response.json(await verifyMediation(request.params.applicationId, request.auth)) }
 export async function legalApplicability(request, response) { response.json(await recordLegalApplicability(request.params.applicationId, request.body, request.auth)) }
 export async function certify(request, response) { response.json(await certifyMediation(request.params.applicationId, request.body, request.auth)) }

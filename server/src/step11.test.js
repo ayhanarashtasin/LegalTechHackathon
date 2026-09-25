@@ -95,6 +95,30 @@ test('Step 11: five fictional cases run through three components; conflict requi
     await fact(applicationId, officer.token, 'safety.urgent', urgent)
     if (currentPriority) await priority(applicationId, officer.token, currentPriority)
   }
+  async function returnedReferral(applicationId, respondedAt) {
+    const application = await models.Application.findOne({ applicationId }).lean()
+    const task = await models.Task.create({
+      applicationId, caseId: application.caseId, kind: 'REFERRAL', title: 'Fictional referral task',
+      ownerRole: 'DLAO_OFFICER', nextAction: 'Review returned referral.',
+    })
+    return models.Referral.create({
+      applicationId, caseId: application.caseId, sendingOfficeCode: 'DEMO', receivingOfficeCode: 'OTHER',
+      sentByUserId: officer.user._id, responsibleUserId: officer.user._id,
+      reason: 'Fictional jurisdiction review.', history: 'Fictional referral history.', expectedAction: 'Review and respond.',
+      dueAt: new Date('2030-01-01'), status: 'RETURNED', respondedAt, responseReason: 'Fictional return for human review.', taskId: task._id,
+    })
+  }
+  const singleReturn = await returnedReferral(applications[1], new Date('2026-01-01'))
+  await returnedReferral(applications[2], new Date('2026-01-01'))
+  const latestReturn = await returnedReferral(applications[2], new Date('2026-01-02'))
+  const escalation = await models.Task.create({
+    applicationId: applications[2], kind: 'ROUTING_DECISION', title: 'Fictional routing escalation',
+    ownerRole: 'DLAO_OFFICER', nextAction: 'Authorised officer decides the route.',
+  })
+  await models.Application.updateOne({ applicationId: applications[3] }, { $set: { routingDecision: {
+    route: 'RETAIN', officeCode: 'DEMO', reason: 'Fictional prior human routing decision.',
+    returnCount: 0, decidedByUserId: officer.user._id, decidedAt: new Date('2026-01-03'),
+  } } })
   assert.equal((await request(`/api/applications/${applications[0]}/triage`, { token: helpline.token })).status, 403)
   assert.equal((await request(`/api/applications/${applications[0]}/triage`, { token: outsideOfficer.token })).status, 403)
 
@@ -106,8 +130,19 @@ test('Step 11: five fictional cases run through three components; conflict requi
     assert.equal(response.data.model, 'rules-only')
     assert.equal(response.data.components.length, 3)
     assert.ok(response.data.components.every(({ requiresHumanReview }) => requiresHumanReview))
+    assert.equal(response.data.routingReview.requiresHumanReview, true)
     assessments.push(response.data)
   }
+  assert.equal(assessments[0].routingReview.status, 'ROUTE_NOT_RECORDED')
+  assert.equal(assessments[1].routingReview.status, 'RETURNED_REFERRAL_REVIEW')
+  assert.ok(assessments[1].routingReview.evidenceRefs.includes(`referral:${singleReturn.id}`))
+  assert.equal(assessments[2].routingReview.status, 'ESCALATION_OPEN')
+  assert.ok(assessments[2].routingReview.evidenceRefs.includes(`task:${escalation.id}`))
+  assert.ok(assessments[2].routingReview.evidenceRefs.includes(`referral:${latestReturn.id}`))
+  assert.equal(assessments[3].routingReview.status, 'HUMAN_ROUTE_RECORDED')
+  assert.equal(assessments[1].components.find(({ name }) => name === 'URGENCY_ROUTING').urgencySignal, 'LOW')
+  assert.equal((await models.Application.findOne({ applicationId: applications[1] }).lean()).routingDecision?.route, undefined)
+  assert.equal((await request(`/api/applications/${applications[2]}/triage`, { token: officer.token })).data[0].routingReview.status, 'ESCALATION_OPEN')
   const conflict = assessments[4]
   assert.equal(conflict.disagreements.length, 1)
   assert.deepEqual(conflict.components.map(({ name }) => name), ['CASE_CATEGORIZER', 'PROCESS_SAFETY', 'URGENCY_ROUTING'])

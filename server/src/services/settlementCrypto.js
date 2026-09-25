@@ -4,7 +4,7 @@ export function canonicalSettlement(draft) {
   const sections = [...draft.sections].sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0).map(({ key, label, text, aiFilled }) => ({
     key, label, text: String(text).replaceAll('\r\n', '\n').trim(), aiFilled: Boolean(aiFilled),
   }))
-  return JSON.stringify({ draftId: String(draft._id ?? draft.id), version: Number(draft.version), template: draft.template, sections })
+  return JSON.stringify({ draftId: String(draft._id ?? draft.id), version: Number(draft.version), template: draft.template, ...(draft.templateRevision ? { templateRevision: draft.templateRevision } : {}), sections })
 }
 
 export function settlementHash(draft) {

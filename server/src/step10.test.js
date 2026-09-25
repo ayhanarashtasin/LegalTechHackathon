@@ -73,7 +73,9 @@ async function duplicateApplication({ name, phone, dob, district }, token) {
 
 test('Step 10: related factory-fire Cases share one standard document; duplicate review stays human and separate', async () => {
   const officer = await actor('test10.officer', 'DLAO_OFFICER')
+  const support = await actor('test10.support', 'CASE_SUPPORT')
   const outsideOfficer = await actor('test10.outside', 'DLAO_OFFICER', 'OTHER')
+  const outsideSupport = await actor('test10.outsidesupport', 'CASE_SUPPORT', 'OTHER')
   const first = await acceptedApplication('Fictional factory worker one', officer.token)
   const second = await acceptedApplication('Fictional factory worker two', officer.token)
   const third = await acceptedApplication('Fictional factory worker three', officer.token)
@@ -89,6 +91,14 @@ test('Step 10: related factory-fire Cases share one standard document; duplicate
   } })
   assert.equal(groupResult.status, 201)
   assert.equal(groupResult.data.members.length, 3)
+  assert.equal((await request(`/api/applications/${first.applicationId}/incidents`, { token: support.token })).status, 200)
+  assert.equal((await request(`/api/applications/${first.applicationId}/incidents`, { token: outsideSupport.token })).status, 403)
+  assert.equal((await request(`/api/applications/${first.applicationId}/incidents`, { method: 'POST', token: support.token, body: {
+    applicationIds: members.map(({ applicationId }) => applicationId), title: 'Case support cannot create a group',
+    reason: 'This write must remain restricted to DLAO officers.',
+  } })).status, 403)
+  assert.equal((await request(`/api/incidents/${groupResult.data.id}`, { token: support.token })).status, 200)
+  assert.equal((await request(`/api/incidents/${groupResult.data.id}`, { token: outsideSupport.token })).status, 403)
   assert.equal((await request(`/api/applications/${first.applicationId}/incidents`, { method: 'POST', token: officer.token, body: {
     applicationIds: [second.applicationId, third.applicationId], title: 'Invalid group without route Application',
     reason: 'The request intentionally omits the Application in the route.',
@@ -106,6 +116,13 @@ test('Step 10: related factory-fire Cases share one standard document; duplicate
   const group = await request(`/api/incidents/${groupResult.data.id}`, { token: officer.token })
   assert.equal(group.data.sharedEvidence.length, 1)
   assert.match(group.data.sharedEvidence[0].textContent, /Synthetic tabletop exercise only/)
+  const supportGroup = await request(`/api/incidents/${groupResult.data.id}`, { token: support.token })
+  assert.equal(supportGroup.data.canShareEvidence, false)
+  assert.deepEqual(supportGroup.data.availableDocuments, [])
+  assert.equal(supportGroup.data.sharedEvidence.length, 1)
+  assert.equal((await request(`/api/incidents/${groupResult.data.id}/evidence`, { method: 'POST', token: support.token, body: {
+    documentId: createdDocument.data.id, reason: 'Case support cannot share another document.',
+  } })).status, 403)
   assert.equal(await models.Document.countDocuments({ _id: createdDocument.data.id }), 1)
   assert.equal((await models.RelatedIncidentGroup.findById(groupResult.data.id)).commonDocumentIds.length, 1)
   assert.equal(await models.Case.countDocuments({ applicationId: { $in: members.map(({ applicationId }) => applicationId) } }), 3)
@@ -122,6 +139,8 @@ test('Step 10: related factory-fire Cases share one standard document; duplicate
   assert.equal((await request(`/api/incidents/${groupResult.data.id}/evidence`, { method: 'POST', token: officer.token, body: {
     documentId: restricted.data.id, reason: 'Attempt to share restricted material is refused.',
   } })).status, 403)
+  const supportAfterRestricted = await request(`/api/incidents/${groupResult.data.id}`, { token: support.token })
+  assert.equal(supportAfterRestricted.data.sharedEvidence.some(({ label }) => label === 'Synthetic restricted placeholder'), false)
   assert.equal((await request(`/api/incidents/${groupResult.data.id}`, { token: outsideOfficer.token })).status, 403)
   const outsideCase = await acceptedApplication('Fictional outside-office case', outsideOfficer.token)
   assert.equal((await request(`/api/applications/${first.applicationId}/incidents`, { method: 'POST', token: officer.token, body: {

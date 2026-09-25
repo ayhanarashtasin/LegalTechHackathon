@@ -1,5 +1,5 @@
 import mongoose from 'mongoose'
-import { CaseFact, Document, Person, SafeContactProfile, TriageAssessment } from '../models/index.js'
+import { CaseFact, Document, Person, Referral, SafeContactProfile, Task, TriageAssessment } from '../models/index.js'
 import { HttpError } from '../utils/httpError.js'
 import { advance, officeApplication } from './applicationService.js'
 import { appendAudit } from './auditService.js'
@@ -29,11 +29,14 @@ const definitions = [
 
 async function triageContext(application) {
   const relevantFields = ['triage.case_category', 'safety.urgent', 'identity.document_access']
-  const [facts, person, safeContact, documents] = await Promise.all([
+  const [facts, person, safeContact, documents, latestReturn, returnCount, openRoutingTask] = await Promise.all([
     CaseFact.find({ applicationId: application.applicationId, field: { $in: relevantFields } }).sort({ revision: -1 }).select('_id field value revision sourceType').lean(),
     Person.findById(application.applicantPersonId).select('identityStatus').lean(),
     SafeContactProfile.findOne({ applicationId: application.applicationId }).sort({ version: -1 }).select('allowedChannels prohibitedChannels smsSafe neutralWordingRequired').lean(),
     Document.find({ applicationId: application.applicationId }).select('sensitivity').lean(),
+    Referral.findOne({ applicationId: application.applicationId, status: 'RETURNED' }).sort({ respondedAt: -1, _id: -1 }).select('_id respondedAt createdAt').lean(),
+    Referral.countDocuments({ applicationId: application.applicationId, status: 'RETURNED' }),
+    Task.findOne({ applicationId: application.applicationId, kind: 'ROUTING_DECISION', status: 'OPEN' }).select('_id').lean(),
   ])
   const latest = new Map()
   for (const fact of facts) if (!latest.has(fact.field)) latest.set(fact.field, fact)
@@ -68,9 +71,35 @@ async function triageContext(application) {
       'documents:counts',
     ],
     routingRefs: ['application:priority', ...(safetyRef ? [safetyRef] : [])],
+    routingReview: routingReview(application, latestReturn, returnCount, openRoutingTask),
     safeRefSet,
   }
   return state
+}
+
+function routingReview(application, latestReturn, returnCount, openRoutingTask) {
+  const decision = application.routingDecision
+  const returnAfterDecision = latestReturn && (Number.isInteger(decision?.returnCount)
+    ? returnCount > decision.returnCount
+    : !decision?.decidedAt || (latestReturn.respondedAt ?? latestReturn.createdAt) > decision.decidedAt)
+  const evidenceRefs = [
+    ...(openRoutingTask ? [`task:${openRoutingTask._id}`] : []),
+    ...(latestReturn ? [`referral:${latestReturn._id}`] : []),
+    'application:routing-decision',
+  ]
+  let status = 'ROUTE_NOT_RECORDED'
+  let reason = 'No human routing decision is recorded. An authorised officer must check jurisdiction under approved policy.'
+  if (openRoutingTask) {
+    status = 'ESCALATION_OPEN'
+    reason = 'A routing escalation task is open after returned referrals. An authorised officer must decide the route.'
+  } else if (returnAfterDecision) {
+    status = 'RETURNED_REFERRAL_REVIEW'
+    reason = 'A returned referral needs a human routing review. Review its reason before deciding the next route.'
+  } else if (decision?.decidedAt) {
+    status = 'HUMAN_ROUTE_RECORDED'
+    reason = 'A human route is recorded. Verify it against current referral evidence and approved policy.'
+  }
+  return { status, reason, evidenceRefs, requiresHumanReview: true }
 }
 
 function deterministicComponents(state) {
@@ -186,6 +215,7 @@ function publicAssessment(item) {
   return {
     id: item._id.toString(), applicationId: item.applicationId, sourceVersion: item.sourceVersion,
     model: item.model, aiAssisted: item.aiAssisted, components: item.components, disagreements: item.disagreements,
+    routingReview: item.routingReview ?? null,
     status: item.status,
     humanDecision: item.humanDecision ? {
       category: item.humanDecision.category, disposition: item.humanDecision.disposition,
@@ -220,13 +250,13 @@ export async function proposeTriageAssessment(applicationId, actor) {
     if (!updated) throw new HttpError(409, 'CONFLICT', 'The Application changed. Refresh and retry.')
     const [assessment] = await TriageAssessment.create([{
       applicationId, sourceVersion: state.version, model, aiAssisted: Boolean(ai), components,
-      disagreements: conflictList, createdByUserId: actor.userId,
+      disagreements: conflictList, routingReview: state.routingReview, createdByUserId: actor.userId,
     }], { session })
     await appendAudit({
       applicationId, caseId: current.caseId, sequence: updated.auditSequence,
       action: 'TRIAGE_ASSESSMENT_PROPOSED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
       previousState: null,
-      newState: { assessmentId: assessment.id, sourceVersion: state.version, model, aiAssisted: Boolean(ai), componentRecommendations: components.map(({ name, recommendation }) => ({ name, recommendation })), disagreementCount: conflictList.length, requiresHumanReview: true },
+      newState: { assessmentId: assessment.id, sourceVersion: state.version, model, aiAssisted: Boolean(ai), componentRecommendations: components.map(({ name, recommendation }) => ({ name, recommendation })), disagreementCount: conflictList.length, routingReviewStatus: state.routingReview.status, routingReviewEvidenceRefs: state.routingReview.evidenceRefs, requiresHumanReview: true },
     }, session)
     return publicAssessment(assessment)
   })

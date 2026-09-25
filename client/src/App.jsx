@@ -1,21 +1,35 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router'
-import Dashboard from './pages/Dashboard.jsx'
-import CitizenDashboard from './pages/CitizenDashboard.jsx'
-import AdminDashboard from './pages/AdminDashboard.jsx'
-import RecordPage from './pages/RecordPage.jsx'
 import VoiceAccess from './pages/VoiceAccess.jsx'
 import AssistedIntake from './pages/AssistedIntake.jsx'
-import ReferralPage from './pages/ReferralPage.jsx'
-import LawyerCasePage from './pages/LawyerCasePage.jsx'
-import IncidentGroupPage from './pages/IncidentGroupPage.jsx'
-import MediationPage from './pages/MediationPage.jsx'
-import MediationVerifier from './pages/MediationVerifier.jsx'
 import AuthModal from './components/AuthModal.jsx'
 import CitizenProfileModal from './components/CitizenProfileModal.jsx'
 import { api } from './services/api.js'
 import { clearOfflineDrafts, resumeOfflineDrafts } from './utils/offlineDrafts.js'
 import { bi, setLang, useLang } from './components/Bi.jsx'
+
+// Provider pages are fetched on demand; the public and assisted offline paths stay in the app shell.
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'))
+const CitizenDashboard = lazy(() => import('./pages/CitizenDashboard.jsx'))
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard.jsx'))
+const RecordPage = lazy(() => import('./pages/RecordPage.jsx'))
+const ReferralPage = lazy(() => import('./pages/ReferralPage.jsx'))
+const LawyerCasePage = lazy(() => import('./pages/LawyerCasePage.jsx'))
+const IncidentGroupPage = lazy(() => import('./pages/IncidentGroupPage.jsx'))
+const MediationPage = lazy(() => import('./pages/MediationPage.jsx'))
+const MediationVerifier = lazy(() => import('./pages/MediationVerifier.jsx'))
+const PartySigning = lazy(() => import('./pages/PartySigning.jsx'))
+
+function initialLightMode() {
+  try {
+    const saved = localStorage.getItem('dlas-light-mode')
+    if (saved !== null) return saved === '1'
+  } catch { /* Storage may be unavailable on a shared or restricted browser. */ }
+  if (typeof navigator === 'undefined') return false
+  const connection = navigator.connection
+  return Boolean(connection?.saveData || ['slow-2g', '2g'].includes(connection?.effectiveType)
+    || (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-data: reduce)').matches))
+}
 
 function LandingHero({ onOpenAuth }) {
   return (
@@ -26,6 +40,7 @@ function LandingHero({ onOpenAuth }) {
           {bi('Need voice support?', 'ফোনে সাহায্য দরকার?')}{' '}
           <Link to="/voice">{bi('Start a voice intake', 'ভয়েসে আবেদন শুরু করুন')}</Link>
         </p>
+        <p className="citizen-door"><Link to="/mediation/sign">{bi('Sign a mediation draft with a private code', 'গোপন কোড দিয়ে মধ্যস্থতার খসড়ায় স্বাক্ষর করুন')}</Link></p>
 
         <div className="landing-auth-buttons">
           <button
@@ -52,7 +67,7 @@ export default function App() {
   const [session, setSession] = useState(null)
   const [authModal, setAuthModal] = useState({ isOpen: false, mode: 'signin', tab: 'citizen' })
   const lang = useLang()
-  const [lightMode, setLightMode] = useState(() => typeof localStorage !== 'undefined' && localStorage.getItem('dlas-light-mode') === '1')
+  const [lightMode, setLightMode] = useState(initialLightMode)
   const [installPrompt, setInstallPrompt] = useState(null)
   const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
@@ -68,10 +83,19 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.lightMode = lightMode ? 'on' : 'off'
-    localStorage.setItem('dlas-light-mode', lightMode ? '1' : '0')
+    try { localStorage.setItem('dlas-light-mode', lightMode ? '1' : '0') } catch { /* Mode still works for this session. */ }
   }, [lightMode])
 
   useEffect(() => { document.documentElement.lang = lang }, [lang])
+
+  useEffect(() => {
+    // Remove credentials written by older builds before this shared-device safeguard.
+    try {
+      localStorage.removeItem('dlas_token')
+      localStorage.removeItem('dlas_registered_login_id')
+      localStorage.removeItem('dlas_registered_login_pwd')
+    } catch { /* Storage may be unavailable. */ }
+  }, [])
 
   useEffect(() => {
     if (previousPath.current !== pathname) document.getElementById('main')?.focus()
@@ -99,7 +123,6 @@ export default function App() {
   async function signIn(username, password) {
     const login = await api('/api/auth/login', { method: 'POST', body: { username, password } })
     const current = await api('/api/auth/me', { token: login.token })
-    try { localStorage.setItem('dlas_token', login.token) } catch { /* ignore storage error */ }
     resumeOfflineDrafts()
     setSession({ token: login.token, user: current.user })
   }
@@ -109,13 +132,6 @@ export default function App() {
       method: 'POST',
       body: { name, username: identifier, password, nid },
     })
-    try {
-      localStorage.setItem('dlas_token', reg.token)
-      localStorage.setItem('dlas_registered_login_id', identifier.trim())
-      localStorage.setItem('dlas_registered_login_pwd', password)
-    } catch {
-      // localStorage unavailable
-    }
     const current = await api('/api/auth/me', { token: reg.token })
     resumeOfflineDrafts()
     setSession({ token: reg.token, user: current.user })
@@ -123,7 +139,11 @@ export default function App() {
 
   async function signOut() {
     const token = session?.token
-    try { localStorage.removeItem('dlas_token') } catch { /* ignore storage error */ }
+    try {
+      localStorage.removeItem('dlas_token')
+      localStorage.removeItem('dlas_registered_login_id')
+      localStorage.removeItem('dlas_registered_login_pwd')
+    } catch { /* ignore storage error */ }
     try { await clearOfflineDrafts() } catch { window.alert(bi('Local drafts could not be cleared. Do not leave this browser on a shared device.', 'এই ডিভাইসের খসড়া মোছা যায়নি। অন্যের সঙ্গে ব্যবহার করা ডিভাইসে এই পৃষ্ঠা খোলা রাখবেন না।')) }
     setSession(null)
     navigate('/')
@@ -239,6 +259,7 @@ export default function App() {
         )}
       </header>
       <main id="main" className="app-main" tabIndex={-1}>
+        <Suspense fallback={<p role="status">{bi('Loading page…', 'পৃষ্ঠা লোড হচ্ছে…')}</p>}>
         <Routes>
           <Route
             path="/"
@@ -261,18 +282,20 @@ export default function App() {
             }
           />
           <Route path="/applications/:applicationId/mediation/verify" element={session ? <MediationVerifier session={session} /> : <Navigate to="/" replace />} />
+          <Route path="/mediation/sign" element={<PartySigning />} />
           <Route path="/applications/:applicationId" element={session ? mediationOnly ? <MediationPage session={session} /> : <RecordPage session={session} /> : <Navigate to="/" replace />} />
           <Route path="/cases/:caseId" element={session ? <LawyerCasePage session={session} /> : <Navigate to="/" replace />} />
           <Route path="/referrals/:referralId" element={session?.user.assignments.some(({ role }) => role === 'RECEIVING_DLAO') ? <ReferralPage session={session} /> : <Navigate to="/" replace />} />
-          <Route path="/incidents/:groupId" element={session?.user.assignments.some(({ role }) => role === 'DLAO_OFFICER') ? <IncidentGroupPage session={session} /> : <Navigate to="/" replace />} />
-          <Route path="/voice" element={<VoiceAccess session={session} />} />
+          <Route path="/incidents/:groupId" element={session?.user.assignments.some(({ role }) => ['DLAO_OFFICER', 'CASE_SUPPORT'].includes(role)) ? <IncidentGroupPage session={session} /> : <Navigate to="/" replace />} />
+          <Route path="/voice" element={<VoiceAccess session={session} lightMode={lightMode} />} />
           <Route path="/assisted" element={session?.user.assignments.some(({ role }) => role === 'UDC_OPERATOR') ? <AssistedIntake session={session} /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </main>
 
       <AuthModal
-        key={`${authModal.mode}-${authModal.tab}-${authModal.isOpen}`}
+        key={authModal.isOpen ? 'auth-open' : 'auth-closed'}
         isOpen={authModal.isOpen}
         mode={authModal.mode}
         initialTab={authModal.tab}

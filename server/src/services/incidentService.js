@@ -12,6 +12,9 @@ const matchFields = [
   ['name', 'Name'], ['contact.phone', 'Contact number'], ['person.date_of_birth', 'Date of birth'], ['location.district', 'District'],
 ]
 
+const canReadIncidentGroup = (actor, officeCode) => hasOfficeRole(actor, 'DLAO_OFFICER', officeCode)
+  || hasOfficeRole(actor, 'CASE_SUPPORT', officeCode)
+
 const normalized = (value) => String(value ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase('en').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ')
 
 function nameSimilarity(left, right) {
@@ -97,7 +100,11 @@ async function auditApplication(application, session, action, newState, reason, 
 }
 
 export async function getDuplicateCandidates(applicationId, actor) {
-  const application = await officeApplication(applicationId, actor)
+  const application = await Application.findOne({ applicationId }).lean()
+  if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
+  const canReview = hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode)
+  const canRead = canReview || hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)
+  if (!canRead) throw new HttpError(403, 'FORBIDDEN', 'This office cannot view duplicate suggestions.')
   // ponytail: newest 100 same-office applications bound the prototype comparison; add paging for larger offices.
   const candidates = await Application.find({ officeCode: application.officeCode, applicationId: { $ne: applicationId }, service: { $ne: 'ADVICE' } })
     .sort({ createdAt: -1 }).limit(100).lean()
@@ -115,7 +122,13 @@ export async function getDuplicateCandidates(applicationId, actor) {
   return comparisons.map((candidate) => {
     const [applicationAId, applicationBId] = pairIds(applicationId, candidate.applicationId)
     const review = reviewByPair.get(`${applicationAId}|${applicationBId}`)
-    return { ...candidate, reviewStatus: review?.status ?? 'OPEN', reviewReason: review?.reviewReason ?? null }
+    const summary = { ...candidate, reviewStatus: review?.status ?? 'OPEN' }
+    // Case support can see the ranking to route a possible concern to an officer, but not the
+    // underlying contact/date-of-birth comparison or review reason.
+    return canReview
+      ? { ...summary, reviewReason: review?.reviewReason ?? null }
+      : { applicationId: summary.applicationId, caseId: summary.caseId, applicantName: summary.applicantName,
+          score: summary.score, reviewStatus: summary.reviewStatus, requiresOfficerReview: true }
   })
 }
 
@@ -166,7 +179,9 @@ export async function createRelatedIncidentGroup(input, actor) {
 }
 
 export async function getApplicationIncidentGroups(applicationId, actor) {
-  const application = await officeApplication(applicationId, actor)
+  const application = await Application.findOne({ applicationId }).select('officeCode').lean()
+  if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
+  if (!canReadIncidentGroup(actor, application.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot read related incident groups.')
   const groups = await RelatedIncidentGroup.find({ applicationIds: applicationId, officeCode: application.officeCode }).sort({ createdAt: -1 }).lean()
   return groups.map(({ _id, title, applicationIds, commonDocumentIds, createdAt }) => ({ id: _id, title, memberCount: applicationIds.length, sharedEvidenceCount: commonDocumentIds.length, createdAt }))
 }
@@ -174,7 +189,7 @@ export async function getApplicationIncidentGroups(applicationId, actor) {
 export async function getRelatedIncidentGroup(groupId, actor) {
   const group = await RelatedIncidentGroup.findById(groupId).lean()
   if (!group) throw new HttpError(404, 'NOT_FOUND', 'Related incident group not found.')
-  if (!hasOfficeRole(actor, 'DLAO_OFFICER', group.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This DLAO office cannot view the related incident group.')
+  if (!canReadIncidentGroup(actor, group.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot view the related incident group.')
   const [applications, cases, documents] = await Promise.all([
     Application.find({ applicationId: { $in: group.applicationIds }, officeCode: group.officeCode }).lean(),
     Case.find({ applicationId: { $in: group.applicationIds } }).select('applicationId caseId').lean(),
@@ -202,8 +217,9 @@ export async function getRelatedIncidentGroup(groupId, actor) {
     return { id: _id, sourceApplicationId, sourceCaseId: caseByApplication.get(sourceApplicationId) ?? null,
       label, currentVersion, qualityState: version?.qualityState ?? 'UNREADABLE', textContent: version?.textContent ?? null }
   })
+  const canShareEvidence = hasOfficeRole(actor, 'DLAO_OFFICER', group.officeCode)
   return { id: group._id, title: group.title, members: group.applicationIds.map((id) => memberByApplication.get(id)).filter(Boolean),
-    availableDocuments, sharedEvidence,
+    canShareEvidence, availableDocuments: canShareEvidence ? availableDocuments : [], sharedEvidence,
     separationNotice: 'Only explicitly linked standard evidence is shared here. Instructions, applicant facts, outcomes, and restricted evidence stay on each individual Case.' }
 }
 

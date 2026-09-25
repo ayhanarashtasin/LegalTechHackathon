@@ -1,17 +1,21 @@
 import { Router } from 'express'
 import { applicationIdParam } from '../validators/requests.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
+import { limitPublic } from '../middleware/rateLimit.js'
 import {
   validateAttendance, validateCertification, validateEmptyMediationBody, validateLegalApplicability,
   validateOutcome, validateReason, validateScheduling, validateSettlementDraft, validateSettlementReview,
-  validateSettlementAmendment, validateSignature, validateVerificationBody,
+  validateSettlementAmendment, validateSignature, validateSigningCode,
+  validateSigningInvitation, validatePartySignature, validateVerificationBody,
 } from '../validators/mediation.js'
 import {
   advance, amendDraft, attendance, certify, claim, create, draft, legalApplicability, outcome,
-  read, reviewDocuments, reviewDraft, schedule, sign, verify,
+  inviteParty, openParty, read, reviewDocuments, reviewDraft, schedule, sign, signParty, verify,
 } from '../controllers/mediationController.js'
 
 const router = Router()
+router.post('/mediation-signing/open', limitPublic(60), validateSigningCode, openParty)
+router.post('/mediation-signing/sign', limitPublic(60), validatePartySignature, signParty)
 router.use(requireAuth)
 router.get('/applications/:applicationId/mediation', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR', 'CLAO'), read)
 router.post('/applications/:applicationId/mediation', applicationIdParam, requireRole('DLAO_OFFICER'), validateEmptyMediationBody, create)
@@ -24,6 +28,7 @@ router.post('/applications/:applicationId/mediation/outcome', applicationIdParam
 router.post('/applications/:applicationId/mediation/draft', applicationIdParam, requireRole('MEDIATOR'), validateSettlementDraft, draft)
 router.post('/applications/:applicationId/mediation/draft/amend', applicationIdParam, requireRole('MEDIATOR'), validateSettlementAmendment, amendDraft)
 router.post('/applications/:applicationId/mediation/draft/review', applicationIdParam, requireRole('MEDIATOR'), validateSettlementReview, reviewDraft)
+router.post('/applications/:applicationId/mediation/signing-invitations', applicationIdParam, requireRole('MEDIATOR'), validateSigningInvitation, inviteParty)
 router.post('/applications/:applicationId/mediation/signatures', applicationIdParam, requireRole('MEDIATOR'), validateSignature, sign)
 router.post('/applications/:applicationId/mediation/verify', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR', 'CLAO'), validateVerificationBody, verify)
 router.post('/applications/:applicationId/mediation/legal-applicability', applicationIdParam, requireRole('CLAO'), validateLegalApplicability, legalApplicability)

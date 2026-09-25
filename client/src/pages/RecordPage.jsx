@@ -39,6 +39,7 @@ function CallRecording({ applicationId, token }) {
 export default function RecordPage({ session }) {
   const { applicationId } = useParams()
   const officer = session.user.assignments.some(({ role }) => role === 'DLAO_OFFICER')
+  const caseSupport = session.user.assignments.some(({ role }) => role === 'CASE_SUPPORT')
   const [data, setData] = useState(null)
   const [refresh, setRefresh] = useState(0)
   const [error, setError] = useState('')
@@ -155,6 +156,9 @@ export default function RecordPage({ session }) {
   }
 
   const record = data?.record
+  const canManageIncidents = session.user.assignments.some(({ role, officeCode }) => role === 'DLAO_OFFICER' && officeCode === record?.officeCode)
+  const canReadDuplicateSuggestions = session.user.assignments.some(({ role, officeCode }) => ['DLAO_OFFICER', 'CASE_SUPPORT'].includes(role) && officeCode === record?.officeCode)
+  const canReviewDuplicates = session.user.assignments.some(({ role, officeCode }) => role === 'DLAO_OFFICER' && officeCode === record?.officeCode)
   const ready = !loading && record?.applicationId === applicationId
   const openTasks = data?.tasks.filter(({ status }) => status === 'OPEN').length ?? 0
   const events = officer ? data?.audit?.events : data?.history.events
@@ -289,7 +293,7 @@ export default function RecordPage({ session }) {
             {officer && data.evidenceAccess.length > 0 && <div className="version-history"><h3><Bi en="Restricted access log" bn="সংবেদনশীল নথি দেখার ইতিহাস" /></h3><ol>{data.evidenceAccess.map((entry) => <li key={entry.id}><Badge code={entry.outcome} /> {entry.user} · {entry.document} · {when(entry.createdAt)}</li>)}</ol></div>}
           </Panel>
 
-          {officer && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={record.assistance.caseType} documents={data.documents} token={session.token} onChanged={() => setRefresh((value) => value + 1)} />}
+          {(officer || caseSupport) && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={record.assistance.caseType} documents={data.documents} token={session.token} readOnly={!officer} onChanged={() => setRefresh((value) => value + 1)} />}
 
           <Panel id="contact-title" en="Contact log" bn="যোগাযোগের রেকর্ড" hint={data.contacts.length ? bi(`${data.contacts.length} attempts`, `${num(data.contacts.length)} বার চেষ্টা`) : none()}>
             <p className="muted"><Bi en="A log only. Nothing is sent from here." bn="এখানে শুধু যোগাযোগের তথ্য নথিভুক্ত হয়; কোনো বার্তা পাঠানো হয় না।" /></p>
@@ -307,8 +311,8 @@ export default function RecordPage({ session }) {
 
           {officer && <ReferralPanel applicationId={applicationId} officeCode={record.officeCode} accepted={record.status === 'ACCEPTED'} referrals={data.referrals} documents={data.documents} token={session.token} change={change} />}
           {officer && record.caseId && <MediationPanel applicationId={applicationId} session={session} role="DLAO_OFFICER" />}
-          {officer && record.status === 'ACCEPTED' && <RelatedIncidentPanel applicationId={applicationId} token={session.token} />}
-          {officer && <DuplicateReview applicationId={applicationId} token={session.token} />}
+          {(officer || caseSupport) && record.status === 'ACCEPTED' && <RelatedIncidentPanel applicationId={applicationId} token={session.token} canManage={canManageIncidents} />}
+          {canReadDuplicateSuggestions && <DuplicateReview applicationId={applicationId} token={session.token} canReview={canReviewDuplicates} />}
 
           {officer && (record.channel === 'VOICE_SIM' || data.transcript) && <Panel id="call-title" en="Call" bn="কল" hint={data.transcript ? bi('Recording and transcript', 'রেকর্ড ও কথোপকথন') : bi('Recording', 'রেকর্ড')}>
             {record.channel === 'VOICE_SIM' && <><h3><Bi en="Recording" bn="রেকর্ড" /></h3><CallRecording applicationId={applicationId} token={session.token} /><p className="muted"><Bi en="The caller was told the call is recorded." bn="কলারকে রেকর্ডিংয়ের কথা জানানো হয়েছে।" /></p></>}

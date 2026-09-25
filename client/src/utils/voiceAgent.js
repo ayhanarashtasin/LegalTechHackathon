@@ -70,6 +70,11 @@ export function spokenYesNo(text) {
   return yes === no ? undefined : yes
 }
 
+// An uncertain safety reply must never be treated as the "no" inside "জানি না".
+export function spokenUncertain(text) {
+  return /জানি\s+না|নিশ্চিত\s+নই|বুঝতে\s+পারছি\s+না|not\s+sure|don'?t\s+know|unsure/i.test(text ?? '')
+}
+
 // A spoken number (a phone number or an NID) is kept as digits only and checked like one typed on the keypad.
 export function spokenDigits(raw, field = 'contactValue') {
   const value = parseAnswer(field, raw)?.replace(/[^0-9]/g, '')
@@ -79,14 +84,20 @@ export function spokenDigits(raw, field = 'contactValue') {
 // Applies an extraction result. Returns the new draft plus the fields that were actually accepted.
 export function applyExtraction(call, values) {
   const accepted = []
+  const clarification = []
   const next = Object.entries(values ?? {}).reduce((draft, [field, raw]) => {
     if (field !== nextField(draft)) return draft
     const value = parseAnswer(field, raw)
     if (value === undefined) return draft
+    // A spoken "no" to current danger is checked by asking the approved safety question again.
+    if (field === 'urgent' && value === false && !draft.safetyNoPending) {
+      clarification.push(field)
+      return { ...draft, safetyNoPending: true }
+    }
     accepted.push(field)
     return answer(draft, field, value, 'AI')
   }, call)
-  return { call: next, accepted }
+  return { call: next, accepted, clarification }
 }
 
 // One turn per answer, so a long problem description is not cut short by the answers around it.

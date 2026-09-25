@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { steps } from '../../client/src/utils/voiceScript.js'
+import { expand, signIn } from './support.js'
 
 // The fake microphone loops 1 s of speech-like sound and 5 s of silence, so a pause ends each spoken answer.
 const rate = 48000
@@ -88,7 +89,7 @@ test('the whole call can be answered by voice, with each number read back and th
 
   const answer = async (fields) => {
     for (const field of fields) {
-      await expect(page.getByRole('heading', { name: steps[field].prompt, exact: true })).toBeFocused({ timeout: 30000 })
+      await expect(page.getByRole('heading', { name: field === 'urgentConfirm' ? /নিরাপত্তার প্রশ্নটি আবার বলুন/ : steps[field].prompt, exact: field !== 'urgentConfirm' })).toBeFocused({ timeout: 30000 })
       await page.keyboard.press('#') // skip the clip to the beep; the pause then ends the answer
     }
   }
@@ -98,7 +99,7 @@ test('the whole call can be answered by voice, with each number read back and th
   await readBack('১২৩৪৫০৯৮৭৬')
   await expect.poll(() => asked.filter((field) => field === 'confirm').length, { timeout: 30000 }).toBe(1)
   await readBack('১২৩৪৫০৯৮৭৬') // asked again with the number kept, not back to the NID question
-  await answer(['problem', 'urgent', 'contactChannel', 'contactValue'])
+  await answer(['problem', 'urgent', 'urgentConfirm', 'contactChannel', 'contactValue'])
   await readBack('০১৭০০০০০০০০')
   await answer(['safeTime'])
   await expect(page.getByRole('heading', { name: 'আপনার উত্তরগুলো শুনে বা পড়ে মিলিয়ে নিন' })).toBeFocused({ timeout: 30000 })
@@ -106,11 +107,62 @@ test('the whole call can be answered by voice, with each number read back and th
   await page.keyboard.press('#')
   const body = (await submitted).postDataJSON()
   expect(asked).toEqual(['service', 'callerRole', 'callerName', 'relationship', 'applicantName', 'district', 'nidKnown', 'nid', 'confirm', 'confirm',
-    'problem', 'urgent', 'contactChannel', 'contactValue', 'confirm', 'safeTime', 'confirm'])
+    'problem', 'urgent', 'urgent', 'contactChannel', 'contactValue', 'confirm', 'safeTime', 'confirm'])
   expect(body.mode).toBe('INTAKE')
   expect(body.confirmation).toBe('VOICE')
   expect(body.answers).toMatchObject({ callerRole: 'REPRESENTATIVE', nidKnown: true, nid: '1234509876', urgent: false, contactChannel: 'PHONE', contactValue: '01700000000' })
   expect(body.aiFields).toEqual(expect.arrayContaining(['callerRole', 'nidKnown', 'nid', 'urgent', 'contactValue']))
   expect(body.transcript).toHaveLength(asked.length) // one turn per answer
   await expect(page.getByRole('heading', { name: /আবেদন জমা হয়েছে/ })).toBeVisible({ timeout: 30000 })
+})
+
+test('an uncertain spoken safety answer reaches a DLAO officer with its context', async ({ page }) => {
+  test.setTimeout(180000)
+  const heard = [{ text: 'না', values: { urgent: false }, sensitive: false },
+    { text: 'জানি না', values: { urgent: 'UNKNOWN' }, sensitive: false }]
+  await page.route('**/audio/*.mp3', (route) => route.fulfill({ status: 200, contentType: 'audio/mpeg', body: '' }))
+  await page.route('**/api/voice/answers**', (route) => route.fulfill({ json: heard.shift() }))
+  await page.goto('/voice')
+  await page.getByRole('button', { name: 'বাংলা', exact: true }).click()
+  await page.getByRole('button', { name: 'কল করুন', exact: true }).click()
+  const choice = async (field, key) => {
+    await expect(page.getByRole('heading', { name: steps[field].prompt, exact: true })).toBeFocused()
+    await page.keyboard.press(key)
+  }
+  const typed = async (field, value) => {
+    await expect(page.getByRole('heading', { name: steps[field].prompt, exact: true })).toBeFocused()
+    await page.getByRole('button', { name: 'লিখে উত্তর দিন' }).click()
+    await page.getByRole('textbox', { name: steps[field].prompt, exact: true }).fill(value)
+    await page.getByRole('button', { name: 'উত্তর দিন', exact: true }).click()
+  }
+  await choice('service', '1')
+  await choice('callerRole', '1')
+  await typed('callerName', 'Fictional Rahima')
+  await typed('district', 'Barguna')
+  await choice('nidKnown', '2')
+  await typed('problem', 'Fictional caller says a neighbour made threats yesterday.')
+  await expect(page.getByRole('heading', { name: steps.urgent.prompt, exact: true })).toBeFocused()
+  for (const heading of [steps.urgent.prompt, /নিরাপত্তার প্রশ্নটি আবার বলুন/]) {
+    await expect(page.getByRole('heading', { name: heading })).toBeFocused()
+    await page.keyboard.press('#')
+    await expect(page.getByText(/শুনছি/)).toBeVisible()
+    await page.waitForTimeout(900) // fake microphone must record for the minimum spoken-answer duration
+    await page.keyboard.press('#')
+  }
+  await choice('contactChannel', '2') // safe in-person contact through a UDC
+  await typed('safeTime', 'Weekday morning')
+  await expect(page.getByRole('heading', { name: 'আপনার উত্তরগুলো শুনে বা পড়ে মিলিয়ে নিন' })).toBeFocused()
+  await expect(page.getByText('নিশ্চিত নই—কর্মকর্তা যাচাই করবেন')).toBeVisible()
+  await page.keyboard.press('1')
+  const done = page.getByRole('heading', { name: /^আবেদন জমা হয়েছে: APP-\d{4}-\d{6}$/ })
+  await expect(done).toBeVisible({ timeout: 30000 })
+  const applicationId = (await done.textContent()).match(/APP-\d{4}-\d{6}/)[0]
+  await signIn(page, 'DLAO_OFFICER')
+  const queueEntry = page.getByRole('link', { name: new RegExp(applicationId) })
+  await expect(queueEntry).toContainText('Safety answer needs human verification')
+  await queueEntry.click()
+  await expand(page, /^Tasks/)
+  await expect(page.getByRole('region', { name: /^Tasks/ })).toContainText('Safety was unclear')
+  await expand(page, /^Call/)
+  await expect(page.getByRole('region', { name: /^Call/ })).toContainText('জানি না')
 })

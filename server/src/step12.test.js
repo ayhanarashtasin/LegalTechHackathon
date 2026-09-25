@@ -133,9 +133,14 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   assert.equal(result.status, 201)
   assert.equal(result.data.stage, 'DRAFT_OUTCOME')
   assert.equal(result.data.draft.aiAssisted, true)
+  assert.equal(result.data.draft.templateRevision, 'demo-1')
+  assert.equal(result.data.draft.templateApprovalState, 'LEGAL_APPROVAL_PENDING')
+  assert.match(result.data.draft.templateExample, /Party A and Party B/)
   assert.equal(result.data.draft.model.startsWith('groq:'), true)
-  assert.ok(result.data.draft.sections.every(({ aiFilled }) => aiFilled))
+  assert.equal(result.data.draft.sections.find(({ key }) => key === 'paymentMethod').aiFilled, false)
+  assert.ok(result.data.draft.sections.filter(({ key }) => key !== 'paymentMethod').every(({ aiFilled }) => aiFilled))
   assert.match(result.data.draft.inconsistencies[0], /review date comes before/i)
+  assert.ok(result.data.draft.inconsistencies.some((warning) => /payment method is missing/i.test(warning)))
   const aiSchema = providerBody.response_format.json_schema.schema
   assert.equal(aiSchema.additionalProperties, false)
   assert.deepEqual(Object.keys(aiSchema.properties).sort(), ['arrangement', 'amount', 'firstDueDate', 'inconsistencies', 'paymentMethod', 'reviewDate'].sort())
@@ -152,26 +157,45 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   })
   assert.equal(notConsented.data.stage, 'DRAFT_OUTCOME')
   assert.equal(notConsented.data.draft.status, 'HUMAN_REVIEW')
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/draft/review`, mediator.token, {
+    partyAUnderstands: true, partyAConsents: true, partyBUnderstands: true, partyBConsents: true,
+    reason: 'The mediator reviewed the proposed draft but has not acknowledged its warnings.',
+  })).data.error.code, 'WARNINGS_NOT_REVIEWED')
   result = await post(`/api/applications/${applicationId}/mediation/draft/review`, mediator.token, {
     partyAUnderstands: true, partyAConsents: true, partyBUnderstands: true, partyBConsents: true,
+    warningsReviewed: true,
     reason: 'Both parties separately confirmed understanding and consent with the mediator.',
   })
   assert.equal(result.data.stage, 'SIGNATURES')
 
   const draft = result.data.draft
   const partyA = await signature(draft, 'PARTY_A')
+  const partyAInvitation = await post(`/api/applications/${applicationId}/mediation/signing-invitations`, mediator.token, { signerRole: 'PARTY_A' })
+  assert.equal(partyAInvitation.status, 201)
+  assert.equal(partyAInvitation.data.code.length, 43)
+  assert.equal(JSON.stringify(partyAInvitation.data.mediation).includes(partyAInvitation.data.code), false)
+  assert.equal((await post('/api/mediation-signing/open', null, { code: partyAInvitation.data.code })).data.documentHash, partyA.documentHash)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, partyA)).data.error.code, 'PARTY_SIGNING_CODE_REQUIRED')
   const invalid = { ...partyA, signature: `${partyA.signature.startsWith('A') ? 'B' : 'A'}${partyA.signature.slice(1)}` }
-  assert.equal((await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, invalid)).data.error.code, 'INVALID_SIGNATURE')
+  assert.equal((await post('/api/mediation-signing/sign', null, { code: partyAInvitation.data.code, ...invalid, partyConfirmed: true })).data.error.code, 'INVALID_SIGNATURE')
+  assert.equal((await post('/api/mediation-signing/sign', null, { code: partyAInvitation.data.code, ...partyA, partyConfirmed: false })).status, 400)
   const mediatorFirst = await signature(draft, 'MEDIATOR')
   assert.equal((await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, mediatorFirst)).data.error.code, 'PARTIES_MUST_SIGN_FIRST')
-  assert.equal((await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, partyA)).status, 201)
-  assert.equal((await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, partyA)).status, 201)
+  const replacedA = await post(`/api/applications/${applicationId}/mediation/signing-invitations`, mediator.token, { signerRole: 'PARTY_A' })
+  assert.equal(replacedA.status, 201)
+  assert.equal((await post('/api/mediation-signing/open', null, { code: partyAInvitation.data.code })).status, 404)
+  assert.equal((await post('/api/mediation-signing/sign', null, { code: replacedA.data.code, ...partyA, partyConfirmed: true })).status, 201)
+  assert.equal((await post('/api/mediation-signing/sign', null, { code: replacedA.data.code, ...partyA, partyConfirmed: true })).status, 201)
   assert.equal(await models.SignatureRecord.countDocuments({ applicationId }), 1)
-  assert.equal((await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, await signature(draft, 'PARTY_B'))).status, 201)
+  assert.equal((await post('/api/mediation-signing/open', null, { code: replacedA.data.code })).status, 404)
+  const partyBInvitation = await post(`/api/applications/${applicationId}/mediation/signing-invitations`, mediator.token, { signerRole: 'PARTY_B' })
+  assert.equal(partyBInvitation.status, 201)
+  assert.equal((await post('/api/mediation-signing/sign', null, { code: partyBInvitation.data.code, ...await signature(draft, 'PARTY_B'), partyConfirmed: true })).status, 201)
   result = await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, await signature(draft, 'MEDIATOR'))
   assert.equal(result.data.stage, 'PENDING_CLAO_CERTIFICATION')
   assert.equal(result.data.legalEffectState, 'LEGAL_EFFECT_REQUIRES_AUTHORISED_REVIEW')
   assert.equal((await models.SignatureRecord.find({ applicationId }).lean()).some(({ privateKey }) => Boolean(privateKey)), false)
+  assert.deepEqual(Object.fromEntries((await models.SignatureRecord.find({ applicationId }).lean()).map(({ signerRole, authorizationMethod }) => [signerRole, authorizationMethod])), { PARTY_A: 'PARTY_CODE', PARTY_B: 'PARTY_CODE', MEDIATOR: 'MEDIATOR_SESSION' })
 
   const initialVerification = await post(`/api/applications/${applicationId}/mediation/verify`, mediator.token)
   assert.equal(initialVerification.data.allValid, true)
@@ -194,4 +218,87 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   assert.ok(audit.data.events.some(({ action }) => action === 'MEDIATION_SIGNATURE_RECORDED'))
   assert.ok(audit.data.events.some(({ action }) => action === 'CLAO_CERTIFICATION_RECORDED'))
   assert.equal((await models.Application.findOne({ applicationId }).lean()).caseId, caseId)
+})
+
+test('T7: property and labour drafts use their controlled examples, date warnings, and human review', async () => {
+  const officer = await actor('test12.t7.officer', 'DLAO_OFFICER')
+  const mediator = await actor('test12.t7.mediator', 'MEDIATOR')
+  const proposals = {
+    PROPERTY: {
+      propertyDescription: 'Fictional plot recorded in the notes', proposedSteps: 'Exchange the fictional title copies',
+      responsibleParty: 'Party A and Party B will exchange their own copies', completionDate: '2026-10-20', followUpDate: '2026-10-10',
+      inconsistencies: ['The mediator must confirm the property description with both parties.'],
+    },
+    LABOUR: {
+      workDescription: 'Fictional wage issue recorded in the notes', amount: 'Not recorded in the mediator notes; mediator completion required.',
+      paymentSchedule: 'One payment after the wage record is checked', dueDate: '2026-10-20', followUpDate: '2026-10-10',
+      inconsistencies: [],
+    },
+  }
+  for (const template of ['PROPERTY', 'LABOUR']) {
+    const applicationId = await acceptedApplication(officer.token)
+    const path = `/api/applications/${applicationId}/mediation`
+    assert.equal((await post(path, officer.token)).status, 201)
+    assert.equal((await post(`${path}/claim`, mediator.token)).status, 200)
+    assert.equal((await post(`${path}/schedule`, mediator.token, {
+      mode: 'IN_PERSON', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), venue: 'Fictional DLAO room',
+      notices: ['PARTY_A', 'PARTY_B'].map((party) => ({ party, deliveryState: 'DELIVERED', reason: 'A human recorded fictional delivery.' })),
+    })).status, 200)
+    assert.equal((await post(`${path}/advance`, mediator.token)).data.stage, 'DOCUMENT_REVIEW')
+    assert.equal((await post(`${path}/documents/review`, mediator.token, { reason: 'A human reviewed the fictional documents.' })).status, 200)
+    assert.equal((await post(`${path}/advance`, mediator.token)).data.stage, 'ATTENDANCE')
+    assert.equal((await post(`${path}/attendance`, mediator.token, {
+      partyA: 'ATTENDED', partyB: 'ATTENDED', reason: 'Both fictional parties attended in person.',
+    })).status, 200)
+    assert.equal((await post(`${path}/advance`, mediator.token)).data.stage, 'MEDIATION')
+    assert.equal((await post(`${path}/outcome`, mediator.token, { outcome: 'AGREEMENT_REACHED', reason: 'The mediator recorded a fictional agreement.' })).status, 200)
+
+    const originalFetch = globalThis.fetch
+    const previousKey = process.env.GROQ_API_KEY
+    const previousAi = process.env.SETTLEMENT_AI
+    process.env.GROQ_API_KEY = 'step12-t7-test-only-not-a-real-key'
+    process.env.SETTLEMENT_AI = 'on'
+    globalThis.fetch = async (url, init) => String(url).startsWith('https://api.groq.com/openai/v1/')
+      ? new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(proposals[template]) } }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : originalFetch(url, init)
+    let result
+    try {
+      result = await post(`${path}/draft`, mediator.token, {
+        template, notes: `Fictional ${template.toLowerCase()} notes: completion or due date 2026-10-20; follow-up 2026-10-10.`, identifiersRemoved: true,
+      })
+    } finally {
+      globalThis.fetch = originalFetch
+      if (previousKey === undefined) delete process.env.GROQ_API_KEY
+      else process.env.GROQ_API_KEY = previousKey
+      process.env.SETTLEMENT_AI = previousAi
+    }
+    assert.equal(result.status, 201)
+    assert.equal(result.data.draft.template, template)
+    assert.equal(result.data.draft.templateRevision, 'demo-1')
+    assert.match(result.data.draft.templateExample, /Party A and Party B/)
+    assert.equal(result.data.draft.aiAssisted, true)
+    assert.ok(result.data.draft.inconsistencies.some((warning) => /comes before/.test(warning)))
+    if (template === 'PROPERTY') {
+      const sections = result.data.draft.sections.map(({ key, text }) => ({ key, text: key === 'followUpDate' ? '2026-10-30' : text }))
+      result = await post(`${path}/draft/amend`, mediator.token, { template, sections, reason: 'The mediator corrected the fictional follow-up date.' })
+      assert.equal(result.status, 200)
+      assert.equal(result.data.draft.version, 2)
+      assert.deepEqual(result.data.draft.inconsistencies, proposals.PROPERTY.inconsistencies)
+      assert.equal(result.data.draft.sections.find(({ key }) => key === 'followUpDate').aiFilled, false)
+    } else {
+      assert.equal(result.data.draft.sections.find(({ key }) => key === 'amount').aiFilled, false)
+      assert.ok(result.data.draft.inconsistencies.some((warning) => /amount.*missing/i.test(warning)))
+      assert.equal((await post(`${path}/draft/review`, mediator.token, {
+        partyAUnderstands: true, partyAConsents: true, partyBUnderstands: true, partyBConsents: true,
+        reason: 'The mediator has not acknowledged the draft warnings.',
+      })).data.error.code, 'WARNINGS_NOT_REVIEWED')
+    }
+    result = await post(`${path}/draft/review`, mediator.token, {
+      partyAUnderstands: true, partyAConsents: true, partyBUnderstands: true, partyBConsents: true,
+      warningsReviewed: true,
+      reason: 'The mediator reviewed the fictional text and both parties recorded understanding and consent.',
+    })
+    assert.equal(result.status, 200)
+    assert.equal(result.data.stage, 'SIGNATURES')
+  }
 })
