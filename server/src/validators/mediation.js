@@ -21,12 +21,15 @@ export function validateEmptyMediationBody(request, _response, next) {
 }
 
 export function validateScheduling(request, _response, next) {
-  const value = body(request, ['mode', 'scheduledAt', 'venue', 'inPersonFallback', 'notices'], ['mode', 'scheduledAt', 'notices'])
+  const value = body(request, ['mode', 'scheduledAt', 'venue', 'inPersonFallback', 'notices', 'sessionType', 'language', 'participants'], ['mode', 'scheduledAt', 'notices'])
   if (!['IN_PERSON', 'REMOTE', 'HYBRID'].includes(value.mode)) fail('Choose in-person, remote, or hybrid mediation.')
   date(value.scheduledAt, 'Scheduled time')
   if (Date.parse(value.scheduledAt) <= Date.now()) fail('Scheduled time must be in the future.')
   if (value.mode === 'IN_PERSON') value.venue = text(value.venue, 'In-person location', 3, 200)
   else value.inPersonFallback = text(value.inPersonFallback, 'In-person fallback plan', 10, 300)
+  if (value.sessionType && !['JOINT', 'SEPARATE_APPLICANT', 'SEPARATE_RESPONDENT'].includes(value.sessionType)) fail('Session type is invalid.')
+  if (value.language && (typeof value.language !== 'string' || value.language.trim().length > 100)) fail('Language is invalid.')
+  if (value.participants && (!Array.isArray(value.participants) || value.participants.some((p) => typeof p !== 'string' || p.length > 200))) fail('Participants must be an array of strings.')
   if (!Array.isArray(value.notices) || value.notices.length !== 2) fail('Record a delivery outcome for each party.')
   const parties = new Set()
   value.notices = value.notices.map((notice) => {
@@ -66,10 +69,11 @@ export function validateOutcome(request, _response, next) {
 }
 
 export function validateSettlementDraft(request, _response, next) {
-  const value = body(request, ['template', 'notes', 'identifiersRemoved'])
+  const value = body(request, ['template', 'notes', 'identifiersRemoved', 'followUpDate'], ['template', 'notes', 'identifiersRemoved'])
   if (typeof value.template !== 'string' || !Object.hasOwn(settlementTemplates, value.template)) fail('Choose a maintenance, property, or labour template.')
   value.notes = text(value.notes, 'Anonymised mediator notes', 10, 3000)
   if (value.identifiersRemoved !== true) fail('Confirm that direct identifiers have been removed before AI drafting.')
+  if (value.followUpDate && Number.isNaN(Date.parse(value.followUpDate))) fail('Follow-up date is invalid.')
   next()
 }
 
@@ -82,7 +86,7 @@ export function validateSettlementReview(request, _response, next) {
 }
 
 export function validateSettlementAmendment(request, _response, next) {
-  const value = body(request, ['template', 'sections', 'reason'])
+  const value = body(request, ['template', 'sections', 'reason', 'followUpDate'], ['template', 'sections', 'reason'])
   const keys = typeof value.template === 'string' && Object.hasOwn(settlementTemplates, value.template)
     ? settlementTemplates[value.template].fields.map(([key]) => key) : null
   if (!keys || !Array.isArray(value.sections) || value.sections.length !== keys.length) fail('Draft sections do not match a supported template.')
@@ -91,6 +95,83 @@ export function validateSettlementAmendment(request, _response, next) {
     return { key: section.key, text: text(section.text, 'Draft section', 1, 500) }
   })
   value.reason = text(value.reason, 'Amendment reason', 10, 1000)
+  if (value.followUpDate && Number.isNaN(Date.parse(value.followUpDate))) fail('Follow-up date is invalid.')
+  next()
+}
+
+export function validateSafetyConsent(request, _response, next) {
+  const value = body(request, [
+    'safeForApplicant', 'applicantAgreed', 'applicantAvailable', 'oppositePartyWilling', 'status', 'reason',
+    'isSafe', 'decision', 'notes',
+  ], [])
+  const status = value.status || value.decision
+  if (!status || !['CONSENT_CONFIRMED', 'NOT_SAFE', 'CONSENT_PENDING'].includes(status)) fail('Status must be CONSENT_CONFIRMED, NOT_SAFE, or CONSENT_PENDING.')
+  request.body = {
+    safeForApplicant: value.safeForApplicant ?? value.isSafe ?? true,
+    applicantAgreed: value.applicantAgreed ?? true,
+    applicantAvailable: value.applicantAvailable ?? true,
+    oppositePartyWilling: value.oppositePartyWilling ?? true,
+    status,
+    reason: typeof value.reason === 'string' ? value.reason : typeof value.notes === 'string' ? value.notes : '',
+  }
+  next()
+}
+
+export function validateSessionDetails(request, _response, next) {
+  const value = body(request, [
+    'applicantComplaint', 'applicantRequestedSolution', 'applicantStatements',
+    'oppositePartyResponse', 'oppositePartyPosition', 'oppositePartyProposedSolution',
+    'issuesDiscussed', 'proposedSolutions', 'mediatorNotes', 'sessionNotes',
+  ], [])
+  request.body = {
+    ...value,
+    mediatorNotes: value.mediatorNotes || value.sessionNotes || '',
+    issuesDiscussed: typeof value.issuesDiscussed === 'string' ? [value.issuesDiscussed] : value.issuesDiscussed,
+    proposedSolutions: typeof value.proposedSolutions === 'string' ? [value.proposedSolutions] : value.proposedSolutions,
+  }
+  next()
+}
+
+export function validateSettlementTerms(request, _response, next) {
+  const value = body(request, ['terms'], ['terms'])
+  if (!Array.isArray(value.terms)) fail('Terms must be an array.')
+  request.body.terms = value.terms.map((item) => {
+    if (!item.issue || typeof item.issue !== 'string') fail('Each term requires an issue.')
+    if (item.status && !['AGREED', 'DISAGREED', 'UNDER_NEGOTIATION'].includes(item.status)) fail('Term status is invalid.')
+    return {
+      issue: item.issue,
+      applicantAsks: item.applicantAsks || item.applicantDemand || '',
+      oppositePartyOffers: item.oppositePartyOffers || item.oppositePartyOffer || '',
+      agreedTerm: item.agreedTerm || '',
+      status: item.status || 'UNDER_NEGOTIATION',
+    }
+  })
+  next()
+}
+
+export function validateFollowUp(request, _response, next) {
+  const value = body(request, [
+    'dueDate', 'settlementFollowed', 'paymentStatus', 'agreementComplied', 'complianceStatus',
+    'furtherAssistanceRequired', 'actionTaken', 'action', 'notes', 'reason',
+  ], [])
+  const actionTaken = value.actionTaken || (value.action === 'CLOSE_CASE' ? 'CLOSED' : value.action === 'REOPEN_REFERRAL' ? 'REOPENED_REFERRED' : value.action) || 'KEEP_MONITORING'
+  if (!['CLOSED', 'REOPENED_REFERRED', 'KEEP_MONITORING'].includes(actionTaken)) fail('Action taken is invalid.')
+  if (value.dueDate && Number.isNaN(Date.parse(value.dueDate))) fail('Due date is invalid.')
+  request.body = {
+    dueDate: value.dueDate,
+    settlementFollowed: value.settlementFollowed,
+    paymentStatus: value.paymentStatus,
+    agreementComplied: value.agreementComplied ?? (value.complianceStatus === 'COMPLIED'),
+    furtherAssistanceRequired: typeof value.furtherAssistanceRequired === 'boolean' ? (value.furtherAssistanceRequired ? 'Yes' : 'No') : value.furtherAssistanceRequired,
+    actionTaken,
+    notes: value.notes || value.reason || '',
+  }
+  next()
+}
+
+export function validateClaoReturn(request, _response, next) {
+  const value = body(request, ['reason'], ['reason'])
+  value.reason = text(value.reason, 'Correction reason', 5, 1000)
   next()
 }
 

@@ -66,6 +66,7 @@ function publicDraft(draft) {
     warningsReviewed: draft.warningsReviewed ?? false,
     status: draft.status, reviewReason: draft.reviewReason ?? null,
     reviewedAt: draft.reviewedAt ?? null, partyAcknowledgements: draft.partyAcknowledgements ?? null,
+    followUpDate: draft.followUpDate ?? null,
   }
 }
 
@@ -90,6 +91,16 @@ async function publicMediation(mediation, session) {
     filledBy: Object.fromEntries(Object.entries(filledBy).map(([key, value]) => [key, { role: value.role, name: nameOf(value.userId), at: value.at }])),
     mode: mediation.mode ?? null, scheduledAt: mediation.scheduledAt ?? null, venue: mediation.venue ?? null,
     inPersonFallback: mediation.inPersonFallback ?? null, notices: mediation.notices,
+    sessionType: mediation.sessionType ?? 'JOINT', language: mediation.language ?? 'Bangla',
+    participants: mediation.participants ?? [],
+    safetyConsent: mediation.safetyConsent ? {
+      ...(mediation.safetyConsent.toObject ? mediation.safetyConsent.toObject() : mediation.safetyConsent),
+      decision: mediation.safetyConsent.status,
+      isSafe: mediation.safetyConsent.safeForApplicant,
+      notes: mediation.safetyConsent.reason,
+    } : null,
+    sessionDetails: mediation.sessionDetails ?? null,
+    settlementTerms: mediation.settlementTerms ?? [],
     documentsReviewedAt: mediation.documentsReviewedAt ?? null, documentReviewReason: mediation.documentReviewReason ?? null,
     attendance: mediation.attendance ?? null, outcome: mediation.outcome ?? null, outcomeReason: mediation.outcomeReason ?? null,
     draft: publicDraft(draft), signatures: signatures.map(({ signerRole, draftVersion, documentHash, publicKeyJwk, signature, clientSignedAt, receivedAt, authorizationMethod }) => ({
@@ -101,6 +112,12 @@ async function publicMediation(mediation, session) {
     legalReviewBasis: mediation.legalReviewBasis ?? null,
     legalEffectState: mediation.legalEffectState,
     certificateReason: mediation.certificateReason ?? null, certifiedAt: mediation.certifiedAt ?? null,
+    claoReturnReason: mediation.claoReturnReason ?? null, claoReturnedAt: mediation.claoReturnedAt ?? null,
+    followUp: mediation.followUp ? {
+      ...(mediation.followUp.toObject ? mediation.followUp.toObject() : mediation.followUp),
+      action: mediation.followUp.actionTaken,
+      complianceStatus: mediation.followUp.agreementComplied ? 'COMPLIED' : 'NOT_COMPLIED',
+    } : null,
     sessions: sessions.map((item) => ({ ...(item.toObject ? item.toObject() : item), recordedByRole: item.recordedByRole ?? null, recordedByName: nameOf(item.recordedByUserId) })),
     documents: documents.map(({ _id, label, qualityState, currentVersion }) => ({ id: idOf(_id), label, qualityState, currentVersion })),
   }
@@ -169,6 +186,30 @@ export async function setMediator(applicationId, { mediatorUserId = null, reason
   })
 }
 
+export async function recordSafetyConsent(applicationId, input, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const { application, mediation, role } = await context(applicationId, actor, session)
+    mediation.safetyConsent = {
+      safeForApplicant: Boolean(input.safeForApplicant),
+      applicantAgreed: Boolean(input.applicantAgreed),
+      applicantAvailable: Boolean(input.applicantAvailable),
+      oppositePartyWilling: Boolean(input.oppositePartyWilling),
+      status: input.status,
+      reason: input.reason?.trim() || '',
+      confirmedByUserId: actor.userId,
+      confirmedAt: new Date(),
+    }
+    if (input.status === 'NOT_SAFE') {
+      mediation.outcome = 'NOT_SAFE'
+      mediation.outcomeReason = input.reason || 'Mediation assessed as not safe for applicant. Halting mediation and escalating case.'
+    }
+    stamp(mediation, 'SAFETY_CONSENT', actor, role)
+    await mediation.save({ session })
+    await recordMutation(application, session, actor, role, input.status === 'NOT_SAFE' ? 'MEDIATION_SAFETY_UNSAFE_STOPPED' : 'MEDIATION_SAFETY_CONSENT_RECORDED', null, { status: input.status, reason: input.reason }, input.status === 'NOT_SAFE' ? 'Mediation determined unsafe; halted for referral/escalation.' : 'Pre-mediation safety and party consent confirmed.')
+    return publicMediation(mediation, session)
+  })
+}
+
 export async function recordScheduling(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
@@ -178,11 +219,14 @@ export async function recordScheduling(applicationId, input, actor) {
     mediation.scheduledAt = new Date(input.scheduledAt)
     mediation.venue = input.venue ?? ''
     mediation.inPersonFallback = input.inPersonFallback ?? ''
+    if (input.sessionType) mediation.sessionType = input.sessionType
+    if (input.language) mediation.language = input.language
+    if (input.participants) mediation.participants = input.participants
     mediation.notices = input.notices.map((notice) => ({ ...notice, recordedByUserId: actor.userId, recordedAt: new Date() }))
     mediation.stage = 'SCHEDULING_NOTICES'
     stamp(mediation, 'SCHEDULE', actor, role)
     await mediation.save({ session })
-    await recordMutation(application, session, actor, role, 'MEDIATION_SCHEDULED', previous, { stage: mediation.stage, mode: mediation.mode, scheduledAt: mediation.scheduledAt, noticeCount: mediation.notices.length }, 'A human recorded the schedule and notice outcomes; the prototype sent no notices.')
+    await recordMutation(application, session, actor, role, 'MEDIATION_SCHEDULED', previous, { stage: mediation.stage, mode: mediation.mode, scheduledAt: mediation.scheduledAt, noticeCount: mediation.notices.length, sessionType: mediation.sessionType, language: mediation.language }, 'A human recorded the schedule and notice outcomes; the prototype sent no notices.')
     return publicMediation(mediation, session)
   })
 }
@@ -298,6 +342,7 @@ export async function createSettlementDraft(applicationId, input, actor) {
         model: proposal.model, aiAssisted: proposal.aiAssisted, sourceNotesDigest, sections,
         aiInconsistencies, inconsistencies, warningsReviewed: false, status: 'HUMAN_REVIEW',
         reviewReason: undefined, reviewedByUserId: undefined, reviewedAt: undefined, partyAcknowledgements: undefined,
+        followUpDate: input.followUpDate ? new Date(input.followUpDate) : undefined,
       })
       await draft.save({ session })
     } else {
@@ -307,6 +352,7 @@ export async function createSettlementDraft(applicationId, input, actor) {
         templateExampleBn: definition.exampleBn,
         version: 1, model: proposal.model, aiAssisted: proposal.aiAssisted, sourceNotesDigest, sections,
         aiInconsistencies, inconsistencies, warningsReviewed: false, status: 'HUMAN_REVIEW',
+        followUpDate: input.followUpDate ? new Date(input.followUpDate) : undefined,
       }], { session })
     }
     mediation.settlementDraftId = draft._id
@@ -339,6 +385,7 @@ export async function amendSettlementDraft(applicationId, input, actor) {
     draft.reviewReason = undefined
     draft.reviewedByUserId = undefined
     draft.reviewedAt = undefined
+    if (input.followUpDate !== undefined) draft.followUpDate = input.followUpDate ? new Date(input.followUpDate) : undefined
     await draft.save({ session })
     stamp(mediation, 'DRAFT', actor, role)
     await mediation.save({ session })
@@ -601,6 +648,93 @@ export async function recordMediationSession(applicationId, input, actor) {
 
     await mediation.save({ session })
     await recordMutation(application, session, actor, role, 'MEDIATION_SESSION_RECORDED', null, newSession, `Mediation session ${sessionCount} recorded. Outcome: ${newSession.outcome}`)
+    return publicMediation(mediation, session)
+  })
+}
+
+export async function recordSessionDetails(applicationId, input, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    mediation.sessionDetails = {
+      applicantComplaint: input.applicantComplaint?.trim() || '',
+      applicantRequestedSolution: input.applicantRequestedSolution?.trim() || '',
+      applicantStatements: input.applicantStatements?.trim() || '',
+      oppositePartyResponse: input.oppositePartyResponse?.trim() || '',
+      oppositePartyPosition: input.oppositePartyPosition?.trim() || '',
+      oppositePartyProposedSolution: input.oppositePartyProposedSolution?.trim() || '',
+      issuesDiscussed: Array.isArray(input.issuesDiscussed) ? input.issuesDiscussed.map((s) => String(s).trim()).filter(Boolean) : [],
+      proposedSolutions: Array.isArray(input.proposedSolutions) ? input.proposedSolutions.map((s) => String(s).trim()).filter(Boolean) : [],
+      mediatorNotes: input.mediatorNotes?.trim() || '',
+    }
+    stamp(mediation, 'SESSION_DETAILS', actor, role)
+    await mediation.save({ session })
+    await recordMutation(application, session, actor, role, 'MEDIATION_SESSION_DETAILS_RECORDED', null, { issuesCount: mediation.sessionDetails.issuesDiscussed.length }, 'Mediation session applicant and respondent details updated.')
+    return publicMediation(mediation, session)
+  })
+}
+
+export async function recordSettlementTerms(applicationId, input, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    mediation.settlementTerms = (input.terms || []).map((item) => ({
+      issue: String(item.issue || '').trim(),
+      applicantAsks: String(item.applicantAsks || '').trim(),
+      oppositePartyOffers: String(item.oppositePartyOffers || '').trim(),
+      agreedTerm: String(item.agreedTerm || '').trim(),
+      status: item.status || 'UNDER_NEGOTIATION',
+    }))
+    stamp(mediation, 'SETTLEMENT_TERMS', actor, role)
+    await mediation.save({ session })
+    await recordMutation(application, session, actor, role, 'MEDIATION_SETTLEMENT_TERMS_RECORDED', null, { termsCount: mediation.settlementTerms.length }, 'Negotiation terms recorded.')
+    return publicMediation(mediation, session)
+  })
+}
+
+export async function returnMediationForCorrection(applicationId, input, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const { application, mediation } = await context(applicationId, actor, session)
+    const role = auditRole(actor, application.officeCode, ['CLAO'])
+    if (mediation.stage !== 'PENDING_CLAO_CERTIFICATION') fail(409, 'INVALID_STAGE', 'Only mediations pending CLAO certification can be returned for correction.')
+    const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session)
+    if (draft) {
+      draft.status = 'HUMAN_REVIEW'
+      await draft.save({ session })
+      await SignatureRecord.deleteMany({ draftId: draft._id, draftVersion: draft.version }).session(session)
+      await SigningInvitation.updateMany({ draftId: draft._id, draftVersion: draft.version }, { $unset: { usedAt: '' } }).session(session)
+    }
+    mediation.stage = 'DRAFT_OUTCOME'
+    mediation.claoReturnReason = input.reason
+    mediation.claoReturnedAt = new Date()
+    mediation.legalEffectState = 'LEGAL_EFFECT_REQUIRES_AUTHORISED_REVIEW'
+    await mediation.save({ session })
+    await recordMutation(application, session, actor, role, 'CLAO_RETURNED_FOR_CORRECTION', { stage: 'PENDING_CLAO_CERTIFICATION' }, { stage: 'DRAFT_OUTCOME', reason: input.reason }, input.reason)
+    return publicMediation(mediation, session)
+  })
+}
+
+export async function recordFollowUp(applicationId, input, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const { application, mediation, role } = await context(applicationId, actor, session)
+    mediation.followUp = {
+      dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
+      settlementFollowed: typeof input.settlementFollowed === 'boolean' ? input.settlementFollowed : undefined,
+      paymentStatus: input.paymentStatus || 'NOT_APPLICABLE',
+      agreementComplied: typeof input.agreementComplied === 'boolean' ? input.agreementComplied : undefined,
+      furtherAssistanceRequired: input.furtherAssistanceRequired?.trim() || '',
+      actionTaken: input.actionTaken,
+      recordedByUserId: actor.userId,
+      recordedAt: new Date(),
+    }
+    if (input.actionTaken === 'CLOSED' || input.actionTaken === 'CLOSE_CASE') {
+      const caseDoc = await Case.findOne({ applicationId }).session(session)
+      if (caseDoc) {
+        caseDoc.status = 'CLOSED'
+        await caseDoc.save({ session })
+      }
+    }
+    stamp(mediation, 'FOLLOW_UP', actor, role)
+    await mediation.save({ session })
+    await recordMutation(application, session, actor, role, 'MEDIATION_FOLLOW_UP_RECORDED', null, mediation.followUp, `Mediation follow-up recorded: ${input.actionTaken}`)
     return publicMediation(mediation, session)
   })
 }

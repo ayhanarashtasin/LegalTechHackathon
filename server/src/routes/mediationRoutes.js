@@ -8,10 +8,12 @@ import {
   validateMediatorAppointment, validateOutcome, validateReason, validateScheduling, validateSettlementDraft, validateSettlementReview,
   validateSettlementAmendment, validateSignature, validateSigningCode,
   validateSigningInvitation, validatePartySignature, validateVerificationBody,
+  validateSafetyConsent, validateSessionDetails, validateSettlementTerms, validateClaoReturn, validateFollowUp,
 } from '../validators/mediation.js'
 import {
   advance, amendDraft, appoint, attendance, certify, create, mediators, draft, legalApplicability, outcome,
   inviteParty, openParty, read, reviewDocuments, reviewDraft, schedule, sign, signParty, verify, addSession,
+  safetyConsent, sessionDetails, settlementTerms, claoReturn, followUp,
 } from '../controllers/mediationController.js'
 
 // Party signing is public (the one-time code is the credential), so app.js mounts it at its own path,
@@ -34,10 +36,13 @@ router.get('/applications/:applicationId/mediation', applicationIdParam, require
 router.post('/applications/:applicationId/mediation', applicationIdParam, requireRole('DLAO_OFFICER'), validateEmptyMediationBody, create)
 router.get('/applications/:applicationId/mediation/mediators', applicationIdParam, requireRole('DLAO_OFFICER'), mediators)
 router.post('/applications/:applicationId/mediation/mediator', applicationIdParam, requireRole('DLAO_OFFICER'), validateMediatorAppointment, appoint)
+router.post('/applications/:applicationId/mediation/safety-consent', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateSafetyConsent, safetyConsent)
 router.post('/applications/:applicationId/mediation/schedule', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateScheduling, schedule)
 router.post('/applications/:applicationId/mediation/advance', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateEmptyMediationBody, advance)
 router.post('/applications/:applicationId/mediation/documents/review', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateReason, reviewDocuments)
 router.post('/applications/:applicationId/mediation/attendance', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateAttendance, attendance)
+router.post('/applications/:applicationId/mediation/session-details', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateSessionDetails, sessionDetails)
+router.post('/applications/:applicationId/mediation/negotiation-terms', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateSettlementTerms, settlementTerms)
 router.post('/applications/:applicationId/mediation/outcome', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateOutcome, outcome)
 router.post('/applications/:applicationId/mediation/draft', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateSettlementDraft, draft)
 router.post('/applications/:applicationId/mediation/draft/amend', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateSettlementAmendment, amendDraft)
@@ -47,5 +52,7 @@ router.post('/applications/:applicationId/mediation/signatures', applicationIdPa
 router.post('/applications/:applicationId/mediation/verify', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR', 'CLAO'), validateVerificationBody, verify)
 router.post('/applications/:applicationId/mediation/legal-applicability', applicationIdParam, requireRole('CLAO'), validateLegalApplicability, legalApplicability)
 router.post('/applications/:applicationId/mediation/certify', applicationIdParam, requireRole('CLAO'), validateCertification, certify)
+router.post('/applications/:applicationId/mediation/return-correction', applicationIdParam, requireRole('CLAO'), validateClaoReturn, claoReturn)
+router.post('/applications/:applicationId/mediation/follow-up', applicationIdParam, requireRole('DLAO_OFFICER'), validateFollowUp, followUp)
 router.post('/applications/:applicationId/mediation/sessions', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), addSession)
 export default router

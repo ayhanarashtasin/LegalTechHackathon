@@ -3,16 +3,20 @@ import {
   recordAttendance, recordDocumentReview, recordLegalApplicability, recordMediationSession, recordOutcome, recordScheduling,
   issueSigningInvitation, openPartySigning, recordPartySignature, recordSignature,
   reviewSettlementDraft, startMediation, verifyMediation,
+  recordSafetyConsent, recordSessionDetails, recordSettlementTerms, returnMediationForCorrection, recordFollowUp,
 } from '../services/mediationService.js'
 
 export async function read(request, response) { response.json(await getMediation(request.params.applicationId, request.auth)) }
 export async function create(request, response) { response.status(201).json(await startMediation(request.params.applicationId, request.auth)) }
 export async function mediators(request, response) { response.json(await listMediators(request.params.applicationId, request.auth)) }
 export async function appoint(request, response) { response.json(await setMediator(request.params.applicationId, request.body, request.auth)) }
+export async function safetyConsent(request, response) { response.json(await recordSafetyConsent(request.params.applicationId, request.body, request.auth)) }
 export async function schedule(request, response) { response.json(await recordScheduling(request.params.applicationId, request.body, request.auth)) }
 export async function advance(request, response) { response.json(await advanceMediation(request.params.applicationId, request.auth)) }
 export async function reviewDocuments(request, response) { response.json(await recordDocumentReview(request.params.applicationId, request.body, request.auth)) }
 export async function attendance(request, response) { response.json(await recordAttendance(request.params.applicationId, request.body, request.auth)) }
+export async function sessionDetails(request, response) { response.json(await recordSessionDetails(request.params.applicationId, request.body, request.auth)) }
+export async function settlementTerms(request, response) { response.json(await recordSettlementTerms(request.params.applicationId, request.body, request.auth)) }
 export async function outcome(request, response) { response.json(await recordOutcome(request.params.applicationId, request.body, request.auth)) }
 export async function draft(request, response) { response.status(201).json(await createSettlementDraft(request.params.applicationId, request.body, request.auth)) }
 export async function amendDraft(request, response) { response.json(await amendSettlementDraft(request.params.applicationId, request.body, request.auth)) }
@@ -24,4 +28,6 @@ export async function signParty(request, response) { response.status(201).json(a
 export async function verify(request, response) { response.json(await verifyMediation(request.params.applicationId, request.auth)) }
 export async function legalApplicability(request, response) { response.json(await recordLegalApplicability(request.params.applicationId, request.body, request.auth)) }
 export async function certify(request, response) { response.json(await certifyMediation(request.params.applicationId, request.body, request.auth)) }
+export async function claoReturn(request, response) { response.json(await returnMediationForCorrection(request.params.applicationId, request.body, request.auth)) }
+export async function followUp(request, response) { response.json(await recordFollowUp(request.params.applicationId, request.body, request.auth)) }
 export async function addSession(request, response) { response.status(201).json(await recordMediationSession(request.params.applicationId, request.body, request.auth)) }

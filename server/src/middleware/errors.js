@@ -15,6 +15,6 @@ export function errorHandler(error, _request, response, next) {
   if (error.code === 11000 || error.hasErrorLabel?.('TransientTransactionError')) {
     return response.status(409).json({ error: { code: 'CONFLICT', message: 'The record changed. Refresh and retry.' } })
   }
-  console.error('Request failed:', error.name)
+  console.error('Request failed:', error.name, error.message)
   return response.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'The request could not be completed.' } })
 }
