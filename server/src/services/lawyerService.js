@@ -1,17 +1,17 @@
 import mongoose from 'mongoose'
-import { Application, Case, ContactAttempt, LawyerAssignment, LawyerChangeRequest, LawyerPaymentEvent, LawyerUpdate, PanelLawyerHold, RoleAssignment, Task, User } from '../models/index.js'
+import { Application, Case, ContactAttempt, LawyerAssignment, LawyerCaseEntry, LawyerChangeRequest, LawyerFeeClaim, LawyerPaymentEvent, LawyerUpdate, PanelLawyerHold, RoleAssignment, Task, User } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
 import { daysOverdue } from '../utils/overdue.js'
-import { advance, lawyerCaseSummaries, officeApplication, verifyHelplineLookup } from './applicationService.js'
+import { advance, lawyerCaseSummaries, officeApplication, requireOpenCase, verifyHelplineLookup } from './applicationService.js'
 import { appendAudit } from './auditService.js'
 
 const reviewRole = 'DLAO_OFFICER'
 
-async function acceptedCase(applicationId, actor, session) {
+async function acceptedCase(applicationId, actor, session, open = true) {
   const application = await officeApplication(applicationId, actor, session)
   if (application.status !== 'ACCEPTED' || !application.caseId) throw new HttpError(409, 'CASE_REQUIRED', 'Accept the application before managing panel-lawyer work.')
-  const caseRecord = await Case.findOne({ applicationId }).session(session)
+  const caseRecord = open ? await requireOpenCase(applicationId, session) : await Case.findOne({ applicationId }).session(session)
   if (!caseRecord) throw new HttpError(409, 'CASE_REQUIRED', 'The accepted Case record is unavailable.')
   return { application, caseRecord }
 }
@@ -28,13 +28,13 @@ async function auditApplication(application, session, action, newState, reason, 
 const reminderSummary = (reminders = []) => ({ reminderCount: reminders.length, lastRemindedAt: reminders.at(-1)?.at ?? null })
 
 export async function getLawyerManagement(applicationId, actor) {
-  const { caseRecord, application } = await acceptedCase(applicationId, actor)
+  const { caseRecord, application } = await acceptedCase(applicationId, actor, undefined, false)
   const [assignments, requests, updates, payments, panelRoles, summaries] = await Promise.all([
     LawyerAssignment.find({ applicationId }).sort({ createdAt: -1 }).populate('lawyerUserId', 'displayName').lean(),
     LawyerChangeRequest.find({ applicationId }).sort({ createdAt: -1 }).lean(),
     LawyerUpdate.find({ applicationId }).sort({ dueAt: 1 }).lean(),
     LawyerPaymentEvent.find({ applicationId }).sort({ createdAt: -1, _id: -1 }).select('assignmentId stage status reason createdAt').lean(),
-    RoleAssignment.find({ role: 'PANEL_LAWYER', officeCode: application.officeCode, active: true }).populate('userId', 'displayName active').lean(),
+    RoleAssignment.find({ role: 'PANEL_LAWYER', officeCode: application.officeCode, active: true }).populate('userId', 'displayName username active acceptingCases userType specializations').lean(),
     lawyerCaseSummaries([applicationId]),
   ])
   const lawyerIds = [...new Set([
@@ -55,10 +55,13 @@ export async function getLawyerManagement(applicationId, actor) {
     applicationId, caseId: caseRecord.caseId, applicantName: summaries.get(applicationId)?.applicantName ?? null,
     casePlan: { nextHearingAt: caseRecord.nextHearingAt ?? null, nextAction: caseRecord.nextAction ?? '' },
     reviewerRole: reviewRole,
+    meansTest: application.meansTest ?? null,
     authorityNotice: 'Demo reviewer routing only. The legally authorised body for a temporary hold is pending policy verification.',
     panelLawyers: panelRoles.filter(({ userId }) => userId?.active).map(({ userId }) => {
       const hold = holdByLawyer.get(userId._id.toString())
-      return { id: userId._id, displayName: userId.displayName,
+      return { id: userId._id, displayName: userId.displayName, username: userId.username, userType: userId.userType || 'lawyer',
+        acceptingCases: userId.acceptingCases ?? true,
+        specializations: userId.specializations || [],
         hold: hold ? { newAssignmentHold: hold.newAssignmentHold, reviewState: hold.reviewState, reviewerRole: hold.reviewerRole, triggeredAt: hold.triggeredAt, reviewReason: hold.reviewReason ?? null } : null }
     }),
     assignments: assignments.map((assignment) => {
@@ -80,32 +83,71 @@ export async function getLawyerManagement(applicationId, actor) {
 export async function getLawyerWorklist(actor) {
   const offices = actor.assignments.filter(({ role }) => role === 'PANEL_LAWYER').map(({ officeCode }) => officeCode)
   if (!offices.length) throw new HttpError(403, 'FORBIDDEN', 'A panel-lawyer assignment is required.')
-  // ponytail: newest 25 assignments for the demo; add paging when real caseloads exceed this.
+  // ponytail: load the lawyer's full prototype caseload for accurate filters; add paging for large panels.
   const assignments = await LawyerAssignment.find({ lawyerUserId: actor.userId, officeCode: { $in: offices }, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } })
-    .sort({ updatedAt: -1 }).limit(25).lean()
+    .sort({ updatedAt: -1 }).lean()
   const ids = assignments.map(({ _id }) => _id)
   const appIds = assignments.map(({ applicationId }) => applicationId)
-  const [cases, updates, payments, summaries] = await Promise.all([
+  const [cases, updates, payments, summaries, allAssignments] = await Promise.all([
     Case.find({ caseId: { $in: assignments.map(({ caseId }) => caseId) } }).select('caseId status nextHearingAt nextAction').lean(),
     LawyerUpdate.find({ assignmentId: { $in: ids }, status: { $ne: 'CANCELLED' } }).sort({ dueAt: 1 }).lean(),
     LawyerPaymentEvent.find({ assignmentId: { $in: ids } }).sort({ createdAt: -1 }).select('assignmentId stage status reason createdAt').lean(),
     lawyerCaseSummaries(appIds),
+    LawyerAssignment.find({ lawyerUserId: actor.userId, officeCode: { $in: offices } }).select('caseId status active').lean(),
   ])
   const caseById = new Map(cases.map((record) => [record.caseId, record]))
   const updatesByAssignment = Map.groupBy(updates, (update) => update.assignmentId.toString())
   const paymentByAssignment = new Map()
   for (const payment of payments) if (!paymentByAssignment.has(payment.assignmentId.toString())) paymentByAssignment.set(payment.assignmentId.toString(), payment)
-  return { records: assignments.map((assignment) => {
-    const record = caseById.get(assignment.caseId)
-    const summary = summaries.get(assignment.applicationId)
-    const accepted = assignment.status === 'ACCEPTED'
-    return { assignmentId: assignment._id, applicationId: assignment.applicationId, caseId: assignment.caseId,
-      applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, priorityDecision: summary?.priorityDecision ?? null,
-      assignmentStatus: assignment.status, caseStatus: accepted ? record?.status ?? 'OPEN' : null,
-      nextHearingAt: accepted ? record?.nextHearingAt ?? null : null, nextAction: accepted ? record?.nextAction ?? null : null,
-      updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt, reminders }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt, ...reminderSummary(reminders) })) : [],
-      payment: accepted ? paymentByAssignment.get(assignment._id.toString()) ?? null : null }
-  }) }
+
+  const pendingRequests = allAssignments.filter((a) => a.active && a.status === 'PENDING').length
+  const acceptedCases = allAssignments.filter((a) => a.status === 'ACCEPTED').length
+  const totalRequests = allAssignments.length
+  const activeCases = assignments.filter((a) => a.status === 'ACCEPTED' && caseById.get(a.caseId)?.status === 'OPEN').length
+  const completedCases = assignments.filter((a) => a.status === 'ACCEPTED' && caseById.get(a.caseId)?.status === 'CLOSED').length
+  const totalAssignedCases = new Set(allAssignments.filter((a) => ['ACCEPTED', 'REASSIGNED'].includes(a.status)).map((a) => a.caseId)).size
+  const pendingUpdates = updates.filter((update) => ['PENDING', 'MISSED'].includes(update.status)).length
+  const feedback = await LawyerCaseEntry.find({ assignmentId: { $in: allAssignments.map(({ _id }) => _id) }, kind: 'FEEDBACK' }).select('data.rating').lean()
+  const clientFeedbackCount = feedback.length
+  const clientFeedbackRating = feedback.length ? feedback.reduce((sum, entry) => sum + entry.data.rating, 0) / feedback.length : null
+  const urgentCases = assignments.filter((a) => summaries.get(a.applicationId)?.urgent).length
+
+  const stats = {
+    totalRequests,
+    pendingRequests,
+    acceptedCases,
+    activeCases,
+    urgentCases,
+    completedCases, totalAssignedCases, pendingUpdates, clientFeedbackCount, clientFeedbackRating,
+  }
+
+  const [documentRequests, recentClaims] = await Promise.all([
+    LawyerCaseEntry.find({ assignmentId: { $in: ids }, kind: 'DOCUMENT_REQUEST' }).sort({ createdAt: -1 }).limit(25).select('caseId createdAt').lean(),
+    LawyerFeeClaim.find({ assignmentId: { $in: ids }, status: { $in: ['APPROVED', 'PAID', 'CHANGES_REQUESTED'] } }).sort({ updatedAt: -1 }).limit(25).select('caseId status updatedAt').lean(),
+  ])
+  const notifications = [
+    ...assignments.filter((a) => a.status === 'PENDING').map((a) => ({ id: `assignment-${a._id}`, caseId: a.caseId, type: 'NEW_ASSIGNMENT', at: a.createdAt })),
+    ...updates.filter((update) => ['PENDING', 'MISSED'].includes(update.status) && update.reminders.length).map((update) => ({ id: `reminder-${update._id}`, caseId: update.caseId, type: 'DLAO_REQUEST', at: update.reminders.at(-1).at })),
+    ...cases.filter((record) => record.status === 'OPEN' && record.nextHearingAt && record.nextHearingAt >= new Date() && record.nextHearingAt <= new Date(Date.now() + 7 * 86400000)).map((record) => ({ id: `hearing-${record.caseId}`, caseId: record.caseId, type: 'HEARING_REMINDER', at: record.nextHearingAt })),
+    ...documentRequests.map((entry) => ({ id: `document-${entry._id}`, caseId: entry.caseId, type: 'DOCUMENT_REQUEST', at: entry.createdAt })),
+    ...recentClaims.map((claim) => ({ id: `payment-${claim._id}`, caseId: claim.caseId, type: 'PAYMENT_UPDATE', at: claim.updatedAt })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at))
+
+  return {
+    stats,
+    notifications,
+    records: assignments.map((assignment) => {
+      const record = caseById.get(assignment.caseId)
+      const summary = summaries.get(assignment.applicationId)
+      const accepted = assignment.status === 'ACCEPTED'
+      return { assignmentId: assignment._id, applicationId: assignment.applicationId, caseId: assignment.caseId,
+        applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, priorityDecision: summary?.priorityDecision ?? null,
+        assignmentStatus: assignment.status, caseStatus: accepted ? record?.status ?? 'OPEN' : null,
+        nextHearingAt: accepted ? record?.nextHearingAt ?? null : null, nextAction: accepted ? record?.nextAction ?? null : null,
+        updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt, reminders }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt, ...reminderSummary(reminders) })) : [],
+        payment: accepted ? paymentByAssignment.get(assignment._id.toString()) ?? null : null }
+    }),
+  }
 }
 
 export async function updateCasePlan(applicationId, input, actor) {
@@ -124,8 +166,9 @@ export async function assignLawyer(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, caseRecord } = await acceptedCase(applicationId, actor, session)
     const lawyerRole = await RoleAssignment.findOne({ userId: input.lawyerUserId, role: 'PANEL_LAWYER', officeCode: application.officeCode, active: true }).session(session)
-    const lawyer = lawyerRole && await User.findOne({ _id: input.lawyerUserId, active: true }).select('displayName').session(session).lean()
+    const lawyer = lawyerRole && await User.findOne({ _id: input.lawyerUserId, active: true }).select('displayName acceptingCases').session(session).lean()
     if (!lawyer) throw new HttpError(400, 'INVALID_LAWYER', 'Choose an active panel lawyer in this office.')
+    if (lawyer.acceptingCases === false) throw new HttpError(409, 'LAWYER_UNAVAILABLE', 'This lawyer is not accepting new assignments.')
     if (await PanelLawyerHold.exists({ lawyerUserId: input.lawyerUserId, newAssignmentHold: true }).session(session)) throw new HttpError(409, 'LAWYER_ON_HOLD', 'This lawyer has a temporary new-assignment hold pending human review.')
     const active = await LawyerAssignment.find({ applicationId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).session(session).lean()
     if (active.some(({ status }) => status === 'PENDING')) throw new HttpError(409, 'ASSIGNMENT_PENDING', 'A panel lawyer has not accepted or declined this assignment offer yet.')
@@ -311,10 +354,16 @@ export async function getLawyerActivity(lawyerUserId, actor) {
   const count = (status) => updates.filter((update) => update.status === status).length
   const byAssignment = Map.groupBy(updates, ({ assignmentId }) => assignmentId.toString())
   const now = Date.now()
-  const current = assignments.filter(({ active, status }) => active && ['PENDING', 'ACCEPTED'].includes(status))
+  const cases = await Case.find({ caseId: { $in: assignments.map(({ caseId }) => caseId) } }).select('caseId status').lean()
+  const caseById = new Map(cases.map((item) => [item.caseId, item]))
+  const current = assignments.filter(({ active, status, caseId }) => active && ['PENDING', 'ACCEPTED'].includes(status) && caseById.get(caseId)?.status === 'OPEN')
+  const feedback = await LawyerCaseEntry.find({ assignmentId: { $in: assignments.map(({ _id }) => _id) }, kind: 'FEEDBACK' }).select('data.rating').lean()
   return {
     lawyerUserId, lawyerName: lawyer?.displayName ?? 'Unavailable',
     activeCases: current.length, pastCases: assignments.length - current.length,
+    totalAssignedCases: new Set(assignments.filter(({ status }) => ['ACCEPTED', 'REASSIGNED'].includes(status)).map(({ caseId }) => caseId)).size,
+    completedCases: assignments.filter(({ status, caseId }) => status === 'ACCEPTED' && caseById.get(caseId)?.status === 'CLOSED').length,
+    clientFeedbackCount: feedback.length, clientFeedbackRating: feedback.length ? feedback.reduce((total, entry) => total + entry.data.rating, 0) / feedback.length : null,
     updates: { onTime: count('SUBMITTED_ON_TIME'), late: count('SUBMITTED_LATE'), overdue: count('MISSED'), upcoming: count('PENDING') },
     remindersSent: updates.reduce((sum, { reminders }) => sum + (reminders?.length ?? 0), 0),
     lastReportAt: updates.map(({ submittedAt }) => submittedAt).filter(Boolean).sort((a, b) => b - a)[0] ?? null,
@@ -362,6 +411,7 @@ export async function requestLawyerChange(applicationId, input, actor) {
     const { profile } = await verifyHelplineLookup(applicationId, input.lookupCode, actor, input.contactChannel, session)
     const application = await Application.findOne({ applicationId }).session(session)
     if (!application?.caseId || application.status !== 'ACCEPTED') throw new HttpError(409, 'CASE_REQUIRED', 'A lawyer-change request needs an accepted Case.')
+    await requireOpenCase(applicationId, session)
     if (!await LawyerAssignment.exists({ applicationId, active: true, status: 'ACCEPTED' }).session(session)) throw new HttpError(409, 'NO_ACTIVE_LAWYER', 'No active panel-lawyer assignment is recorded for this Case.')
     if (await LawyerChangeRequest.exists({ applicationId, status: { $in: ['OPEN', 'APPROVED'] } }).session(session)) throw new HttpError(409, 'REQUEST_IN_PROGRESS', 'A lawyer-change request is already under review or awaiting replacement.')
     await auditApplication(application, session, 'APPLICANT_LAWYER_CHANGE_REQUESTED', { contactChannel: input.contactChannel, status: 'OPEN' }, input.reason, actor.userId, 'HELPLINE_AGENT')
@@ -437,3 +487,40 @@ export async function updateLawyerPaymentStatus(assignmentId, input, actor) {
     return { id: event.id, stage: event.stage, status: event.status, version: updated.version, moneyMoved: false }
   })
 }
+
+export async function getLawyerAvailability(userId) {
+  const user = await User.findById(userId).select('acceptingCases displayName username')
+  if (!user) throw new HttpError(404, 'NOT_FOUND', 'User not found.')
+  return { acceptingCases: user.acceptingCases ?? true, displayName: user.displayName, username: user.username }
+}
+
+export async function setLawyerAvailability(userId, acceptingCases) {
+  if (typeof acceptingCases !== 'boolean') throw new HttpError(400, 'VALIDATION_ERROR', 'Availability must be true or false.')
+  const isAccepting = acceptingCases
+  const user = await User.findByIdAndUpdate(userId, { $set: { acceptingCases: isAccepting } }, { new: true }).select('acceptingCases displayName username')
+  if (!user) throw new HttpError(404, 'NOT_FOUND', 'User not found.')
+  return { acceptingCases: user.acceptingCases ?? true, displayName: user.displayName, username: user.username }
+}
+
+export async function updatePovertyCertificate(applicationId, input, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const { application, caseRecord } = await acceptedCase(applicationId, actor, session)
+    const previousState = application.meansTest ? { ...application.meansTest } : null
+    const meansTest = {
+      canBearCosts: input.canBearCosts ?? false,
+      povertyCertificateSubmitted: true,
+      povertyCertificateNumber: input.certificateNumber?.trim() || `PR-CERT-${Date.now().toString().slice(-6)}`,
+      issuingAuthority: input.issuingAuthority || 'UP_CHAIRMAN',
+      issueDate: input.issueDate ? new Date(input.issueDate) : new Date(),
+      verificationStatus: input.status || 'VERIFIED',
+      verificationNote: input.note?.trim() || 'Verified by DLAO officer per DBLA criteria.',
+      verifiedByUserId: actor.userId,
+      verifiedAt: new Date(),
+    }
+    application.meansTest = meansTest
+    await application.save({ session })
+    await auditApplication(application, session, 'POVERTY_CERTIFICATE_VERIFIED', meansTest, input.reason || 'Poverty certificate (দরিদ্র প্রত্যয়ন) verified for legal aid eligibility.', actor.userId, 'DLAO_OFFICER', previousState)
+    return { applicationId, caseId: caseRecord.caseId, meansTest }
+  })
+}
+

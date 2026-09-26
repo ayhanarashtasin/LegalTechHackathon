@@ -301,7 +301,8 @@ export function validateEmptyBody(request, _response, next) {
 const audioTypes = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'video/webm']
 
 export function validateAnswerAudio(request, _response, next) {
-  if (Object.keys(request.query).some((key) => key !== 'fields')) fail('Unexpected parameter.')
+  if (Object.keys(request.query).some((key) => key !== 'fields' && key !== 'lang')) fail('Unexpected parameter.')
+  if (request.query.lang && !['bn', 'en'].includes(request.query.lang)) fail('Invalid language.')
   const fields = String(request.query.fields || '').split(',')
   // `confirm` is the caller's yes/no to a read-back: their spoken number, or the whole application before submitting.
   if (!fields.length || fields.some((field) => !voiceAnswers[field] && field !== 'confirm') || new Set(fields).size !== fields.length) fail('Unknown question.')
@@ -406,5 +407,21 @@ export function documentIdParam(request, _response, next) {
 
 export function documentVersionParam(request, _response, next) {
   if (!/^[1-9][0-9]{0,5}$/.test(request.params.version)) fail('Document version is invalid.')
+  next()
+}
+
+export function validateEditCaseInfo(request, _response, next) {
+  if (!request.body || typeof request.body !== 'object') fail('A JSON object is required.')
+  if (typeof request.body.reason !== 'string' || !request.body.reason.trim()) fail('A valid reason is required for case information edits.')
+  next()
+}
+
+export function validatePreMediationVerify(request, _response, next) {
+  if (!request.body || typeof request.body !== 'object') fail('A JSON object is required.')
+  next()
+}
+
+export function validateNoticeDispatch(request, _response, next) {
+  if (!request.body || typeof request.body !== 'object') fail('A JSON object is required.')
   next()
 }

@@ -1,20 +1,22 @@
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
 import mongoose from 'mongoose'
-import { Application, Case, Document, Mediation, SettlementDraft, SignatureRecord, SigningInvitation } from '../models/index.js'
-import { advance } from './applicationService.js'
+import { Application, Case, Document, Mediation, SettlementDraft, SignatureRecord, SigningInvitation, PartyVerification } from '../models/index.js'
+import { advance, requireOpenCase } from './applicationService.js'
 import { appendAudit } from './auditService.js'
 import { completeStructuredChat, extractionModel } from './ai/groq.js'
 import { canonicalSettlement, settlementHash, verifySettlementSignature } from './settlementCrypto.js'
 import { isMissingSettlementFact, missingSettlementFact, settlementInconsistencies, settlementTemplates } from './settlementTemplates.js'
 import { HttpError } from '../utils/httpError.js'
 
+// Signatures that must exist before CLAO certification; the CLAO's own signature is recorded by certification itself.
+const requiredSigners = ['PARTY_A', 'PARTY_B', 'MEDIATOR']
 const stages = ['REGISTRATION', 'SCHEDULING_NOTICES', 'DOCUMENT_REVIEW', 'ATTENDANCE', 'MEDIATION', 'DRAFT_OUTCOME', 'SIGNATURES', 'PENDING_CLAO_CERTIFICATION', 'CERTIFIED_FINAL']
 
 const fail = (status, code, message) => { throw new HttpError(status, code, message) }
 const idOf = (value) => String(value?._id ?? value)
 const assignment = (actor, roles, officeCode) => actor.assignments.find((item) => roles.includes(item.role) && item.officeCode === officeCode)
 
-async function context(applicationId, actor, session, { requireClaim = false } = {}) {
+export async function context(applicationId, actor, session, { requireClaim = false } = {}) {
   const application = await Application.findOne({ applicationId }).session(session)
   if (!application) fail(404, 'NOT_FOUND', 'Application not found.')
   const mediation = await Mediation.findOne({ applicationId }).session(session)
@@ -32,7 +34,7 @@ function auditRole(actor, officeCode, preferred) {
   return assignment(actor, preferred, officeCode)?.role ?? fail(403, 'FORBIDDEN', 'This role cannot perform that mediation action.')
 }
 
-async function recordMutation(application, session, actor, actorRole, action, previousState, newState, reason, channel = 'DLAO') {
+export async function recordMutation(application, session, actor, actorRole, action, previousState, newState, reason, channel = 'DLAO') {
   const updated = await advance(application, session)
   await appendAudit({
     applicationId: application.applicationId, caseId: application.caseId, sequence: updated.auditSequence,
@@ -77,6 +79,7 @@ async function publicMediation(mediation, session) {
     legalReviewBasis: mediation.legalReviewBasis ?? null,
     legalEffectState: mediation.legalEffectState,
     certificateReason: mediation.certificateReason ?? null, certifiedAt: mediation.certifiedAt ?? null,
+    sessions: mediation.sessions ?? [],
     documents: documents.map(({ _id, label, qualityState, currentVersion }) => ({ id: idOf(_id), label, qualityState, currentVersion })),
   }
 }
@@ -89,6 +92,7 @@ export async function startMediation(applicationId, actor) {
     if (application.status !== 'ACCEPTED' || !application.caseId || !await Case.exists({ applicationId, caseId: application.caseId }).session(session)) {
       fail(409, 'CASE_REQUIRED', 'Register mediation only after a human accepts the Application and creates its Case.')
     }
+    await requireOpenCase(applicationId, session)
     const existing = await Mediation.findOne({ applicationId }).session(session)
     if (existing) return publicMediation(existing, session)
     const [mediation] = await Mediation.create([{
@@ -106,7 +110,7 @@ export async function getMediation(applicationId, actor) {
   if (!role) fail(403, 'FORBIDDEN', 'This role cannot access mediation records for this office.')
   const mediation = await Mediation.findOne({ applicationId }).lean()
   if (!mediation) {
-    if (role.role !== 'DLAO_OFFICER') fail(404, 'MEDIATION_NOT_FOUND', 'No mediation is assigned to this account yet.')
+    if (role.role === 'MEDIATOR') fail(404, 'MEDIATION_NOT_FOUND', 'No mediation is assigned to this account yet.')
     return { mediation: null }
   }
   if (role.role === 'MEDIATOR' && mediation.mediatorUserId && idOf(mediation.mediatorUserId) !== idOf(actor.userId)) fail(403, 'FORBIDDEN', 'This mediation is assigned to another mediator.')
@@ -383,7 +387,14 @@ export async function openPartySigning(code) {
   if (!invitation || invitation.usedAt || invitation.expiresAt <= new Date()) fail(404, 'SIGNING_CODE_UNAVAILABLE', 'This signing code is unavailable or has expired.')
   const [draft, mediation] = await Promise.all([SettlementDraft.findById(invitation.draftId).lean(), Mediation.findById(invitation.mediationId).lean()])
   if (!draft || !mediation || draft.status !== 'APPROVED' || mediation.stage !== 'SIGNATURES' || idOf(mediation.settlementDraftId) !== idOf(draft) || draft.version !== invitation.draftVersion) fail(409, 'DOCUMENT_CHANGED', 'The approved signing document is no longer current.')
-  return { signerRole: invitation.signerRole, expiresAt: invitation.expiresAt, draft: partyDraft(draft), documentHash: settlementHash(draft) }
+  const verification = await requirePartyVerification(invitation)
+  return { signerRole: invitation.signerRole, expiresAt: invitation.expiresAt, identityVerificationId: idOf(verification), draft: partyDraft(draft), documentHash: settlementHash(draft) }
+}
+
+export async function requirePartyVerification(invitation, session) {
+  const verification = await PartyVerification.findOne({ invitationId: invitation._id, tokenHash: invitation.tokenHash }).sort({ createdAt: -1, _id: -1 }).session(session)
+  if (!verification || verification.status !== 'VERIFIED' || verification.expiresAt <= new Date() || verification.draftVersion !== invitation.draftVersion) fail(403, 'IDENTITY_VERIFICATION_REQUIRED', 'The assigned mediator must approve your identity verification before signing.')
+  return verification
 }
 
 export async function recordPartySignature(code, input) {
@@ -404,13 +415,14 @@ export async function recordPartySignature(code, input) {
     }
     if (invitation.usedAt || invitation.expiresAt <= new Date()) fail(409, 'SIGNING_CODE_UNAVAILABLE', 'This signing code was used or has expired.')
     if (mediation.stage !== 'SIGNATURES' || invitation.draftVersion !== draft.version) fail(409, 'DOCUMENT_CHANGED', 'The approved signing document is no longer current.')
+    const verification = await requirePartyVerification(invitation, session)
     if (await SignatureRecord.exists({ draftId: draft._id, draftVersion: draft.version, signerRole: input.signerRole }).session(session)) fail(409, 'SIGNER_ALREADY_RECORDED', 'A signature for this signer and draft version is already recorded.')
     const receivedAt = new Date()
     await SignatureRecord.create([{
       applicationId: invitation.applicationId, caseId: mediation.caseId, mediationId: mediation._id, draftId: draft._id,
       draftVersion: draft.version, signerRole: input.signerRole, documentHash: hash,
       publicKeyJwk: input.publicKeyJwk, signature: input.signature, clientMutationId: input.clientMutationId,
-      clientSignedAt: new Date(input.clientSignedAt), signingInvitationId: invitation._id, authorizationMethod: 'PARTY_CODE', partyConfirmed: true, receivedAt,
+      clientSignedAt: new Date(input.clientSignedAt), signingInvitationId: invitation._id, identityVerificationId: verification._id, signatureEvidenceId: verification.signatureEvidenceId, authorizationMethod: 'PARTY_CODE', partyConfirmed: true, receivedAt,
     }], { session })
     invitation.usedAt = receivedAt
     await invitation.save({ session })
@@ -460,7 +472,8 @@ export async function verifyMediation(applicationId, actor, overrideSections) {
   const candidate = overrideSections ? { ...draft, sections: overrideSections } : draft
   const signatures = await SignatureRecord.find({ mediationId: mediation._id }).sort({ receivedAt: 1 }).lean()
   const results = signatures.map((record) => ({ signerRole: record.signerRole, receivedAt: record.receivedAt, ...verifySettlementSignature(candidate, record) }))
-  return { documentHash: settlementHash(candidate), signatures: results, allValid: results.length === 3 && results.every(({ valid }) => valid) }
+  const required = results.filter(({ signerRole }) => requiredSigners.includes(signerRole))
+  return { documentHash: settlementHash(candidate), signatures: results, allValid: required.length === 3 && results.every(({ valid }) => valid) }
 }
 
 export async function recordLegalApplicability(applicationId, input, actor) {
@@ -486,16 +499,69 @@ export async function certifyMediation(applicationId, input, actor) {
     if (mediation.stage !== 'PENDING_CLAO_CERTIFICATION' || mediation.legalApplicability !== 'APPLICABLE_VERIFIED') fail(409, 'LEGAL_REVIEW_REQUIRED', 'Do not certify while legal applicability is unverified.')
     const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session).lean()
     if (!draft) fail(409, 'SETTLEMENT_DRAFT_REQUIRED', 'The signed settlement draft is missing.')
-    const signatures = await SignatureRecord.find({ draftId: draft._id, draftVersion: draft.version }).session(session).lean()
+    const signatures = await SignatureRecord.find({ draftId: draft._id, draftVersion: draft.version, signerRole: { $in: requiredSigners } }).session(session).lean()
     const verification = signatures.map((record) => verifySettlementSignature(draft, record))
     if (signatures.length !== 3 || verification.some(({ valid }) => !valid) || new Set(signatures.map(({ signerRole }) => signerRole)).size !== 3) fail(409, 'SIGNATURE_VERIFICATION_FAILED', 'All three current-version signatures must independently verify before certification.')
+    // The CLAO's own signature must cover the exact document the parties and mediator signed.
+    const hash = verifySignatureInput(draft, input.signature)
+    if (await SignatureRecord.exists({ clientMutationId: input.signature.clientMutationId }).session(session)) fail(409, 'MUTATION_REUSED', 'This signature ID was already used. Sign again.')
+    const receivedAt = new Date()
+    await SignatureRecord.create([{
+      applicationId, caseId: mediation.caseId, mediationId: mediation._id, draftId: draft._id,
+      draftVersion: draft.version, signerRole: 'CLAO', documentHash: hash,
+      publicKeyJwk: input.signature.publicKeyJwk, signature: input.signature.signature, clientMutationId: input.signature.clientMutationId,
+      clientSignedAt: new Date(input.signature.clientSignedAt), recordedByUserId: actor.userId, authorizationMethod: 'CLAO_SESSION', receivedAt,
+    }], { session })
     mediation.certificateReason = input.reason
     mediation.certifiedByUserId = actor.userId
     mediation.certifiedAt = new Date()
     mediation.legalEffectState = 'CERTIFIED_FINAL'
     mediation.stage = 'CERTIFIED_FINAL'
     await mediation.save({ session })
-    await recordMutation(application, session, actor, role, 'CLAO_CERTIFICATION_RECORDED', { stage: 'PENDING_CLAO_CERTIFICATION' }, { stage: mediation.stage, legalEffectState: mediation.legalEffectState }, input.reason)
+    await recordMutation(application, session, actor, role, 'CLAO_CERTIFICATION_RECORDED', { stage: 'PENDING_CLAO_CERTIFICATION' }, { stage: mediation.stage, legalEffectState: mediation.legalEffectState, signerRole: 'CLAO', draftVersion: draft.version, documentHash: hash, receivedAt }, input.reason)
+    return publicMediation(mediation, session)
+  })
+}
+
+export async function recordMediationSession(applicationId, input, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const { application, mediation } = await context(applicationId, actor, session, { requireClaim: false })
+    const role = auditRole(actor, application.officeCode, ['DLAO_OFFICER', 'MEDIATOR'])
+
+    const sessionCount = (mediation.sessions?.length || 0) + 1
+    const newSession = {
+      sessionNumber: sessionCount,
+      scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : new Date(),
+      mode: input.mode || mediation.mode || 'IN_PERSON',
+      venue: input.venue || mediation.venue || '',
+      attendance: {
+        partyA: input.attendance?.partyA || 'ATTENDED',
+        partyB: input.attendance?.partyB || 'ATTENDED',
+        notes: input.attendance?.notes || '',
+      },
+      summaryNotes: input.summaryNotes?.trim() || '',
+      outcome: input.outcome || 'ADJOURNED_NEXT_DATE',
+      nextSessionDate: input.nextSessionDate ? new Date(input.nextSessionDate) : null,
+      recordedByUserId: actor.userId,
+      createdAt: new Date(),
+    }
+
+    if (!mediation.sessions) mediation.sessions = []
+    mediation.sessions.push(newSession)
+
+    if (newSession.nextSessionDate) {
+      mediation.scheduledAt = newSession.nextSessionDate
+    }
+    if (input.outcome === 'AGREEMENT_REACHED') {
+      mediation.outcome = 'AGREEMENT_REACHED'
+      mediation.outcomeReason = input.summaryNotes || 'Agreement reached in mediation session.'
+    } else if (input.outcome === 'NO_AGREEMENT') {
+      mediation.outcome = 'NO_AGREEMENT'
+      mediation.outcomeReason = input.summaryNotes || 'No agreement reached.'
+    }
+
+    await mediation.save({ session })
+    await recordMutation(application, session, actor, role, 'MEDIATION_SESSION_RECORDED', null, newSession, `Mediation session ${sessionCount} recorded. Outcome: ${newSession.outcome}`)
     return publicMediation(mediation, session)
   })
 }

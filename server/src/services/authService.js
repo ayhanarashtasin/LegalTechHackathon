@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { DemoSession, RoleAssignment, User } from '../models/index.js'
 import { HttpError } from '../utils/httpError.js'
 import { hashPassword, verifyPassword } from '../utils/password.js'
 import { Person } from '../models/index.js'
+import { demoAccounts as demoDefinitions, demoPassword } from './demoAccounts.js'
 
 export const tokenHash = (token) => createHash('sha256').update(token).digest('hex')
 
@@ -11,33 +11,17 @@ const failedLogins = new Map()
 const loginWindowMs = 15 * 60 * 1000
 const maxLoginFailures = 10
 const maxLoginBuckets = 4096
-const demoAccounts = new Map([
-  ['DLAO_OFFICER', 'demo.officer'],
-  ['MEDIATOR', 'demo.mediator'],
-  ['HELPLINE_AGENT', 'demo.helpline'],
-  ['UDC_OPERATOR', 'demo.udc'],
-  ['PANEL_LAWYER', 'demo.lawyer'],
-  ['RECEIVING_DLAO', 'demo.receiving'],
-  ['CASE_SUPPORT', 'demo.support'],
-  ['CLAO', 'demo.clao'],
-  ['CITIZEN', 'demo.citizen'],
-])
+const mainDemoAccounts = demoDefinitions.filter(([username]) => username.startsWith('demo.'))
+const demoAccounts = new Map(mainDemoAccounts.map(([username, , role]) => [role, username]))
+const demoRoleUsernames = { ...Object.fromEntries(mainDemoAccounts.map(([username, , , userType]) => [userType, username])), admin: 'admin.com' }
 const staffLoginEnabled = () => process.env.NODE_ENV !== 'production' || process.env.STAFF_LOGIN_ENABLED === 'true'
 
 export async function getDemoCredentials(role) {
   if (process.env.NODE_ENV === 'production') throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Demo authentication is disabled in production.')
-  const username = demoAccounts.get(role) || (Array.from(demoAccounts.values()).includes(role) ? role : null)
+  const username = demoAccounts.get(role) || (demoDefinitions.some(([username]) => username === role) ? role : null)
   if (!username) throw new HttpError(404, 'DEMO_ACCOUNT_NOT_FOUND', 'That demo role is not available.')
 
-  let credentials
-  try {
-    credentials = JSON.parse(await readFile(new URL('../../.demo-credentials.json', import.meta.url), 'utf8'))
-  } catch (error) {
-    if (error.code === 'ENOENT') throw new HttpError(503, 'DEMO_ACCOUNTS_NOT_SEEDED', 'Demo accounts are not ready. Seed the server demo accounts first.')
-    throw error
-  }
-  const password = credentials?.[username] || '1234'
-  return { username, password }
+  return { username, password: demoPassword(username) }
 }
 
 export async function registerCitizen(username, password, nid = '', name = '', phone = '') {
@@ -45,6 +29,7 @@ export async function registerCitizen(username, password, nid = '', name = '', p
     throw new HttpError(400, 'NAME_REQUIRED', 'Name is required.')
   }
   const cleanUsername = (username || '').trim().toLowerCase()
+  if (Object.hasOwn(demoRoleUsernames, cleanUsername) || cleanUsername === 'admin.com' || demoDefinitions.some(([username]) => username === cleanUsername)) throw new HttpError(409, 'USERNAME_TAKEN', 'That identifier is reserved for a demo account.')
   if (cleanUsername.length < 3 || cleanUsername.length > 50) {
     throw new HttpError(400, 'INVALID_USERNAME', 'Email ID / Phone must be between 3 and 50 characters.')
   }
@@ -65,6 +50,7 @@ export async function registerCitizen(username, password, nid = '', name = '', p
   const user = await User.create({
     username: cleanUsername,
     displayName: fullName,
+    userType: 'citizen',
     passwordHash,
     nid: nid?.trim() || undefined,
     phone: phone?.trim() || (cleanUsername.startsWith('01') || cleanUsername.startsWith('+') ? cleanUsername : undefined),
@@ -81,12 +67,13 @@ export async function registerCitizen(username, password, nid = '', name = '', p
   const token = randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000)
   await DemoSession.create({ tokenHash: tokenHash(token), userId: user._id, expiresAt })
-  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName, role: 'CITIZEN' } }
+  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName, userType: 'citizen', role: 'CITIZEN' } }
 }
 
 export async function login(username, password, remoteAddress = '') {
   if (!staffLoginEnabled()) throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Staff sign-in is disabled on this server.')
-  const key = createHash('sha256').update(`${remoteAddress}\0${username.toLowerCase()}`).digest('hex')
+  const cleanId = (username || '').toLowerCase().trim()
+  const key = createHash('sha256').update(`${remoteAddress}\0${cleanId}`).digest('hex')
   const now = Date.now()
   let failures = failedLogins.get(key)
   if (failures?.resetAt <= now) {
@@ -95,7 +82,10 @@ export async function login(username, password, remoteAddress = '') {
   }
   if (failures?.count >= maxLoginFailures) throw new HttpError(429, 'LOGIN_RATE_LIMITED', 'Too many sign-in attempts. Try again later.')
 
-  const user = await User.findOne({ username: username.toLowerCase(), active: true }).select('+passwordHash')
+  // A role word ("dlao", "lawyer") signs in to that role's fixed demo account; an exact username always wins.
+  // Never fall back to "any account of this type": the name must identify one account.
+  const user = await User.findOne({ username: cleanId, active: true }).select('+passwordHash')
+    ?? (Object.hasOwn(demoRoleUsernames, cleanId) ? await User.findOne({ username: demoRoleUsernames[cleanId], active: true }).select('+passwordHash') : null)
   const dummyHash = `${'0'.repeat(32)}:${'0'.repeat(128)}`
   if (!await verifyPassword(password, user?.passwordHash ?? dummyHash)) {
     if (!failures) {
@@ -114,7 +104,7 @@ export async function login(username, password, remoteAddress = '') {
   const token = randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000)
   await DemoSession.create({ tokenHash: tokenHash(token), userId: user._id, expiresAt })
-  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName } }
+  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName, userType: user.userType || 'citizen' } }
 }
 
 export async function getSession(token) {
@@ -125,7 +115,7 @@ export async function getSession(token) {
   const user = await User.findOne({ _id: session.userId, active: true })
   if (!user) return null
   const assignments = await RoleAssignment.find({ userId: user._id, active: true }).lean()
-  return { userId: user._id, username: user.username, displayName: user.displayName, assignments }
+  return { userId: user._id, username: user.username, displayName: user.displayName, userType: user.userType || 'citizen', acceptingCases: user.acceptingCases ?? true, assignments }
 }
 
 export async function ensureAdminUser() {
@@ -136,7 +126,7 @@ export async function ensureAdminUser() {
   const passwordHash = await hashPassword(password)
   const user = await User.findOneAndUpdate(
     { username },
-    { $set: { displayName: 'System Administrator', passwordHash, active: true, fictional: false } },
+    { $set: { displayName: 'System Administrator', userType: 'admin', passwordHash, active: true, fictional: false } },
     { upsert: true, returnDocument: 'after' },
   )
   await RoleAssignment.updateOne(
@@ -157,6 +147,7 @@ export async function changePassword(userId, currentPassword, newPassword) {
   }
   const user = await User.findById(userId).select('+passwordHash')
   if (!user) throw new HttpError(404, 'USER_NOT_FOUND', 'User not found.')
+  if (process.env.NODE_ENV !== 'production' && (demoDefinitions.some(([username]) => username === user.username) || user.username === 'admin.com' && !process.env.ADMIN_PASSWORD)) throw new HttpError(409, 'DEMO_PASSWORD_FIXED', 'Demo passwords are fixed. Use a registered account to change your password.')
 
   const matches = await verifyPassword(currentPassword || '', user.passwordHash)
   if (!matches) {

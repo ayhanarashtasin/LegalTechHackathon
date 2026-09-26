@@ -29,7 +29,7 @@ test('Step 13: API security headers, login throttling, and route focus are enfor
   await expect(page.getByRole('heading', { name: 'একটি রেকর্ড, প্রতিটি হস্তান্তরে।' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'সাইন ইন', exact: true })).toBeVisible()
   await expect(page.locator('html')).toHaveAttribute('lang', 'bn')
-  await page.getByRole('link', { name: 'ভয়েসে আবেদন শুরু করুন' }).click()
+  await page.getByRole('link', { name: 'টেলিফোনে সহায়তা কল শুরু করুন' }).click()
   await expect(page).toHaveURL(/\/voice$/)
   await expect(page.locator('#main')).toBeFocused()
   await expect(page.locator('.call-page')).toHaveAttribute('lang', 'bn')

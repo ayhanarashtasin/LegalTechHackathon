@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DLAS Solution Paper</title>
+<style>
+  @page { size: A4; margin: 12mm 13mm 11mm; }
+  :root { --ink: #1c2530; --muted: #52606d; --line: #d5dce3; --accent: #0b6b4f; --accent-soft: #e7f3ee; --warn: #92400e; --warn-soft: #fdf1d8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: var(--ink); }
+  body { font: 9.1pt/1.36 "Segoe UI", Arial, sans-serif; }
+  h1 { font-size: 16pt; line-height: 1.15; margin: 0; color: var(--accent); letter-spacing: -0.01em; }
+  h2 { font-size: 9.8pt; margin: 8pt 0 3pt; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+  p { margin: 0 0 3pt; }
+  ul { margin: 0; padding-left: 11pt; }
+  li { margin: 0 0 2pt; }
+  .meta { color: var(--muted); font-size: 8pt; margin: 2pt 0 5pt; }
+  .lead { font-size: 9.6pt; border-left: 2.5pt solid var(--accent); padding: 1pt 0 1pt 6pt; margin: 4pt 0 2pt; }
+
+  .map { border: 0.75pt solid var(--line); border-radius: 4pt; padding: 6pt; margin-top: 4pt; }
+  .map-label { font-size: 7.2pt; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3pt; }
+  .doors { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4pt; }
+  .door { background: var(--accent-soft); color: var(--accent); font-weight: 700; border-radius: 3pt; padding: 4pt; font-size: 8pt; text-align: center; }
+  .down { text-align: center; color: var(--accent); font-size: 9pt; line-height: 1; margin: 3pt 0; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 3pt; font-size: 8pt; }
+  .step { border: 0.75pt solid var(--accent); border-radius: 10pt; padding: 1pt 7pt; font-weight: 600; }
+  .step.human { background: var(--accent); color: #fff; }
+  .arrow { color: var(--muted); }
+  .band { margin-top: 5pt; background: #f3f5f7; border-radius: 3pt; padding: 3pt 5pt; font-size: 8pt; text-align: center; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; vertical-align: top; padding: 2.6pt 4pt; border-bottom: 0.6pt solid var(--line); }
+  th { font-size: 7.4pt; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border-bottom: 1pt solid var(--ink); }
+  tr { break-inside: avoid; }
+  .cases td { font-size: 8.7pt; }
+  .cases td:first-child { width: 24pt; font-weight: 700; color: var(--accent); }
+  .cases td:nth-child(2) { width: 132pt; font-weight: 600; }
+  .cases td:last-child { width: 70pt; }
+  .new-page { break-before: page; }
+  .group td { background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 7.6pt; text-transform: uppercase; letter-spacing: 0.05em; padding: 2pt 4pt; }
+  .ok { color: var(--accent); font-weight: 700; font-size: 10pt; line-height: 1; }
+  .part { display: inline-block; border-radius: 8pt; padding: 0 5pt; background: var(--warn-soft); color: var(--warn); font-size: 7.4pt; font-weight: 700; }
+  .gap { display: block; color: var(--warn); font-size: 7.4pt; line-height: 1.25; margin-top: 1pt; }
+  code { font: 7.8pt Consolas, monospace; }
+  .legend { font-size: 7.6pt; color: var(--muted); margin-top: 2pt; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12pt; }
+  .fail td { font-size: 8.6pt; padding: 2.2pt 3pt; }
+  .fail td:first-child { font-weight: 600; width: 46%; }
+  .kpi td { font-size: 8.6pt; }
+  .kpi td:first-child { font-weight: 700; width: 118pt; }
+  .kpi td:last-child { width: 44pt; font-weight: 700; color: var(--accent); }
+  .note { font-size: 7.9pt; color: var(--muted); margin-top: 3pt; }
+</style>
+</head>
+<body>
+
+<h1>Five Doors, One Record: Integrated Digital Legal Aid System (DLAS)</h1>
+<p class="meta">Solution paper · ADLASB Grand Finale · 26 September 2026 · all data fictional</p>
+<p class="lead">One system, not 23 islands: every citizen door, provider role and technical feature works on <b>one authoritative Application/Case record</b>. AI suggests; authorised humans decide.</p>
+
+<h2>1. Architecture and integration map</h2>
+<p>React/Vite PWA → Express 5 API (MVC) → MongoDB with transactions. Submission issues an <b>Application ID</b>; only a DLAO officer's acceptance creates the <b>Case ID</b>. Facts, consent, safe contact, tasks, documents, referrals, mediation, lawyer work and audit attach to that record. The server enforces role, office and assignment. Optional Groq AI always has a manual fallback.</p>
+<div class="map">
+  <div class="map-label">Five doors</div>
+  <div class="doors">
+    <div class="door">16699 voice call (simulated)</div>
+    <div class="door">Citizen web / PWA</div>
+    <div class="door">UDC assisted, offline</div>
+    <div class="door">Helpline &amp; DLAO desk</div>
+    <div class="door">Inter-office referral</div>
+  </div>
+  <div class="down">▼</div>
+  <div class="flow">
+    <span class="step">Application ID</span><span class="arrow">→</span>
+    <span class="step human">DLAO review</span><span class="arrow">→</span>
+    <span class="step">Case ID</span><span class="arrow">→</span>
+    <span class="step">Mediation · Lawyer · Referral</span><span class="arrow">→</span>
+    <span class="step">Follow-up</span><span class="arrow">→</span>
+    <span class="step human">Outcome &amp; closure</span>
+  </div>
+  <div class="band"><b>Travels with the record:</b> provenance · safe contact · deadlines · versioned documents · restricted evidence · hash-chained audit</div>
+</div>
+
+<h2>2. The 23 problems and our solutions</h2>
+<table class="cases">
+  <thead><tr><th>#</th><th>Problem</th><th>Solution</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr class="group"><td colspan="4">Part A: citizens</td></tr>
+    <tr><td>A1</td><td>Moyuri: unsafe contact, no NID, brother reports</td><td>Ripon's facts stay <code>REPRESENTATIVE_REPORTED</code> and identity incomplete until she confirms. Safe-contact profile enforced; if someone else answers, nothing is disclosed. Her correction is appended as <code>APPLICANT_CONFIRMED</code>; his version stays.</td><td><span class="part">Partial</span><span class="gap">Officer-attested correction; no self-service screen</span></td></tr>
+    <tr><td>A2</td><td>Ripon: blind representative</td><td>Voice or keypad call with 38 recorded Bangla prompts, read-back, ID and PIN spoken; no CAPTCHA, visual OTP or PDF. Representation stays pending.</td><td><span class="part">Partial</span><span class="gap">Blind-user test pending</span></td></tr>
+    <tr><td>A3</td><td>Nabila: urgent, sensitive images</td><td>Urgency reasons with evidence; officer sets priority. Restricted evidence needs a named grant or open referral; every access logged. Tracked referral; no acknowledgement → follow-up task.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>A4</td><td>Nuching: Marma, cannot read, weak network</td><td>Applicant, helper, translator and typist recorded separately; Marma original beside translation, read back; helper's phone never becomes applicant contact; drafts survive network loss.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>A5</td><td>Malek: long case, shop phone, silent lawyer</td><td>“Ask by Voice”: he speaks his ID and PIN and hears stage, hearing date and next step, after a private-listening check. Failed contacts logged; overdue lawyer updates alert the DLAO.</td><td><span class="ok">✓</span></td></tr>
+  </tbody>
+  <tbody>
+    <tr class="group"><td colspan="4">Part B: providers</td></tr>
+    <tr><td>B1</td><td>DLAO officer: scattered registers</td><td>One office queue: flag reasons, ageing, owner, next action, search; priority override needs a reason and is audited.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>B2</td><td>Mediator</td><td>Registration, scheduling (in-person, remote or hybrid), notices, documents, attendance, session and outcome, with T7 drafting and T11 signing.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>B3</td><td>16699 helpline agent</td><td>Exact-ID lookup; generic status only after one-time code, verification and safe channel; new intakes join the same record.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>B4</td><td>UDC entrepreneur</td><td>Free-service notice, checklist, consent, provenance, safe contact; access ends at DLAO review or 24 hours.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>B5</td><td>Panel lawyer</td><td>Worklist, accept/decline, hearings, update schedule, reports, fee claims, overdue reminders; client contact only after acceptance.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>B6</td><td>Receiving DLAO</td><td>Package: reason, history, documents, responsible officer, expected action, deadline; accept or return with reason; both offices see status.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>B7</td><td>Case-support staff</td><td>Structured record, search, versions, tasks, audit reconstruction, reports from data captured once; restricted evidence hidden.</td><td><span class="ok">✓</span></td></tr>
+  </tbody>
+  <tbody class="new-page">
+    <tr class="group"><td colspan="4">Part C: technical challenges</td></tr>
+    <tr><td>T1</td><td>Lawyer change, inactivity, payment</td><td>Change request → DLAO review → replacement; stage payment history; two missed updates → review and temporary assignment hold, not a misconduct finding.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T2</td><td>Jurisdiction ping-pong</td><td>Two returns escalate; transfers blocked until a DLAO records a reasoned routing decision.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T3</td><td>One incident, many applicants</td><td>Three Cases linked, never merged; common document uploaded once, shared by reference.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T4</td><td>Duplicate / fraud risk</td><td>Multi-attribute fuzzy matching over 12 profiles; side-by-side human review with reason; never merges or rejects; two traps stay separate.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T5</td><td>Bangla intake agent</td><td>AI fills only approved fields, re-validated and marked AI-inferred; unclear safety answers go to an officer with the transcript.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T6</td><td>Document agent</td><td>Six documents → briefing quoting source version and line; flags a missing and an unreadable item; officer approves.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T7</td><td>Settlement drafting</td><td>Maintenance, property and labour templates; AI-filled fields and inconsistencies marked; human review before signing.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T8</td><td>Multi-agent triage</td><td>Categorisation, process/safety and urgency components; disagreements shown; no names sent to AI; DLAO decides. Five cases, one conflict.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T9</td><td>Offline sync, integrity</td><td>Encrypted drafts with temporary and mutation IDs sync once; conflicts go to a human; hash chain verified.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T10</td><td>Low-bandwidth PWA</td><td>Installable; caches static shell only; light mode (automatic on Save-Data/2G) cuts call start 468 → 304 ms at 50 KB/s.</td><td><span class="ok">✓</span></td></tr>
+    <tr><td>T11</td><td>Offline e-signature</td><td>Parties sign separately with P-256 keys, one offline then synced; mediator last; a changed copy fails verification.</td><td><span class="ok">✓</span></td></tr>
+  </tbody>
+</table>
+<p class="legend"><span class="ok">✓</span> built, integrated and covered by automated tests.</p>
+
+<div class="cols">
+  <div>
+    <h2>3. Human safeguards</h2>
+    <ul>
+      <li><b>AI proposes, humans decide:</b> AI never sets eligibility, priority, route, lawyer, outcome or provenance.</li>
+      <li>Every override and decision needs a reason and is audited.</li>
+      <li>Scores and alerts open reviews; they never reject, merge or find misconduct.</li>
+      <li>Signatures are not a decree; CLAO certification is a separate authorised step.</li>
+      <li>Demo thresholds await law-team approval.</li>
+    </ul>
+  </div>
+  <div>
+    <h2>4. Resilience and failure model</h2>
+    <table class="fail">
+      <tbody>
+        <tr><td>Unknown person answers</td><td>No disclosure; safer follow-up</td></tr>
+        <tr><td>Referral unacknowledged</td><td>Follow-up task, audit event</td></tr>
+        <tr><td>Network drop</td><td>Encrypted draft; no duplicate on sync</td></tr>
+        <tr><td>Offline edit conflict</td><td>Human chooses, with reason</td></tr>
+        <tr><td>Lawyer misses two updates</td><td>Review and assignment hold</td></tr>
+        <tr><td>AI unavailable</td><td>Deterministic or keyboard path</td></tr>
+        <tr><td>Signed text altered</td><td>Verification fails</td></tr>
+        <tr><td>Wrong role opens evidence</td><td>Denied and logged</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Audit is tamper-evident (SHA-256 chain), not tamper-proof.</p>
+  </div>
+</div>
+
+<h2>5. Five success indicators</h2>
+<table class="kpi">
+  <thead><tr><th>Indicator</th><th>Measure and prototype evidence</th><th>Target</th></tr></thead>
+  <tbody>
+    <tr><td>Safe-contact compliance</td><td>Contact attempts with zero unauthorised disclosure; unknown-person test passes.</td><td>100%</td></tr>
+    <tr><td>One-record continuity</td><td>Journeys where all doors and roles share one Application/Case ID; six jury flows.</td><td>100%</td></tr>
+    <tr><td>Accessible completion</td><td>Ripon, Nuching and Malek tasks done without an excluded step; blind-user test pending.</td><td>≥ 90%</td></tr>
+    <tr><td>Tracked responsibility</td><td>Referrals, lawyer updates and mediation steps with owner, deadline and escalation.</td><td>100%</td></tr>
+    <tr><td>Resilient recovery</td><td>Failure tests recovered without loss or duplicates; 12 bad-day tests automated.</td><td>100%</td></tr>
+  </tbody>
+</table>
+<p class="note"><b>Stated limits:</b> 16699 telephony, SMS/USSD, government ID, payments and notifications are simulated or not connected. Pending: blind-user and real-caller validation, scanned-PDF OCR, multi-server timers, law-team approval. Targets are proposals.</p>
+
+</body>
+</html>

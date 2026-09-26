@@ -60,6 +60,10 @@ const copies = { bn: {
   phoneRule: 'ফোন নম্বর কমপক্ষে ৬ অঙ্কের হয়।',
   correct: 'ঠিক আছে',
   wrong: 'ভুল',
+  speakingPrompt: 'সিস্টেম প্রশ্ন বলছে…',
+  skipPrompt: 'সরাসরি উত্তর দিন',
+  doneSpeaking: 'বলা শেষ (#)',
+  speakOrKeypad: 'মুখে উত্তর বলুন অথবা নিচের কিপ্যাড ব্যবহার করুন:',
 }, en: {
   simulation: 'Web simulation · not a real phone call',
   call: 'Call',
@@ -110,6 +114,10 @@ const copies = { bn: {
   phoneRule: 'A phone number has at least 6 digits.',
   correct: 'Correct',
   wrong: 'Wrong',
+  speakingPrompt: 'System is asking…',
+  skipPrompt: 'Answer Now',
+  doneSpeaking: 'Done speaking (#)',
+  speakOrKeypad: 'Speak your answer aloud or use the keypad below:',
 } }
 const bn = () => getLang() === 'bn'
 const text = () => copies[getLang()]
@@ -158,7 +166,26 @@ function createClipPlayer() {
       for (const clip of clips) if (!await playOne(clip)) return false
       return true
     },
-    stop() { audio.pause(); settle?.(false) },
+    speak(text, lang = 'en-US') {
+      return new Promise((resolve) => {
+        if (typeof window === 'undefined' || !window.speechSynthesis) return resolve(true)
+        settle = resolve
+        window.speechSynthesis.cancel()
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.lang = lang
+        utterance.rate = 1.0
+        utterance.onend = () => resolve(true)
+        utterance.onerror = () => resolve(true)
+        window.speechSynthesis.speak(utterance)
+      })
+    },
+    stop() {
+      audio.pause()
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel()
+      }
+      settle?.(false)
+    },
   }
 }
 
@@ -291,10 +318,30 @@ export default function VoiceAccess({ session, lightMode }) {
     const ask = done ? endClips(call, submission) : kind === 'CONFIRM' ? [...digitClips(spokenNumber), 'numberConfirm'] : [field ?? 'readback']
     const clips = [...leadRef.current, ...intros, ...ask]
     leadRef.current = []
-    const finished = lightMode || !bn() || await playerRef.current.play(clips)
+    let finished = lightMode
+    if (!finished) {
+      if (bn()) {
+        finished = await playerRef.current.play(clips)
+      } else if (typeof window !== 'undefined' && window.speechSynthesis) {
+        const promptText = done
+          ? (modeOf(call) === 'ADVICE' ? `${copy.adviceDone}. ${copy.adviceNext}` : `${copy.submitted}. ${copy.review}`)
+          : kind === 'CONFIRM'
+            ? `${copy.heardNumber}: ${spokenNumber}. Press 1 if correct, press 2 if wrong.`
+            : field ? promptOf(field) : copy.readback
+        finished = await playerRef.current.speak(promptText, 'en-US')
+      } else {
+        finished = true
+      }
+    }
     if (finished && run === runRef.current && !done) listen()
   })
   useEffect(() => { askTurn() }, [turn])
+
+  function skipToListen() {
+    if (!call || mode === 'PROCESSING' || submission.status === 'PROCESSING') return
+    playerRef.current?.stop()
+    if (!done) listen()
+  }
 
   const onKeyboard = useEffectEvent((event) => {
     if (event.ctrlKey || event.altKey || event.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return
@@ -328,11 +375,11 @@ export default function VoiceAccess({ session, lightMode }) {
   // working. The number is spoken only when its read-back will be heard. Without voice, a spoken question opens the
   // typed answer and the rest wait for keys.
   function listen() {
-    const readBackHeard = readBackReadyRef.current && bn() && !lightMode
+    const readBackHeard = (readBackReadyRef.current && bn() && !lightMode) || (!bn() && typeof window !== 'undefined' && typeof speechSynthesis !== 'undefined')
     if (voiceOff || !streamRef.current || (kind === 'DIGITS' && !readBackHeard)) return waitForKeys()
     const words = kind === 'SPOKEN' || kind === 'DIGITS'
     try {
-      const pause = { context: toneRef.current, pauseMs: words ? steps[field].long || kind === 'DIGITS' ? LONG_PAUSE_MS : PAUSE_MS : QUICK_PAUSE_MS, onPause: () => { playTone(toneRef.current, [480], 150); finishSpoken() } }
+      const pause = { context: toneRef.current, pauseMs: words ? steps[field]?.long || kind === 'DIGITS' ? LONG_PAUSE_MS : PAUSE_MS : QUICK_PAUSE_MS, onPause: () => { playTone(toneRef.current, [480], 150); finishSpoken() } }
       answerRef.current = { recorder: startRecording(streamRef.current, pause), startedAt: Date.now() }
     } catch {
       return waitForKeys()
@@ -443,7 +490,7 @@ export default function VoiceAccess({ session, lightMode }) {
     setMode('PROCESSING')
     const readBack = kind === 'CONFIRM' || kind === 'READBACK'
     try {
-      const result = await api(`/api/voice/answers?fields=${readBack ? 'confirm' : field}`, { method: 'POST', audio: clip })
+      const result = await api(`/api/voice/answers?fields=${readBack ? 'confirm' : field}&lang=${language}`, { method: 'POST', audio: clip })
       if (run !== runRef.current) return
       if (result.text) transcriptRef.current = appendTranscript(transcriptRef.current, 'CALLER', result.text)
       if (result.sensitive) setCall((current) => current ? { ...current, aiSensitive: true } : current)
@@ -624,8 +671,31 @@ export default function VoiceAccess({ session, lightMode }) {
             <CallTimer />
           </div>}
           <div role="status" className="call-notice">
-            {/* Not announced: a screen reader speaking now would be recorded as the answer; the beep is the cue. */}
-            {mode === 'RECORDING' && <p aria-hidden="true">{copy.listening}</p>}
+            {/* Live voice prompts & recording states */}
+            {mode === 'PROMPT' && !done && (
+              <div className="voice-prompt-bar">
+                <span className="voice-prompt-status">
+                  <span className="voice-speaker-icon" aria-hidden="true">🔊</span> {copy.speakingPrompt}
+                </span>
+                <button type="button" className="voice-action-btn secondary-button" onClick={skipToListen}>
+                  {copy.skipPrompt} 🎙️
+                </button>
+              </div>
+            )}
+            {mode === 'RECORDING' && (
+              <div className="voice-listening-card">
+                <div className="voice-mic-wave" aria-hidden="true">
+                  <span className="mic-dot" />
+                  <span className="mic-pulse" />
+                </div>
+                <div className="voice-listening-text">
+                  <p aria-hidden="true">{copy.listening}</p>
+                </div>
+                <button type="button" className="voice-action-btn secondary-button" onClick={finishSpoken}>
+                  {copy.doneSpeaking}
+                </button>
+              </div>
+            )}
             {mode === 'PROCESSING' && <p>{copy.transcribing}</p>}
             {submission.status === 'PROCESSING' && <p>{copy.submitting}</p>}
             {notice && <p>{notice}</p>}
@@ -660,6 +730,9 @@ export default function VoiceAccess({ session, lightMode }) {
               {kind === 'READBACK' && <Readback call={call} recordings={recordings}
                 onCorrect={(item) => { setSubmission({ status: 'IDLE' }); setCall(correct(call, item)) }} />}
               {submission.status === 'FAILED' && <p role="alert" className="error">{copy.failed}</p>}
+              {mode !== 'TYPING' && (kind === 'CHOICE' || kind === 'DIGITS') && (
+                <p className="keypad-subhint">{copy.speakOrKeypad}</p>
+              )}
               {mode === 'TYPING' && kind === 'SPOKEN'
                 ? <TypedAnswer key={`${field}:${attempt}`} field={field} initial={call.previous[field]} onAnswer={choose} />
                 : <Keypad hints={hints} onPress={pressKey} />}

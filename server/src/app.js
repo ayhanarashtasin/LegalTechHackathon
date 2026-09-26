@@ -27,7 +27,7 @@ const clientContentSecurityPolicy = [
   "form-action 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self'",
   "media-src 'self' blob:",
@@ -38,7 +38,7 @@ const clientContentSecurityPolicy = [
 app.use((_request, response, next) => {
   response.set({
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
-    'Permissions-Policy': 'camera=(), microphone=(self), geolocation=()',
+    'Permissions-Policy': 'camera=(self), microphone=(self), geolocation=()',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
@@ -51,8 +51,8 @@ app.use((request, response, next) => {
     response.vary('Origin')
     response.set({
       'Access-Control-Allow-Origin': origin,
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Lookup-Code',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Lookup-Code, X-Signing-Code',
     })
     if (request.method === 'OPTIONS') return response.status(204).end()
   }
@@ -60,6 +60,7 @@ app.use((request, response, next) => {
 })
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() })
 app.use('/api/citizen/applications', express.json({ limit: '10mb' }))
+app.use('/api/lawyers/assignments/:assignmentId/documents', express.raw({ type: 'application/pdf', limit: '4mb' }))
 app.use(express.json({ limit: '128kb' }))
 app.use('/health', healthRoutes)
 app.use('/api/auth', authRoutes)

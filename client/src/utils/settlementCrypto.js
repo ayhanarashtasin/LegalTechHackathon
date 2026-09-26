@@ -46,5 +46,7 @@ export async function verifySettlement(draft, signatures, sections = draft.secti
       return { signerRole: record.signerRole, receivedAt: record.receivedAt, hashMatches, cryptographicallyValid: false, valid: false }
     }
   }))
-  return { documentHash, signatures: results, allValid: results.length === 3 && results.every(({ valid }) => valid) }
+  // Party A, Party B and the mediator must all be present; a CLAO certification signature, when present, must verify too.
+  const required = results.filter(({ signerRole }) => signerRole !== 'CLAO')
+  return { documentHash, signatures: results, allValid: required.length === 3 && results.every(({ valid }) => valid) }
 }

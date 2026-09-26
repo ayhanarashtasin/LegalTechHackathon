@@ -93,8 +93,9 @@ export function validateSignature(request, _response, next) {
   next()
 }
 
-function checkSignature(value) {
-  if (!['PARTY_A', 'PARTY_B', 'MEDIATOR'].includes(value.signerRole)) fail('Signer role is invalid.')
+function checkSignature(value, roles = ['PARTY_A', 'PARTY_B', 'MEDIATOR']) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('Signature is invalid.')
+  if (!roles.includes(value.signerRole)) fail('Signer role is invalid.')
   if (!Number.isSafeInteger(value.draftVersion) || value.draftVersion < 1) fail('Draft version is invalid.')
   if (typeof value.documentHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.documentHash)) fail('Document digest is invalid.')
   const jwk = value.publicKeyJwk
@@ -138,8 +139,11 @@ export function validateLegalApplicability(request, _response, next) {
   next()
 }
 
+// The CLAO signs the same settlement document the parties and mediator signed; the reason stays in the audit history.
 export function validateCertification(request, _response, next) {
-  const value = body(request, ['reason'])
+  const value = body(request, ['reason', 'signature'])
   value.reason = text(value.reason, 'CLAO certification reason', 10, 500)
+  checkSignature(value.signature, ['CLAO'])
+  if (Object.keys(value.signature).some((key) => !['signerRole', 'draftVersion', 'documentHash', 'publicKeyJwk', 'signature', 'clientMutationId', 'clientSignedAt'].includes(key))) fail('Signature fields are invalid.')
   next()
 }

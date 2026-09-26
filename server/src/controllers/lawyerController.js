@@ -1,7 +1,7 @@
 import {
-  assignLawyer, getLawyerActivity, getLawyerManagement, getLawyerWorklist, remindLawyerUpdate, requestLawyerChange,
-  respondToAssignment, reviewLawyerChange, reviewLawyerHold, scheduleLawyerUpdate, submitLawyerUpdate, updateCasePlan,
-  updateLawyerPaymentStatus,
+  assignLawyer, getLawyerActivity, getLawyerAvailability, getLawyerManagement, getLawyerWorklist, remindLawyerUpdate, requestLawyerChange,
+  respondToAssignment, reviewLawyerChange, reviewLawyerHold, scheduleLawyerUpdate, setLawyerAvailability, submitLawyerUpdate, updateCasePlan,
+  updateLawyerPaymentStatus, updatePovertyCertificate,
 } from '../services/lawyerService.js'
 
 export async function worklist(request, response) {
@@ -55,3 +55,17 @@ export async function holdReview(request, response) {
 export async function paymentStatus(request, response) {
   response.status(201).json(await updateLawyerPaymentStatus(request.params.assignmentId, request.body, request.auth))
 }
+
+export async function lawyerAvailability(request, response) {
+  response.json(await getLawyerAvailability(request.auth.userId))
+}
+
+export async function updateAvailability(request, response) {
+  const { acceptingCases } = request.body || {}
+  response.json(await setLawyerAvailability(request.auth.userId, acceptingCases))
+}
+
+export async function povertyCertificate(request, response) {
+  response.json(await updatePovertyCertificate(request.params.applicationId, request.body, request.auth))
+}
+

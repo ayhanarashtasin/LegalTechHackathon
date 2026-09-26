@@ -13,3 +13,4 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .playwright-mcp/
+server/.identity-evidence-key

@@ -65,7 +65,7 @@ export function validateProgressReport(request, _response, next) {
 
 export function validatePaymentStatus(request, _response, next) {
   const value = body(request, ['stage', 'status', 'reason'])
-  if (!['CASE_PREPARATION', 'HEARING_ATTENDANCE', 'CLAIM_REVIEW', 'RECONCILIATION'].includes(value.stage)) fail('Payment stage is invalid.')
+  if (!['CASE_PREPARATION', 'HEARING_ATTENDANCE', 'FINAL_DISPOSAL', 'CLAIM_REVIEW', 'RECONCILIATION'].includes(value.stage)) fail('Payment stage is invalid.')
   if (!['NOT_RECORDED', 'SUBMITTED', 'UNDER_REVIEW', 'RECONCILED', 'PAYMENT_RECORDED', 'DISPUTED'].includes(value.status)) fail('Payment status is invalid.')
   value.reason = text(value.reason, 'Reconciliation reason', 10)
   next()

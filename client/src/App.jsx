@@ -18,6 +18,7 @@ const ReferralPage = lazy(() => import('./pages/ReferralPage.jsx'))
 const LawyerCasePage = lazy(() => import('./pages/LawyerCasePage.jsx'))
 const IncidentGroupPage = lazy(() => import('./pages/IncidentGroupPage.jsx'))
 const MediationPage = lazy(() => import('./pages/MediationPage.jsx'))
+const CaseRedirect = lazy(() => import('./pages/MediationPage.jsx').then((module) => ({ default: module.CaseRedirect })))
 const MediationVerifier = lazy(() => import('./pages/MediationVerifier.jsx'))
 const PartySigning = lazy(() => import('./pages/PartySigning.jsx'))
 
@@ -77,6 +78,8 @@ export default function App() {
   const isCitizen = session?.user?.assignments?.some(({ role }) => role === 'CITIZEN')
   const mediationOnly = session?.user?.assignments?.some(({ role }) => role === 'MEDIATOR' || role === 'CLAO')
     && !session?.user?.assignments?.some(({ role }) => role === 'DLAO_OFFICER')
+  const claoCaseView = session?.user?.assignments?.some(({ role }) => role === 'CLAO')
+    && !session?.user?.assignments?.some(({ role }) => role === 'DLAO_OFFICER' || role === 'PANEL_LAWYER')
 
   useEffect(() => {
     document.documentElement.dataset.lightMode = lightMode ? 'on' : 'off'
@@ -232,7 +235,7 @@ export default function App() {
                 <div className="account-dropdown-user-row">
                   <span className="account-dropdown-name">{session.user.displayName || session.user.username}</span>
                   <span className="account-dropdown-role">
-                    {session.user.assignments?.[0]?.role?.replace(/_/g, ' ') || 'Citizen'}
+                    {session.user.userType ? session.user.userType.toUpperCase() : (session.user.assignments?.[0]?.role?.replace(/_/g, ' ') || 'CITIZEN')}
                   </span>
                 </div>
 
@@ -323,7 +326,7 @@ export default function App() {
           <Route path="/applications/:applicationId/mediation/verify" element={session ? <MediationVerifier session={session} /> : <Navigate to="/" replace />} />
           <Route path="/mediation/sign" element={<PartySigning />} />
           <Route path="/applications/:applicationId" element={session ? mediationOnly ? <MediationPage session={session} /> : <RecordPage session={session} /> : <Navigate to="/" replace />} />
-          <Route path="/cases/:caseId" element={session ? <LawyerCasePage session={session} /> : <Navigate to="/" replace />} />
+          <Route path="/cases/:caseId" element={session ? claoCaseView ? <CaseRedirect session={session} /> : <LawyerCasePage session={session} /> : <Navigate to="/" replace />} />
           <Route path="/referrals/:referralId" element={session?.user.assignments.some(({ role }) => role === 'RECEIVING_DLAO') ? <ReferralPage session={session} /> : <Navigate to="/" replace />} />
           <Route path="/incidents/:groupId" element={session?.user.assignments.some(({ role }) => ['DLAO_OFFICER', 'CASE_SUPPORT'].includes(role)) ? <IncidentGroupPage session={session} /> : <Navigate to="/" replace />} />
           <Route path="/voice" element={<VoiceAccess session={session} lightMode={lightMode} />} />

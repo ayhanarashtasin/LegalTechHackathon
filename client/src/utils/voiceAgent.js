@@ -23,9 +23,9 @@ export function parseAnswer(field, raw) {
 
 // A caller may answer a choice by saying its key number ("দুই"). The model cannot see the key order, so an answer
 // that is only a number is matched to its key here, like pressing it.
-const numberWords = { এক: 1, দুই: 2, দু: 2, তিন: 3 }
+const numberWords = { এক: 1, দুই: 2, দু: 2, তিন: 3, চার: 4, one: 1, two: 2, three: 3, four: 4 }
 export function spokenKey(text) {
-  const word = asciiDigits(text ?? '').replace(/[\s।.,!?'"-]+/g, '')
+  const word = asciiDigits(text ?? '').toLowerCase().replace(/[\s।.,!?'"-]+/g, '')
   return numberWords[word] ?? (/^[1-9]$/.test(word) ? Number(word) : undefined)
 }
 

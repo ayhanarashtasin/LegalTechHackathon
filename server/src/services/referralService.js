@@ -3,7 +3,7 @@ import { Application, Document, Person, Referral, RoleAssignment, SafeContactPro
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
 import { appendAudit } from './auditService.js'
-import { advance, officeApplication } from './applicationService.js'
+import { advance, officeApplication, requireOpenCase } from './applicationService.js'
 
 const WAITING = ['SENT', 'ACKNOWLEDGED']
 // ponytail: Goal.md T2 demo threshold; replace with the approved routing policy once the law team confirms who decides.
@@ -46,6 +46,7 @@ export async function createReferral(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const application = await officeApplication(applicationId, actor, session)
     if (application.status !== 'ACCEPTED') throw new HttpError(409, 'CASE_REQUIRED', 'Only an accepted case with a Case ID can be referred.')
+    await requireOpenCase(applicationId, session)
     if (await Referral.exists({ applicationId, status: { $in: WAITING } }).session(session)) throw new HttpError(409, 'REFERRAL_ACTIVE', 'A referral is still waiting for the receiving office.')
     if ((await routingReviewRequired(application, session)).required || await Task.exists({ applicationId, kind: 'ROUTING_DECISION', status: 'OPEN' }).session(session)) {
       throw new HttpError(409, 'ROUTING_DECISION_REQUIRED', 'Repeated returns were escalated. Record an authorised routing decision first.')

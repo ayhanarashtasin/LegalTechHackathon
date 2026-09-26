@@ -154,6 +154,41 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
   const [passwordMsg, setPasswordMsg] = useState('')
   const [passwordError, setPasswordError] = useState('')
 
+  // Lawyer case acceptance availability state
+  const isLawyer = session?.user?.assignments?.some((a) => a.role === 'PANEL_LAWYER')
+  const [lawyerAccepting, setLawyerAccepting] = useState(() => session?.user?.acceptingCases ?? true)
+  const [togglingLawyer, setTogglingLawyer] = useState(false)
+
+  useEffect(() => {
+    if (isLawyer && isOpen && session?.token) {
+      api('/api/lawyers/availability', { token: session.token })
+        .then((res) => { if (typeof res.acceptingCases === 'boolean') setLawyerAccepting(res.acceptingCases) })
+        .catch(() => {})
+    }
+  }, [isLawyer, isOpen, session?.token])
+
+  async function handleToggleLawyerAvailability() {
+    setTogglingLawyer(true)
+    setError('')
+    try {
+      const next = !lawyerAccepting
+      const res = await api('/api/lawyers/availability', {
+        token: session.token,
+        method: 'PUT',
+        body: { acceptingCases: next }
+      })
+      setLawyerAccepting(res.acceptingCases)
+      setSuccessMsg(res.acceptingCases
+        ? bi('Case availability updated: You are now accepting cases.', 'মামলা গ্রহণের স্থিতি হালনাগাদ: আপনি এখন নতুন মামলা গ্রহণে প্রস্তুত।')
+        : bi('Case availability updated: Case acceptance is now paused.', 'মামলা গ্রহণের স্থিতি হালনাগাদ: মামলা গ্রহণ স্থগিত করা হয়েছে।')
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setTogglingLawyer(false)
+    }
+  }
+
   useEffect(() => {
     if (!isOpen || !session?.token) return
     const controller = new AbortController()
@@ -370,6 +405,40 @@ export default function CitizenProfileModal({ isOpen, session, onClose, onProfil
         {successMsg && (
           <div className="auth-alert success" role="status" style={{ margin: '1rem 0 0.5rem 0' }}>
             <strong>{bi('Update: ', 'আপডেট: ')}</strong>{successMsg}
+          </div>
+        )}
+
+        {isLawyer && (
+          <div style={{ margin: '1rem 0', padding: '0.85rem 1.1rem', background: '#fafaf8', border: '1px solid #e5e5e0', borderRadius: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div>
+                <strong style={{ fontSize: '0.92rem', display: 'block', color: '#111' }}>
+                  {bi('Panel Lawyer Case Acceptance Status', 'প্যানেল আইনজীবী মামলা গ্রহণের প্রাপ্যতা')}
+                </strong>
+                <span style={{ fontSize: '0.82rem', color: '#666' }}>
+                  {bi('Manage your availability to receive newly assigned legal aid cases from the DLAO office.', 'ডিএলএও কার্যালয় থেকে নতুন মামলার দায়িত্ব গ্রহণের বিষয়ে আপনার প্রাপ্যতা নির্ধারণ করুন।')}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <span className={`availability-badge ${lawyerAccepting ? 'accepting' : 'not-accepting'}`}>
+                  <span className="availability-dot" />
+                  {lawyerAccepting
+                    ? bi('Accepting Cases', 'মামলা গ্রহণে প্রস্তুত')
+                    : bi('Not Accepting Cases', 'মামলা গ্রহণ স্থগিত')}
+                </span>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.82rem' }}
+                  disabled={togglingLawyer}
+                  onClick={handleToggleLawyerAvailability}
+                >
+                  {lawyerAccepting
+                    ? bi('Set to Not Accepting', 'মামলা গ্রহণ স্থগিত করুন')
+                    : bi('Set to Accepting', 'মামলা গ্রহণে প্রস্তুত করুন')}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

@@ -36,7 +36,7 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
   const assignmentId = (await offer.json()).assignmentId
 
   await signIn(page, 'PANEL_LAWYER')
-  await page.getByRole('link', { name: new RegExp(caseId) }).click()
+  await page.getByRole('link', { name: new RegExp(`^${caseId}`) }).click()
   await expect(page.getByRole('heading', { name: 'Respond to assignment offer' })).toBeVisible()
   await page.getByLabel('Reason for accepting or declining').fill('I accept this fictional panel assignment and will report progress.')
   await page.getByRole('button', { name: 'Accept', exact: true }).click()
@@ -51,7 +51,7 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
   }, { timeout: 30000 }).toBe(true)
   const panelPage = await page.context().newPage()
   await signIn(panelPage, 'PANEL_LAWYER')
-  await panelPage.getByRole('link', { name: new RegExp(caseId) }).click()
+  await panelPage.getByRole('link', { name: new RegExp(`^${caseId}`) }).click()
   await expect(panelPage.locator('.plain-list li').filter({ hasText: /Update 1/ })).toContainText('Missed')
   await panelPage.getByLabel('Progress report').first().fill('The fictional file was reviewed; no confidential details were added.')
   await panelPage.getByLabel('Next step').first().fill('The DLAO will confirm the safe next step before travel.')
@@ -84,8 +84,8 @@ test('Step 9 Malek: panel worklist, late updates, accessible status, human hold 
   await expect(activity).toContainText('not a finding of misconduct')
   const lawyerPage = await page.context().newPage()
   await signIn(lawyerPage, 'PANEL_LAWYER')
-  await expect(lawyerPage.getByRole('link', { name: new RegExp(caseId) })).toContainText('the DLAO asked 1×')
-  await lawyerPage.getByRole('link', { name: new RegExp(caseId) }).click()
+  await expect(lawyerPage.getByRole('link', { name: new RegExp(`^${caseId}`) })).toContainText('the DLAO asked 1×')
+  await lawyerPage.getByRole('link', { name: new RegExp(`^${caseId}`) }).click()
   await expect(lawyerPage.getByRole('note').filter({ hasText: 'The DLAO office has asked for this update' })).toBeVisible()
   await lawyerPage.close()
 
@@ -182,12 +182,8 @@ test('T1 citizen portal request reaches officer review and stage payment history
   await changePanel.getByLabel('Review reason').fill('DLAO approved a replacement offer after reviewing the applicant request.')
   await changePanel.getByRole('button', { name: 'Approve' }).click()
   await expect(officePage.getByRole('status').filter({ hasText: 'Offer a new lawyer separately' })).toBeVisible()
+  // The citizen's session survives the reload; the refreshed card shows the officer's decision.
   await page.reload()
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-  await page.getByRole('tab', { name: 'Citizen' }).click()
-  await page.getByLabel('Email ID / Phone').fill(username)
-  await page.getByLabel('Password', { exact: true }).fill(password)
-  await page.getByRole('button', { name: 'Sign In as Citizen' }).click()
   await expect(caseCard.getByText('Change approved; replacement pending')).toBeVisible()
 
   const payment = officePage.getByRole('heading', { name: /^Payment status/ }).locator('..')

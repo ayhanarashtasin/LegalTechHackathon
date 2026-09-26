@@ -20,6 +20,10 @@ npm run dev:client
 
 Open `http://127.0.0.1:5173`. The API health endpoint is `http://127.0.0.1:5000/health`; it succeeds only when MongoDB responds. `npm run seed --workspace server` idempotently creates fictional provider accounts and demo records for voice/assisted intake, referrals, lawyer work, related incidents, duplicate review, triage, and mediation. Generated passwords stay in ignored `server/.demo-credentials.json`; do not publish that file. For local Docker MongoDB, run `docker compose up -d` before seeding; the example configuration also uses port 5000.
 
+In development, the API creates and synchronizes the fixed demo accounts before accepting logins, so scenario seeding is optional for sign-in. The login screen defaults work on fresh databases and after restarts: panel lawyers use `123`, other demo roles use `1234`, and the local admin uses `admin123` unless `ADMIN_PASSWORD` is configured. Scenario seeding writes those same development credentials to the ignored credential file. Production does not auto-create public-password demo accounts; production seeding retains private passwords or generates replacements for known development defaults.
+
+Public development demo passwords cannot be changed through account settings; registered accounts retain normal password changes.
+
 Run the checks (API and browser tests each use a temporary, isolated MongoDB database that is dropped afterwards):
 
 ```powershell
@@ -51,6 +55,14 @@ The API checks referral acknowledgement deadlines every minute (`REFERRAL_SWEEP_
 The root npm workspace installs both applications. Run `docker compose down` to stop the database without deleting its named volume.
 
 ## Structure
+
+### Party identity verification before mediation signing
+
+Issue separate party codes from the mediator's Signatures section. At `/mediation/sign`, each party consents and chooses a short camera recording with an ID document, an in-person visit, or an assisted office-device check. The assigned mediator reviews each party separately and records approval, a retake, or a manual check. Approval is required on the server before opening the signing draft and accepting a new party signature. Replaced codes, changed drafts, expired approvals and revoked approvals cannot authorise a new signature. Approved parties can still sign offline and sync later; evidence is never stored in the offline cache.
+
+Videos are checked with `ffprobe` (3–12 seconds, maximum 4 MB); ID uploads accept PNG/JPEG/PDF (2 MB), and optional supporting signature images accept PNG/JPEG (2 MB). Evidence is encrypted with AES-256-GCM in separate private MongoDB records, access is audited, and MongoDB TTL indexes remove expired evidence. The other party and unrelated officers have no evidence access. In-person/assisted approval requires the mediator to compare the original ID and person, witness consent, and record the venue/helper details. The party signs on the office device themselves. A helper cannot create a party signature using an officer session.
+
+Before production use, configure `IDENTITY_EVIDENCE_KEY` (private 64-character hexadecimal key), an authorised `IDENTITY_EVIDENCE_RETENTION_DAYS` (1–365), HTTPS, and an installed, maintained `ffprobe` binary (`FFPROBE_PATH` optionally selects it). Local development creates an ignored persistent encryption key and defaults to 30-day evidence retention. Keep that key private and backed up with the encrypted database; losing it makes earlier evidence unreadable. Database backups require their own authorised deletion schedule. Use fictional evidence in this prototype. Human video review is not certified liveness, biometric identification, or government ID verification. Signature images support the existing cryptographic record; this workflow does not digitise witnessed paper signatures or determine cross-border legal validity.
 
 - `client/`: React views in JavaScript/JSX, built with Vite. Its home screen checks the local API.
 - `server/src/routes/`: Express endpoint mapping.

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { expand, signIn, signOut } from './support.js'
 
 test('helpline intake becomes one reviewed DLAO case and provider shells stay bounded', async ({ page, request }) => {
+  test.setTimeout(60000) // signs in as eight roles in turn
   await page.goto('/')
   await page.keyboard.press('Tab')
   await expect(page.getByRole('link', { name: 'Skip to main content' })).toBeFocused()
@@ -43,7 +44,8 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   for (const role of ['CASE_SUPPORT', 'UDC_OPERATOR', 'PANEL_LAWYER', 'MEDIATOR', 'RECEIVING_DLAO', 'CLAO']) {
     await signOut(page)
     await signIn(page, role)
-    if (role !== 'CASE_SUPPORT') await expect(page.getByText(applicationId)).toHaveCount(0)
+    // Case support and the CLAO (read-only) see the office queue; other provider shells stay bounded.
+    if (role !== 'CASE_SUPPORT' && role !== 'CLAO') await expect(page.getByText(applicationId)).toHaveCount(0)
   }
 
   await page.setViewportSize({ width: 375, height: 700 })

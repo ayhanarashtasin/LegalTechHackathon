@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import mongoose from 'mongoose'
 import { Application, CancellationRequest, Case, CaseFact, Document, DocumentVersion, LawyerAssignment, LawyerChangeRequest, Mediation, Person, SafeContactProfile, Task, User } from '../models/index.js'
-import { advance } from './applicationService.js'
+import { advance, requireOpenCase } from './applicationService.js'
 import { appendAudit } from './auditService.js'
 import { HttpError } from '../utils/httpError.js'
 import { nextRecordId } from '../utils/recordId.js'
@@ -122,6 +122,7 @@ export async function requestCitizenLawyerChange(applicationId, { reason }, acto
       throw new HttpError(409, 'CASE_NOT_ACCEPTED', 'A lawyer change request can only be submitted for an accepted Case.')
     }
 
+    await requireOpenCase(applicationId, session)
     const activeAssignment = await LawyerAssignment.findOne({
       applicationId,
       active: true,
@@ -189,6 +190,7 @@ export async function cancelOrRequestCancellation(applicationId, { reason }, act
     if (application.status === 'CANCELLED') {
       throw new HttpError(409, 'ALREADY_CANCELLED', 'This application has already been cancelled.')
     }
+    if (application.caseId) await requireOpenCase(applicationId, session)
     if (await CancellationRequest.exists({ applicationId, status: 'OPEN' }).session(session)) {
       throw new HttpError(409, 'REQUEST_IN_PROGRESS', 'A cancellation request is already under review.')
     }

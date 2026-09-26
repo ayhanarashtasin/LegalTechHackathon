@@ -2,25 +2,12 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import mongoose from 'mongoose'
 import * as models from '../models/index.js'
-import { Application, Case, CaseFact, ContactAttempt, LawyerAssignment, LawyerUpdate, Person, RoleAssignment, SafeContactProfile, User } from '../models/index.js'
+import { Application, Case, CaseFact, ContactAttempt, LawyerAssignment, LawyerUpdate, RoleAssignment, SafeContactProfile, User } from '../models/index.js'
 import { acceptApplication, addFact, createDocumentMetadata, lookupHash, newVoicePin, overridePriority, recordContactAttempt, reviewApplication, setSafeContact, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
 import { createAssisted } from '../services/assistedService.js'
 import { assignLawyer, respondToAssignment, scheduleLawyerUpdate, updateCasePlan } from '../services/lawyerService.js'
 import { ensureAdminUser } from '../services/authService.js'
-import { hashPassword } from '../utils/password.js'
-
-const accounts = [
-  ['demo.officer', 'Demo DLAO Officer', 'DLAO_OFFICER'],
-  ['demo.mediator', 'Demo Mediator', 'MEDIATOR'],
-  ['demo.helpline', 'Demo Helpline Agent', 'HELPLINE_AGENT'],
-  ['demo.udc', 'Demo UDC Operator', 'UDC_OPERATOR'],
-  ['demo.lawyer', 'Demo Panel Lawyer', 'PANEL_LAWYER'],
-  // A separate office so referrals leave the sending DLAO.
-  ['demo.receiving', 'Demo Receiving DLAO', 'RECEIVING_DLAO', 'JHENAIDAH-DEMO'],
-  ['demo.support', 'Demo Case Support', 'CASE_SUPPORT'],
-  ['demo.clao', 'Demo CLAO', 'CLAO'],
-  ['demo.citizen', 'Demo Citizen', 'CITIZEN', 'CITIZEN'],
-]
+import { demoAccounts as accounts, demoPassword, ensureDemoAccounts } from '../services/demoAccounts.js'
 
 const credentialsFile = new URL('../../.demo-credentials.json', import.meta.url)
 
@@ -31,13 +18,13 @@ async function credentials() {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
   }
-  const defaultPassword = process.env.NODE_ENV === 'production'
-    ? randomBytes(24).toString('base64url')
-    : (process.env.DEMO_USER_PASSWORD || '1234')
   let changed = false
   for (const [username] of accounts) {
-    if (!existing[username]) {
-      existing[username] = defaultPassword
+    const password = process.env.NODE_ENV === 'production'
+      ? existing[username] && existing[username] !== demoPassword(username) ? existing[username] : randomBytes(24).toString('base64url')
+      : demoPassword(username)
+    if (existing[username] !== password) {
+      existing[username] = password
       changed = true
     }
   }
@@ -70,31 +57,7 @@ try {
   await Promise.all(Object.values(models).map((item) => item.init()))
   await ensureAdminUser()
   const passwords = await credentials()
-  for (const [username, displayName, role, officeCode = 'DEMO'] of accounts) {
-    if (typeof passwords[username] !== 'string') throw new Error('Demo credential file is incomplete.')
-    const passwordHash = await hashPassword(passwords[username])
-    let personId = undefined
-    if (role === 'CITIZEN') {
-      let person = await Person.findOne({ displayName })
-      if (!person) {
-        person = await Person.create({ displayName, identityStatus: 'VERIFIED', fictional: true })
-      }
-      personId = person._id
-    }
-    const update = { displayName, passwordHash, active: true, fictional: true }
-    if (personId) update.personId = personId
-    const user = await User.findOneAndUpdate(
-      { username },
-      { $set: update },
-      { upsert: true, returnDocument: 'after' },
-    )
-    await RoleAssignment.updateOne(
-      { userId: user._id, role, officeCode },
-      { $set: { active: true } },
-      { upsert: true },
-    )
-    await RoleAssignment.updateMany({ userId: user._id, role, officeCode: { $ne: officeCode } }, { $set: { active: false } })
-  }
+  await ensureDemoAccounts(passwords)
   let sample = await Application.findOne({ demoSeedKey: 'STEP3_SIMPLE' })
   if (!sample) {
     const helpline = await User.findOne({ username: 'demo.helpline' })

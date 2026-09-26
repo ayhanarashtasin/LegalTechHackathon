@@ -427,8 +427,101 @@ legend { font-weight: 650; padding: 0 .25rem; }
 .readback .text-button { min-height: 44px; }
 .script-box { margin: 1rem 0 0; padding: 1rem; background: #f7f6f3; border-radius: 4px; }
 .script-box blockquote { margin: .5rem 0 0; font-weight: 650; }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .readback audio { width: 100%; max-width: 16rem; height: 2.2rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.voice-prompt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #f4f3ef;
+  border: 1px solid #e3e2dc;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+.voice-prompt-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #3b423e;
+}
+.voice-speaker-icon {
+  font-size: 1rem;
+}
+.voice-listening-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #fdf6ec;
+  border: 1px solid #faecc8;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+.voice-mic-wave {
+  position: relative;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mic-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  background: #c0392b;
+  border-radius: 50%;
+  z-index: 2;
+}
+.mic-pulse {
+  position: absolute;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: rgba(192, 57, 43, 0.25);
+  animation: mic-wave 1.4s ease-out infinite;
+}
+@keyframes mic-wave {
+  0% { transform: scale(0.6); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mic-pulse { animation: none; }
+}
+.voice-listening-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 10rem;
+}
+.voice-listening-text strong {
+  font-size: 0.95rem;
+  color: #8c5200;
+}
+.voice-listening-text span {
+  font-size: 0.82rem;
+  color: #4e5751;
+}
+.voice-action-btn {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  min-height: 38px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.keypad-subhint {
+  font-size: 0.82rem;
+  color: #667069;
+  text-align: center;
+  margin: 0.4rem 0 0.2rem;
+}
 
 .record-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: .5rem 1rem; }
 .record-head h1 { margin: 0; font-size: clamp(1.4rem, 5.5vw, 2.4rem); word-break: break-word; overflow-wrap: anywhere; }
@@ -3116,3 +3209,186 @@ thead th { font-size: .8rem; color: #4e5751; }
     width: 100%;
   }
 }
+/* Lawyer Availability Badges & Banners */
+.lawyer-availability-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.15rem;
+  background: #fbfbf9;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
+  margin: 1rem 0 1.25rem 0;
+  flex-wrap: wrap;
+}
+
+.availability-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.availability-badge.accepting {
+  background: #edf3ec;
+  color: #28562d;
+  border: 1px solid #b8dab9;
+}
+
+.availability-badge.not-accepting {
+  background: #fdebec;
+  color: #9f2f2d;
+  border: 1px solid #f1babb;
+}
+
+.availability-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.availability-badge.accepting .availability-dot {
+  background: #2e7d32;
+}
+
+.availability-badge.not-accepting .availability-dot {
+  background: #c62828;
+}
+
+.safe-phone-highlight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: #edf3ec;
+  color: #28562d;
+  border: 1px solid #b8dab9;
+  border-radius: 6px;
+  font-weight: 700;
+  font-family: 'Geist Mono', 'SF Mono', monospace;
+  font-size: 1.05rem;
+}
+
+/* Lawyer Dashboard Statistics Bento Grid */
+.lawyer-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.85rem;
+  margin: 1.15rem 0 1.5rem 0;
+}
+
+.lawyer-stat-card {
+  background: #ffffff;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  position: relative;
+  text-align: left;
+}
+
+.lawyer-stat-card:hover {
+  border-color: #bbbbba;
+  background: #fbfbf9;
+}
+
+.lawyer-stat-card.active {
+  border-color: #111111;
+  background: #fafaf8;
+  box-shadow: inset 0 0 0 1px #111111;
+}
+
+.lawyer-stat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.lawyer-stat-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.lawyer-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.lawyer-stat-pill.blue {
+  background: #e1f3fe;
+  color: #1f6c9f;
+}
+
+.lawyer-stat-pill.green {
+  background: #edf3ec;
+  color: #28562d;
+}
+
+.lawyer-stat-pill.yellow {
+  background: #fbf3db;
+  color: #956400;
+}
+
+.lawyer-stat-pill.red {
+  background: #fdebec;
+  color: #9f2f2d;
+}
+
+.lawyer-stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #111111;
+  margin: 0.45rem 0 0.2rem 0;
+  font-family: 'Geist Mono', 'SF Mono', monospace;
+}
+
+.lawyer-stat-desc {
+  font-size: 0.8rem;
+  color: #787774;
+  margin: 0;
+  line-height: 1.4;
+}
+/* Shared lawyer records, document review, and printable stage payment reports. */
+.lawyer-workspace { display: grid; gap: 1rem; min-width: 0; }
+.lawyer-workspace .panel { min-width: 0; }
+.lawyer-workspace details { margin: 1rem 0; }
+.lawyer-workspace summary, .lawyer-officer-workspace > summary { cursor: pointer; padding: .75rem 0; min-height: 44px; }
+.lawyer-attachments { border: 1px solid #eaeaea; border-radius: 8px; padding: 1rem; }
+.lawyer-attachments label, .lawyer-check { display: flex; align-items: center; gap: .75rem; min-height: 44px; }
+.lawyer-attachments input[type="checkbox"], .lawyer-check input[type="checkbox"] { width: 20px; height: 20px; flex: 0 0 20px; }
+.lawyer-table-scroll { overflow-x: auto; }
+.lawyer-workspace table, .lawyer-print-sheet table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.lawyer-workspace th, .lawyer-workspace td, .lawyer-print-sheet th, .lawyer-print-sheet td { text-align: start; padding: .65rem; border-bottom: 1px solid #eaeaea; }
+.lawyer-workspace caption, .lawyer-print-sheet caption { text-align: start; padding: .75rem 0; font-weight: 600; }
+.lawyer-workspace article { overflow-wrap: anywhere; }
+.lawyer-workspace button { min-height: 44px; }
+.lawyer-print-sheet { display: none; }
+@media print {
+  body:has(.lawyer-print-sheet.print-active) #root { display: none; }
+  .lawyer-print-sheet.print-active { display: block; color: #111; font-size: 10pt; }
+  .lawyer-print-sheet tr { break-inside: avoid; }
+  .lawyer-print-sheet thead { display: table-header-group; }
+  .lawyer-print-sheet th, .lawyer-print-sheet td { padding: .35rem; overflow-wrap: anywhere; }
+  @page { size: A4 landscape; margin: 12mm; }
+}
+.identity-video, .identity-image { display: block; width: min(100%, 480px); max-height: 360px; object-fit: contain; border-radius: 8px; background: var(--surface, #f5f3ef); }

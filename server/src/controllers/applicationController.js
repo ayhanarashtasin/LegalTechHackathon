@@ -1,5 +1,5 @@
 import { extractAnswers, transcribeAnswer } from '../services/ai/groq.js'
-import { acceptApplication, addFact, recordAdviceOutcome, addRepresentation, completeTask, correctFact, createTask, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, recordConsent, recordContactAttempt, reviewApplication, reviewCaseCancellationRequest, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake, trackApplicationStatus } from '../services/applicationService.js'
+import { acceptApplication, addFact, recordAdviceOutcome, addRepresentation, completeTask, correctFact, createTask, editCaseInformation, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, preMediationVerify, recordConsent, recordContactAttempt, recordNoticeSent, reviewApplication, reviewCaseCancellationRequest, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake, trackApplicationStatus } from '../services/applicationService.js'
 
 export async function submit(request, response) {
   response.status(201).json(await submitApplication(request.body, request.auth))
@@ -23,7 +23,8 @@ export async function readRecording(request, response) {
 }
 
 export async function transcribeVoiceAnswer(request, response) {
-  const text = await transcribeAnswer(request.body, request.get('content-type'))
+  const lang = request.query.lang === 'en' ? 'en' : 'bn'
+  const text = await transcribeAnswer(request.body, request.get('content-type'), undefined, lang)
   const { values, sensitive } = await extractAnswers(text, request.query.fields.split(','))
   response.json({ text, values, sensitive })
 }
@@ -128,5 +129,17 @@ export async function readAudit(request, response) {
 
 export async function trackStatus(request, response) {
   response.json(await trackApplicationStatus(request.body.identifier, request.body.lookupCode))
+}
+
+export async function updateCaseInfo(request, response) {
+  response.json(await editCaseInformation(request.params.applicationId, request.body, request.auth))
+}
+
+export async function verifyPreMediation(request, response) {
+  response.json(await preMediationVerify(request.params.applicationId, request.body, request.auth))
+}
+
+export async function sendNotice(request, response) {
+  response.status(201).json(await recordNoticeSent(request.params.applicationId, request.body, request.auth))
 }
 

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto'
 import { createServer } from 'node:http'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { mkdtemp, readFile, unlink, rmdir } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import mongoose from 'mongoose'
 import app from './app.js'
@@ -53,6 +58,14 @@ async function actor(username, role, officeCode = 'DEMO') {
 
 async function post(path, token, body = {}) { return request(path, { method: 'POST', token, body }) }
 
+async function witnessedCheck(code, applicationId, token, mode = 'IN_PERSON') {
+  const started = await post('/api/mediation-signing/verification/begin', null, { code, mode, consent: true })
+  assert.equal(started.status, 200)
+  const decision = { verificationId: started.data.id, status: 'VERIFIED', reason: 'Fictional party presented their original fictional ID at the test office; no helper signed for them.', idReviewed: true, personMatched: true, challengeChecked: true }
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/identity/review`, token, decision)).status, 200)
+  return started.data
+}
+
 async function acceptedApplication(token) {
   const submitted = await post('/api/applications', token, { applicantName: 'Fictional Step 12 maintenance applicant' })
   assert.equal(submitted.status, 201)
@@ -80,6 +93,7 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   const mediator = await actor('test12.mediator', 'MEDIATOR')
   const clao = await actor('test12.clao', 'CLAO')
   const outsideMediator = await actor('test12.outside', 'MEDIATOR', 'OTHER')
+  const unrelatedMediator = await actor('test12.unrelated', 'MEDIATOR')
   const applicationId = await acceptedApplication(officer.token)
   const start = await post(`/api/applications/${applicationId}/mediation`, officer.token)
   assert.equal(start.status, 201)
@@ -174,7 +188,51 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   assert.equal(partyAInvitation.status, 201)
   assert.equal(partyAInvitation.data.code.length, 43)
   assert.equal(JSON.stringify(partyAInvitation.data.mediation).includes(partyAInvitation.data.code), false)
-  assert.equal((await post('/api/mediation-signing/open', null, { code: partyAInvitation.data.code })).data.documentHash, partyA.documentHash)
+  const code = partyAInvitation.data.code
+  assert.equal((await post('/api/mediation-signing/open', null, { code })).data.error.code, 'IDENTITY_VERIFICATION_REQUIRED')
+  assert.equal((await post('/api/mediation-signing/sign', null, { code, ...partyA, partyConfirmed: true })).data.error.code, 'IDENTITY_VERIFICATION_REQUIRED')
+  assert.equal((await post('/api/mediation-signing/verification/begin', null, { code, mode: 'REMOTE_VIDEO', consent: false })).status, 400)
+  const remote = await post('/api/mediation-signing/verification/begin', null, { code, mode: 'REMOTE_VIDEO', consent: true })
+  assert.equal(remote.data.status, 'CAPTURING')
+  assert.match(remote.data.challenge, /\d{4}/)
+  const upload = async (slot, mime, bytes) => fetch(`${baseUrl}/api/mediation-signing/verification/evidence/${slot}`, { method: 'POST', headers: { 'X-Signing-Code': code, 'Content-Type': mime }, body: bytes })
+  assert.equal((await upload('ID', 'image/png', Buffer.alloc(32))).status, 400)
+  const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0uoAAAAASUVORK5CYII=', 'base64')
+  const idUpload = await upload('ID', 'image/png', image)
+  assert.equal(idUpload.status, 201)
+  const idEvidence = await idUpload.json()
+  const stored = await models.PartyEvidence.findById(idEvidence.id).select('+ciphertext')
+  assert.equal(stored.ciphertext.equals(image), false)
+  assert.equal((await models.PartyEvidence.findById(idEvidence.id).lean()).ciphertext, undefined)
+  const folder = await mkdtemp(join(tmpdir(), 'dlas-test-video-'))
+  const videoPath = join(folder, 'fictional.webm')
+  try {
+    await promisify(execFile)('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=160x120:r=10', '-t', '5', '-c:v', 'libvpx', videoPath], { windowsHide: true })
+    assert.equal((await upload('VIDEO', 'video/webm', await readFile(videoPath))).status, 201)
+    await promisify(execFile)('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=160x120:r=10', '-t', '1', '-c:v', 'libvpx', videoPath], { windowsHide: true })
+    assert.equal((await upload('VIDEO', 'video/webm', await readFile(videoPath))).status, 400)
+  } finally { await unlink(videoPath).catch(() => {}); await rmdir(folder) }
+  const privatePath = `/api/mediation-signing/verification/evidence/${idEvidence.id}`
+  assert.equal((await fetch(`${baseUrl}${privatePath}`)).status, 403)
+  const ownEvidence = await fetch(`${baseUrl}${privatePath}`, { headers: { 'X-Signing-Code': code } })
+  assert.equal(ownEvidence.headers.get('cache-control'), 'no-store')
+  assert.equal(Buffer.from(await ownEvidence.arrayBuffer()).equals(image), true)
+  assert.equal((await request(`/api/applications/${applicationId}/mediation/identity`, { token: officer.token })).status, 403)
+  assert.equal((await request(`/api/applications/${applicationId}/mediation/identity`, { token: outsideMediator.token })).status, 403)
+  assert.equal((await request(`/api/applications/${applicationId}/mediation/identity`, { token: unrelatedMediator.token })).status, 403)
+  assert.equal((await post('/api/mediation-signing/verification/submit', null, { code, documentType: 'PASSPORT' })).data.status, 'PENDING_REVIEW')
+  const review = { verificationId: remote.data.id, status: 'VERIFIED', reason: 'Synthetic video and fictional document checked for this automated check only.', idReviewed: true, personMatched: true, challengeChecked: true }
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/identity/review`, officer.token, review)).status, 403)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/identity/review`, mediator.token, { ...review, personMatched: false })).status, 400)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/identity/review`, mediator.token, review)).status, 200)
+  assert.equal((await post('/api/mediation-signing/open', null, { code })).data.documentHash, partyA.documentHash)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/identity/review`, mediator.token, { ...review, status: 'MANUAL_REVIEW_REQUIRED' })).status, 200)
+  assert.equal((await post('/api/mediation-signing/open', null, { code })).status, 403)
+  const restarted = await witnessedCheck(code, applicationId, mediator.token)
+  assert.notEqual(restarted.id, remote.data.id)
+  await models.PartyVerification.updateOne({ _id: restarted.id }, { expiresAt: new Date(Date.now() - 1000) })
+  assert.equal((await post('/api/mediation-signing/open', null, { code })).status, 403)
+  await models.PartyVerification.updateOne({ _id: restarted.id }, { expiresAt: partyAInvitation.data.expiresAt })
   assert.equal((await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, partyA)).data.error.code, 'PARTY_SIGNING_CODE_REQUIRED')
   const invalid = { ...partyA, signature: `${partyA.signature.startsWith('A') ? 'B' : 'A'}${partyA.signature.slice(1)}` }
   assert.equal((await post('/api/mediation-signing/sign', null, { code: partyAInvitation.data.code, ...invalid, partyConfirmed: true })).data.error.code, 'INVALID_SIGNATURE')
@@ -184,12 +242,22 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   const replacedA = await post(`/api/applications/${applicationId}/mediation/signing-invitations`, mediator.token, { signerRole: 'PARTY_A' })
   assert.equal(replacedA.status, 201)
   assert.equal((await post('/api/mediation-signing/open', null, { code: partyAInvitation.data.code })).status, 404)
+  assert.equal((await post('/api/mediation-signing/open', null, { code: replacedA.data.code })).status, 403)
+  assert.equal((await fetch(`${baseUrl}${privatePath}`, { headers: { 'X-Signing-Code': replacedA.data.code } })).status, 403)
+  await witnessedCheck(replacedA.data.code, applicationId, mediator.token)
+  assert.equal((await fetch(`${baseUrl}/api/mediation-signing/verification/evidence/SIGNATURE`, { method: 'POST', headers: { 'X-Signing-Code': replacedA.data.code, 'Content-Type': 'image/png' }, body: image })).status, 201)
   assert.equal((await post('/api/mediation-signing/sign', null, { code: replacedA.data.code, ...partyA, partyConfirmed: true })).status, 201)
   assert.equal((await post('/api/mediation-signing/sign', null, { code: replacedA.data.code, ...partyA, partyConfirmed: true })).status, 201)
   assert.equal(await models.SignatureRecord.countDocuments({ applicationId }), 1)
+  const recordedParty = await models.SignatureRecord.findOne({ applicationId, signerRole: 'PARTY_A' })
+  assert.ok(recordedParty.identityVerificationId)
+  assert.ok(recordedParty.signatureEvidenceId)
   assert.equal((await post('/api/mediation-signing/open', null, { code: replacedA.data.code })).status, 404)
   const partyBInvitation = await post(`/api/applications/${applicationId}/mediation/signing-invitations`, mediator.token, { signerRole: 'PARTY_B' })
   assert.equal(partyBInvitation.status, 201)
+  const assisted = await witnessedCheck(partyBInvitation.data.code, applicationId, mediator.token, 'ASSISTED')
+  assert.equal(assisted.mode, 'ASSISTED')
+  assert.equal((await fetch(`${baseUrl}${privatePath}`, { headers: { 'X-Signing-Code': partyBInvitation.data.code } })).status, 403)
   assert.equal((await post('/api/mediation-signing/sign', null, { code: partyBInvitation.data.code, ...await signature(draft, 'PARTY_B'), partyConfirmed: true })).status, 201)
   result = await post(`/api/applications/${applicationId}/mediation/signatures`, mediator.token, await signature(draft, 'MEDIATOR'))
   assert.equal(result.data.stage, 'PENDING_CLAO_CERTIFICATION')
@@ -208,10 +276,25 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   const changedSections = originalSections.map((section, index) => index ? section : { ...section, text: `${section.text} changed` })
   await models.SettlementDraft.updateOne({ applicationId }, { $set: { sections: changedSections } })
   assert.equal((await post(`/api/applications/${applicationId}/mediation/verify`, mediator.token)).data.allValid, false)
-  assert.equal((await post(`/api/applications/${applicationId}/mediation/certify`, clao.token, { reason: 'Try certification with a changed signed document.' })).data.error.code, 'SIGNATURE_VERIFICATION_FAILED')
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/certify`, clao.token, { reason: 'Try certification with a changed signed document.', signature: await signature(draft, 'CLAO') })).data.error.code, 'SIGNATURE_VERIFICATION_FAILED')
   await models.SettlementDraft.updateOne({ applicationId }, { $set: { sections: originalSections } })
   assert.equal((await post(`/api/applications/${applicationId}/mediation/verify`, mediator.token)).data.allValid, true)
-  assert.equal((await post(`/api/applications/${applicationId}/mediation/certify`, clao.token, { reason: 'CLAO independently reviewed the fictional file and records certification.' })).data.stage, 'CERTIFIED_FINAL')
+  const reason = 'CLAO independently reviewed the fictional file and records certification.'
+  // Certification needs the CLAO's own signature over the same document; a reason alone or a forged signature is refused.
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/certify`, clao.token, { reason })).status, 400)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/certify`, clao.token, { reason, signature: await signature(draft, 'MEDIATOR') })).status, 400)
+  const forged = { ...await signature(draft, 'CLAO'), signature: (await signature(draft, 'CLAO')).signature }
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/certify`, clao.token, { reason, signature: forged })).data.error.code, 'INVALID_SIGNATURE')
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/certify`, officer.token, { reason, signature: await signature(draft, 'CLAO') })).status, 403)
+  const pendingWorkspace = await request('/api/workspace?role=CLAO', { token: clao.token })
+  assert.deepEqual(pendingWorkspace.data.certifications.map(({ applicationId: id, stage }) => [id, stage]), [[applicationId, 'PENDING_CLAO_CERTIFICATION']])
+  const certified = await post(`/api/applications/${applicationId}/mediation/certify`, clao.token, { reason, signature: await signature(draft, 'CLAO') })
+  assert.equal(certified.data.stage, 'CERTIFIED_FINAL')
+  assert.equal(certified.data.signatures.filter(({ signerRole }) => signerRole === 'CLAO').length, 1)
+  assert.equal((await models.SignatureRecord.findOne({ applicationId, signerRole: 'CLAO' }).lean()).authorizationMethod, 'CLAO_SESSION')
+  const finalCheck = await post(`/api/applications/${applicationId}/mediation/verify`, clao.token)
+  assert.equal(finalCheck.data.allValid, true)
+  assert.equal(finalCheck.data.signatures.length, 4)
   const audit = await request(`/api/applications/${applicationId}/audit`, { token: officer.token })
   assert.equal(audit.data.valid, true)
   assert.equal(JSON.stringify(audit.data.events).includes(sourceNotes), false)
@@ -301,4 +384,34 @@ test('T7: property and labour drafts use their controlled examples, date warning
     assert.equal(result.status, 200)
     assert.equal(result.data.stage, 'SIGNATURES')
   }
+})
+
+test('CLAO sees the DLAO office view read-only and cannot take DLAO decisions', async () => {
+  const officer = await actor('test12.view.officer', 'DLAO_OFFICER')
+  const clao = await actor('test12.view.clao', 'CLAO')
+  const outsideClao = await actor('test12.view.outside', 'CLAO', 'OTHER')
+  const submitted = await post('/api/applications', officer.token, { applicantName: 'Fictional CLAO view applicant' })
+  const { applicationId } = submitted.data
+  const pendingId = (await post('/api/applications', officer.token, { applicantName: 'Fictional CLAO pending applicant' })).data.applicationId
+  const acceptedId = await acceptedApplication(officer.token)
+  const { caseId } = (await request(`/api/applications/${acceptedId}`, { token: officer.token })).data
+
+  const dlao = await request('/api/workspace?role=DLAO_OFFICER', { token: officer.token })
+  const view = await request('/api/workspace?role=CLAO', { token: clao.token })
+  assert.equal(view.status, 200)
+  assert.equal(view.data.readOnly, true)
+  assert.deepEqual(view.data.records.map(({ applicationId: id }) => id).sort(), dlao.data.records.map(({ applicationId: id }) => id).sort())
+  for (const key of ['hearingList', 'mediationList', 'lawyerFeedback', 'calendarEvents', 'certifications']) assert.ok(Array.isArray(view.data[key]), key)
+  assert.equal(dlao.data.certifications, undefined)
+
+  // Reading is allowed in the CLAO's own office, including records with no mediation.
+  assert.equal((await request(`/api/applications/${applicationId}`, { token: clao.token })).status, 200)
+  assert.deepEqual((await request(`/api/applications/${applicationId}/mediation`, { token: clao.token })).data, { mediation: null })
+  assert.equal((await request(`/api/cases/${encodeURIComponent(caseId)}`, { token: clao.token })).data.applicationId, acceptedId)
+  assert.equal((await request(`/api/applications/${applicationId}`, { token: outsideClao.token })).status, 403)
+
+  // DLAO decisions stay with the DLAO office.
+  assert.equal((await post(`/api/applications/${pendingId}/review`, clao.token, { reviewState: 'READY_FOR_DECISION', reason: 'A CLAO must not record DLAO review decisions.' })).status, 403)
+  assert.equal((await post(`/api/applications/${pendingId}/accept`, clao.token, { reason: 'A CLAO must not accept DLAO applications.' })).status, 403)
+  assert.equal((await post(`/api/applications/${acceptedId}/mediation`, clao.token)).status, 403)
 })

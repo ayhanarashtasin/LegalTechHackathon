@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../services/api.js'
+import { MediatorIdentityVerification } from '../components/IdentityVerification.jsx'
 import { createSignaturePacket } from '../utils/settlementCrypto.js'
 import { listSignaturePackets, loadSignaturePacket, removeSignaturePacket, saveSignaturePacket } from '../utils/offlineDrafts.js'
 import { Badge, Bi, Panel, Term, bi, num, say, when } from '../components/Bi.jsx'
@@ -49,6 +50,49 @@ export default function MediationPanel({ applicationId, session, role }) {
   const [issuedCodes, setIssuedCodes] = useState({})
   const [applicabilityBasis, setApplicabilityBasis] = useState('')
   const [certificateReason, setCertificateReason] = useState('')
+  const [claoConfirmed, setClaoConfirmed] = useState(false)
+  const [signatureCheck, setSignatureCheck] = useState(null)
+
+  // Multi-session mediation state
+  const [showNewSessionForm, setShowNewSessionForm] = useState(false)
+  const [sessionScheduledAt, setSessionScheduledAt] = useState(initialLocalDateTime)
+  const [sessionMode, setSessionMode] = useState('IN_PERSON')
+  const [sessionVenue, setSessionVenue] = useState('')
+  const [sessionPartyA, setSessionPartyA] = useState('ATTENDED')
+  const [sessionPartyB, setSessionPartyB] = useState('ATTENDED')
+  const [sessionSummary, setSessionSummary] = useState('')
+  const [sessionOutcome, setSessionOutcome] = useState('ADJOURNED_NEXT_DATE')
+  const [nextSessionDate, setNextSessionDate] = useState('')
+  const [savingSession, setSavingSession] = useState(false)
+
+  async function submitSession(e) {
+    e.preventDefault()
+    setSavingSession(true)
+    setError('')
+    try {
+      const res = await api(`/api/applications/${applicationId}/mediation/sessions`, {
+        token: session.token,
+        method: 'POST',
+        body: {
+          scheduledAt: new Date(sessionScheduledAt).toISOString(),
+          mode: sessionMode,
+          venue: sessionVenue,
+          attendance: { partyA: sessionPartyA, partyB: sessionPartyB },
+          summaryNotes: sessionSummary,
+          outcome: sessionOutcome,
+          nextSessionDate: nextSessionDate ? new Date(nextSessionDate).toISOString() : null,
+        },
+      })
+      setMediation(res)
+      setShowNewSessionForm(false)
+      setSessionSummary('')
+      setNotice(bi('Mediation session recorded successfully.', 'মধ্যস্থতার বৈঠক সফলভাবে নথিভুক্ত করা হয়েছে।'))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSavingSession(false)
+    }
+  }
 
   const refreshQueue = useCallback(async () => setQueue(await listSignaturePackets(ownerId)), [ownerId])
   useEffect(() => {
@@ -156,6 +200,33 @@ export default function MediationPanel({ applicationId, session, role }) {
     finally { setBusy(false) }
   }
 
+  // The CLAO signs the exact settlement the parties and mediator signed, in this browser, then the server
+  // verifies that signature and records certification in one step. The signing key is discarded afterwards.
+  async function signAndCertify(event) {
+    event.preventDefault()
+    if (!mediation?.draft) return
+    setError('')
+    setNotice('')
+    setBusy(true)
+    try {
+      const signature = await createSignaturePacket(mediation.draft, 'CLAO')
+      const result = await api(pathFor(applicationId, '/certify'), { token: session.token, method: 'POST', body: { reason: certificateReason, signature } })
+      setMediation(result.mediation ?? result)
+      setCertificateReason('')
+      setClaoConfirmed(false)
+      setNotice(bi('Your signature was verified and the CLAO certification is recorded. No court-decree finding is made here.', 'আপনার স্বাক্ষর যাচাই হয়েছে এবং সিএলএও সনদ নথিভুক্ত হয়েছে। এটি আদালতের ডিক্রি কি না, তা এখান থেকে নির্ধারণ করা হয় না।'))
+    } catch (failure) { setError(failure.message) }
+    finally { setBusy(false) }
+  }
+
+  async function checkSignatures() {
+    setError('')
+    setBusy(true)
+    try { setSignatureCheck(await api(pathFor(applicationId, '/verify'), { token: session.token, method: 'POST', body: {} })) }
+    catch (failure) { setError(failure.message) }
+    finally { setBusy(false) }
+  }
+
   async function refreshSignatures() {
     setBusy(true)
     setError('')
@@ -183,6 +254,7 @@ export default function MediationPanel({ applicationId, session, role }) {
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
     {loaded && <p className="muted"><Bi en="Records what people do. Sends no notices and decides no legal outcome." bn="এখানে কর্মীদের কাজ নথিভুক্ত হয়। এখান থেকে নোটিশ পাঠানো বা মামলার আইনি ফল নির্ধারণ করা হয় না।" /></p>}
+    {loaded && role === 'CLAO' && !mediation && !error && <p className="muted"><Bi en="No mediation is recorded on this case." bn="এই মামলায় কোনো মধ্যস্থতা নথিভুক্ত নেই।" /></p>}
     {loaded && role === 'DLAO_OFFICER' && !mediation && <button type="button" disabled={busy} onClick={() => send('', {}, bi('Mediation registered. A mediator in this office can now claim it.', 'মধ্যস্থতা নিবন্ধিত। এই অফিসের একজন মধ্যস্থতাকারী দায়িত্ব নিতে পারবেন।'))}><Bi en="Start mediation" bn="মধ্যস্থতা শুরু করুন" /></button>}
     {mediation && <>
       <ol className="journey stages" aria-label={bi('Mediation stages', 'মধ্যস্থতার ধাপ')}>{stages.map((stage, index) => <li key={stage} className={index < stageIndex ? 'done' : undefined} aria-current={index === stageIndex ? 'step' : undefined}><Term code={stage} /></li>)}</ol>
@@ -194,6 +266,189 @@ export default function MediationPanel({ applicationId, session, role }) {
         {mediation.inPersonFallback && <div><dt><Bi en="Backup plan" bn="বিকল্প পরিকল্পনা" /></dt><dd>{mediation.inPersonFallback}</dd></div>}
         <div><dt><Bi en="Legal effect" bn="আইনি কার্যকারিতা" /></dt><dd><Term code={mediation.legalEffectState} /></dd></div>
       </dl>
+
+      {/* Multiple Mediation Sessions History */}
+      <section className="mediation-sessions-section" style={{ margin: '1.25rem 0', border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FAFAFA' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#111' }}>
+              <Bi en="Mediation Sessions History (বৈঠক সমূহের ইতিহাস)" bn="মধ্যস্থতার বৈঠক সমূহের ধারাবাহিক ইতিহাস" />
+            </h3>
+            <p className="muted" style={{ margin: '0.2rem 0 0', fontSize: '0.85rem' }}>
+              <Bi en="Multiple joint & separate mediation sessions log (১ম বৈঠক, ২য় বৈঠক...)" bn="বহুস্তরীয় মধ্যস্থতা বৈঠকের ইতিহাস ও ফলাফল (১ম বৈঠক, ২য় বৈঠক...)" />
+            </p>
+          </div>
+          {(mediatorCanAct || role === 'DLAO_OFFICER') && (
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
+              onClick={() => setShowNewSessionForm(!showNewSessionForm)}
+            >
+              {showNewSessionForm ? bi('Hide Session Form', 'ফর্ম বন্ধ করুন') : bi('+ Record Session (বৈঠক নথিভুক্ত)', '+ নতুন বৈঠক লিপিবদ্ধ')}
+            </button>
+          )}
+        </div>
+
+        {/* Record New Session Form */}
+        {showNewSessionForm && (
+          <form onSubmit={submitSession} className="form-stack" style={{ marginTop: '0.75rem', padding: '1rem', backgroundColor: '#FFFFFF', border: '1px solid #D9D9D9', borderRadius: '6px' }}>
+            <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem' }}>
+              <Bi en="Record Mediation Session Outcome & Next Date" bn="বৈঠকের ফলাফল ও পরবর্তী তারিখ নির্ধারণ" />
+            </h4>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+              <div>
+                <label htmlFor="session-date"><Bi en="Session Date & Time" bn="বৈঠকের তারিখ ও সময়" /></label>
+                <input
+                  id="session-date"
+                  type="datetime-local"
+                  value={sessionScheduledAt}
+                  onChange={(e) => setSessionScheduledAt(e.target.value)}
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="session-mode"><Bi en="Mode" bn="মাধ্যম" /></label>
+                <select id="session-mode" value={sessionMode} onChange={(e) => setSessionMode(e.target.value)}>
+                  <option value="IN_PERSON">{say('IN_PERSON')}</option>
+                  <option value="REMOTE">{say('REMOTE')}</option>
+                  <option value="HYBRID">{say('HYBRID')}</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="session-venue"><Bi en="Venue / Room" bn="স্থান / কক্ষ" /></label>
+                <input
+                  id="session-venue"
+                  value={sessionVenue}
+                  onChange={(e) => setSessionVenue(e.target.value)}
+                  placeholder={bi('e.g. DLAO Room 2', 'যেমনঃ ডিএলএও সম্মেলন কক্ষ')}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <div>
+                <label htmlFor="session-party-a"><Bi en="Party A (Applicant / Petitioner)" bn="পক্ষ ক (বাদী)" /></label>
+                <select id="session-party-a" value={sessionPartyA} onChange={(e) => setSessionPartyA(e.target.value)}>
+                  <option value="ATTENDED">{say('ATTENDED')}</option>
+                  <option value="REPRESENTED">{say('REPRESENTED')}</option>
+                  <option value="ABSENT">{say('ABSENT')}</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="session-party-b"><Bi en="Party B (Opposing / Respondent)" bn="পক্ষ খ (বিবাদী)" /></label>
+                <select id="session-party-b" value={sessionPartyB} onChange={(e) => setSessionPartyB(e.target.value)}>
+                  <option value="ATTENDED">{say('ATTENDED')}</option>
+                  <option value="REPRESENTED">{say('REPRESENTED')}</option>
+                  <option value="ABSENT">{say('ABSENT')}</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '0.5rem' }}>
+              <label htmlFor="session-summary"><Bi en="Session Summary & Discussion Notes" bn="বৈঠকের সারসংক্ষেপ ও আলোচনার বিবরণ" /></label>
+              <textarea
+                id="session-summary"
+                value={sessionSummary}
+                onChange={(e) => setSessionSummary(e.target.value)}
+                placeholder={bi('Summarize key points discussed, claims presented, offers made...', 'আলোচিত মূল বিষয়, দাবিসমূহ ও প্রস্তাবের বিবরণ...')}
+                rows={3}
+                required
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <div>
+                <label htmlFor="session-outcome"><Bi en="Session Outcome" bn="বৈঠকের ফলাফল" /></label>
+                <select id="session-outcome" value={sessionOutcome} onChange={(e) => setSessionOutcome(e.target.value)}>
+                  <option value="ADJOURNED_NEXT_DATE">{bi('Adjourned to Next Session Date', 'পরবর্তী বৈঠকের তারিখ ধার্য')}</option>
+                  <option value="AGREEMENT_REACHED">{bi('Agreement Reached (আপস নিষ্পত্তি)', 'আপস নিষ্পত্তি সম্পন্ন')}</option>
+                  <option value="NO_AGREEMENT">{bi('Mediation Failed / No Agreement', 'আপস সম্ভব হয়নি / ব্যর্থ')}</option>
+                  <option value="CONTINUED">{bi('Continued (চলমান)', 'চলমান')}</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="next-session-date"><Bi en="Next Session Date (If Adjourned)" bn="পরবর্তী বৈঠকের তারিখ (ধার্য থাকলে)" /></label>
+                <input
+                  id="next-session-date"
+                  type="date"
+                  value={nextSessionDate}
+                  onChange={(e) => setNextSessionDate(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <button type="button" className="secondary-button" onClick={() => setShowNewSessionForm(false)}>
+                <Bi en="Cancel" bn="বাতিল" />
+              </button>
+              <button type="submit" disabled={savingSession}>
+                {savingSession ? bi('Saving…', 'সংরক্ষণ হচ্ছে…') : bi('Save Session Outcome', 'বৈঠকের তথ্য সংরক্ষণ')}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Sessions list */}
+        {(!mediation.sessions || mediation.sessions.length === 0) ? (
+          <p className="muted" style={{ fontStyle: 'italic', margin: '0.5rem 0 0', fontSize: '0.88rem' }}>
+            <Bi en="No formal mediation sessions recorded yet. Record the 1st session outcome once held." bn="এখনো কোনো আনুষ্ঠানিক বৈঠকের বিবরণ নথিভুক্ত করা হয়নি। ১ম বৈঠক অনুষ্ঠিত হলে ফলাফল লিপিবদ্ধ করুন।" />
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.75rem' }}>
+            {mediation.sessions.map((s, idx) => {
+              const sessionLabelsBn = ['১ম বৈঠক', '২য় বৈঠক', '৩য় বৈঠক', '৪র্থ বৈঠক', '৫ম বৈঠক', '৬ষ্ঠ বৈঠক', '৭ম বৈঠক', '৮ম বৈঠক']
+              const banglaLabel = sessionLabelsBn[s.sessionNumber - 1] || `${num(s.sessionNumber)}তম বৈঠক`
+              return (
+                <div
+                  key={s._id || idx}
+                  style={{
+                    padding: '0.75rem 1rem',
+                    border: '1px solid #EAEAEA',
+                    borderRadius: '5px',
+                    backgroundColor: '#FFFFFF',
+                    borderLeft: '4px solid #2f54eb',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <strong style={{ fontSize: '0.95rem', color: '#111' }}>
+                      {bi(`Session ${s.sessionNumber}`, banglaLabel)} · <span style={{ fontWeight: 500, color: '#555' }}>{when(s.scheduledAt)}</span>
+                    </strong>
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        padding: '0.15rem 0.5rem',
+                        borderRadius: '9999px',
+                        backgroundColor: s.outcome === 'AGREEMENT_REACHED' ? '#EDF3EC' : s.outcome === 'NO_AGREEMENT' ? '#FDEBEC' : '#FBF3DB',
+                        color: s.outcome === 'AGREEMENT_REACHED' ? '#346538' : s.outcome === 'NO_AGREEMENT' ? '#9F2F2D' : '#956400',
+                      }}
+                    >
+                      {say(s.outcome)}
+                    </span>
+                  </div>
+
+                  <p style={{ margin: '0.25rem 0', fontSize: '0.88rem', color: '#333' }}>
+                    {s.summaryNotes}
+                  </p>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.85rem', fontSize: '0.8rem', color: '#666', marginTop: '0.4rem' }}>
+                    <span><strong><Bi en="Party A:" bn="বাদী:" /></strong> {say(s.attendance?.partyA || 'ATTENDED')}</span>
+                    <span><strong><Bi en="Party B:" bn="বিবাদী:" /></strong> {say(s.attendance?.partyB || 'ATTENDED')}</span>
+                    {s.venue && <span><strong><Bi en="Venue:" bn="স্থান:" /></strong> {s.venue}</span>}
+                    {s.nextSessionDate && (
+                      <span style={{ color: '#2f54eb', fontWeight: 600 }}>
+                        <strong><Bi en="Adjourned to:" bn="পরবর্তী তারিখ:" /></strong> {when(s.nextSessionDate)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
 
       {role === 'MEDIATOR' && !mediation.mediatorUserId && <button type="button" disabled={busy} onClick={() => send('/claim', {}, bi('Mediation claimed.', 'মধ্যস্থতার দায়িত্ব নেওয়া হয়েছে।'))}><Bi en="Claim this mediation" bn="দায়িত্ব নিন" /></button>}
       {role === 'MEDIATOR' && mediation.mediatorUserId && !assignedToMe && <p role="alert" className="error"><Bi en="Assigned to another mediator." bn="অন্য মধ্যস্থতাকারীর দায়িত্বে।" /></p>}
@@ -276,6 +531,7 @@ export default function MediationPanel({ applicationId, session, role }) {
           </div>
         })}
         <button type="button" className="secondary-button" disabled={busy || !online} onClick={refreshSignatures}><Bi en="Refresh party signatures" bn="পক্ষগুলোর সর্বশেষ স্বাক্ষর দেখুন" /></button>
+        {role === 'MEDIATOR' && mediation.stage === 'SIGNATURES' && <MediatorIdentityVerification key={`${mediation.id}:${mediation.signingInvitations?.map((invite) => invite.updatedAt).join(':')}`} applicationId={applicationId} token={session.token} />}
         <ol className="plain-list">{signatures.map((record) => <li key={record.signerRole}><strong><Term code={record.signerRole} /></strong> · {when(record.receivedAt)} · {record.documentHash.slice(0, 12)}…</li>)}</ol>
         <label htmlFor="signature-passphrase"><Bi en="Your local passphrase for an encrypted offline mediator signature" bn="মধ্যস্থতাকারীর অফলাইন স্বাক্ষরের জন্য আপনার পাসফ্রেজ" /></label><input id="signature-passphrase" type="password" autoComplete="off" minLength="8" value={signingPassphrase} onChange={(event) => setSigningPassphrase(event.target.value)} />
         <p className="muted"><Bi en="Your signing key is made in this browser and discarded. The offline signature packet contains no draft text." bn="আপনার স্বাক্ষরের চাবি এই ব্রাউজারে তৈরি হয় এবং পরে মুছে যায়। অফলাইন স্বাক্ষরের প্যাকেটে খসড়ার লেখা থাকে না।" /></p>
@@ -286,13 +542,50 @@ export default function MediationPanel({ applicationId, session, role }) {
         {mediation.stage !== 'SIGNATURES' && <p className="safety-note"><Term code={mediation.legalEffectState} />. <Bi en="E-signing alone does not create a decree." bn="শুধু ই-স্বাক্ষর করলেই এটি আদালতের ডিক্রি হয়ে যায় না।" /></p>}
       </section>}
 
-      {role === 'CLAO' && mediation.stage === 'PENDING_CLAO_CERTIFICATION' && <section className="form-stack inline-form" aria-labelledby="clao-title">
-        <h3 id="clao-title"><Bi en="Legal review and CLAO certification" bn="আইনি পর্যালোচনা ও সিএলএও সনদ" /></h3><p className="safety-note"><strong><Term code={mediation.legalEffectState} /></strong>. <Bi en="Applicability depends on date and area; the system does not decide it." bn="আইনের প্রযোজ্যতা কার্যকর তারিখ ও এখতিয়ারভুক্ত এলাকার ওপর নির্ভরশীল; সিস্টেম নিজে কোনো আইনি সিদ্ধান্ত প্রদান করে না।" /></p>
-        <p><Bi en="Signatures must verify first. Record the legal basis and any Gazette, date or area reference." bn="আগে স্বাক্ষর যাচাই হতে হবে। আইনি ভিত্তি ও গেজেট, তারিখ বা এলাকার সূত্র লিখুন।" /></p>
-        {mediation.legalApplicability !== 'APPLICABLE_VERIFIED' ? <form className="form-stack" onSubmit={(event) => { event.preventDefault(); send('/legal-applicability', { applicability: 'APPLICABLE_VERIFIED', basis: applicabilityBasis }, bi('Applicability recorded. Certification is a separate step.', 'আইনগত প্রযোজ্যতা যাচাই সম্পন্ন হয়েছে। চূড়ান্ত সনদ প্রদান একটি পৃথক পদক্ষেপ।')) }}><label htmlFor="legal-basis"><Bi en="Verified legal basis" bn="যাচাইকৃত আইনি ভিত্তি" /></label><textarea id="legal-basis" value={applicabilityBasis} onChange={(event) => setApplicabilityBasis(event.target.value)} minLength="10" maxLength="500" required /><button type="submit" disabled={busy}><Bi en="Record verified applicability" bn="প্রযোজ্যতা সংরক্ষণ করুন" /></button><button type="button" className="secondary-button" disabled={busy} onClick={() => send('/legal-applicability', { applicability: 'UNVERIFIED' }, bi('Left unverified; final status is blocked.', 'আইনগত প্রযোজ্যতা নিশ্চিত হয়নি বিধায় চূড়ান্ত কার্যক্রম স্থগিত রয়েছে।'))}><Bi en="Leave unverified" bn="অযাচাইকৃত রাখুন" /></button></form> : <><p><Bi en="Legal basis:" bn="আইনি ভিত্তি:" /> {mediation.legalReviewBasis}</p><form className="form-stack" onSubmit={(event) => { event.preventDefault(); send('/certify', { reason: certificateReason }, bi('CLAO certification recorded. No court-decree finding is made.', 'সিএলএও (CLAO) সনদ নথিভুক্ত হয়েছে। এটি আদালতের সমমানের ডিক্রি কি না, তা এখান থেকে নির্ধারণ করা হয় না।')) }}><label htmlFor="certificate-reason"><Bi en="Certification reason" bn="সনদের কারণ" /></label><textarea id="certificate-reason" value={certificateReason} onChange={(event) => setCertificateReason(event.target.value)} minLength="10" maxLength="500" required /><button type="submit" disabled={busy}><Bi en="Record CLAO certification" bn="সনদ প্রদান ও সংরক্ষণ" /></button></form></>}
+      {role === 'CLAO' && mediation.stage === 'PENDING_CLAO_CERTIFICATION' && <section className="form-stack inline-form clao-certify" aria-labelledby="clao-title">
+        <h3 id="clao-title"><Bi en="Legal review and CLAO certification" bn="আইনি পর্যালোচনা ও সিএলএও সনদ" /></h3>
+        <p className="safety-note"><strong><Term code={mediation.legalEffectState} /></strong>. <Bi en="Applicability depends on date and area; the system does not decide it." bn="আইনের প্রযোজ্যতা কার্যকর তারিখ ও এখতিয়ারভুক্ত এলাকার ওপর নির্ভরশীল; সিস্টেম নিজে কোনো আইনি সিদ্ধান্ত প্রদান করে না।" /></p>
+
+        <h4><Bi en="1. Read the signed settlement" bn="১. স্বাক্ষরিত মীমাংসাপত্র পড়ুন" /></h4>
+        {mediation.draft ? <div className="clao-document">
+          <p className="muted"><Term code={mediation.draft.template} /> · <Bi en="version" bn="সংস্করণ" /> {num(mediation.draft.version)}</p>
+          {mediation.draft.sections.map((section) => <div key={section.key}><h5>{section.label}</h5><p>{section.text}</p></div>)}
+        </div> : <p className="error"><Bi en="The signed settlement is missing." bn="স্বাক্ষরিত মীমাংসাপত্র পাওয়া যায়নি।" /></p>}
+
+        <h4><Bi en="2. Check the three signatures" bn="২. তিনটি স্বাক্ষর যাচাই করুন" /></h4>
+        <ul className="plain-list">{['PARTY_A', 'PARTY_B', 'MEDIATOR'].map((signerRole) => {
+          const record = signatures.find((item) => item.signerRole === signerRole)
+          const checked = signatureCheck?.signatures.find((item) => item.signerRole === signerRole)
+          return <li key={signerRole}><strong><Term code={signerRole} /></strong> · {record ? <>{bi('signed', 'স্বাক্ষরিত')} {when(record.receivedAt)}</> : bi('not signed', 'স্বাক্ষর নেই')}{checked ? <> · <strong>{checked.valid ? bi('verified', 'যাচাইকৃত') : bi('does not verify', 'যাচাই ব্যর্থ')}</strong></> : null}</li>
+        })}</ul>
+        <button type="button" className="secondary-button" disabled={busy} onClick={checkSignatures}><Bi en="Check signatures now" bn="এখনই স্বাক্ষর যাচাই করুন" /></button>
+        {signatureCheck && <p role="status" className={signatureCheck.allValid ? 'success' : 'error'}>{signatureCheck.allValid ? bi('All three signatures match this settlement.', 'তিনটি স্বাক্ষরই এই মীমাংসাপত্রের সঙ্গে মিলেছে।') : bi('A signature is missing or does not match. Do not certify.', 'কোনো স্বাক্ষর নেই বা মেলেনি। সনদ দেবেন না।')}</p>}
+        <p>{verifier}</p>
+
+        <h4><Bi en="3. Record legal applicability" bn="৩. আইনি প্রযোজ্যতা নথিভুক্ত করুন" /></h4>
+        {mediation.legalApplicability !== 'APPLICABLE_VERIFIED' ? <form className="form-stack" onSubmit={(event) => { event.preventDefault(); send('/legal-applicability', { applicability: 'APPLICABLE_VERIFIED', basis: applicabilityBasis }, bi('Applicability recorded. Now sign the certification.', 'প্রযোজ্যতা নথিভুক্ত হয়েছে। এবার সনদে স্বাক্ষর করুন।')) }}>
+          <p className="muted"><Bi en="Record the legal basis and any Gazette, date or area reference." bn="আইনি ভিত্তি ও গেজেট, তারিখ বা এলাকার সূত্র লিখুন।" /></p>
+          <label htmlFor="legal-basis"><Bi en="Verified legal basis" bn="যাচাইকৃত আইনি ভিত্তি" /></label><textarea id="legal-basis" value={applicabilityBasis} onChange={(event) => setApplicabilityBasis(event.target.value)} minLength="10" maxLength="500" required />
+          <button type="submit" disabled={busy}><Bi en="Record verified applicability" bn="প্রযোজ্যতা সংরক্ষণ করুন" /></button>
+          <button type="button" className="secondary-button" disabled={busy} onClick={() => send('/legal-applicability', { applicability: 'UNVERIFIED' }, bi('Left unverified; certification is blocked.', 'আইনগত প্রযোজ্যতা নিশ্চিত হয়নি বিধায় সনদ প্রদান স্থগিত রয়েছে।'))}><Bi en="Leave unverified" bn="অযাচাইকৃত রাখুন" /></button>
+        </form> : <p><Bi en="Legal basis:" bn="আইনি ভিত্তি:" /> {mediation.legalReviewBasis}</p>}
+
+        <h4><Bi en="4. Sign and certify" bn="৪. স্বাক্ষর করে সনদ দিন" /></h4>
+        {mediation.legalApplicability === 'APPLICABLE_VERIFIED' ? <form className="form-stack" onSubmit={signAndCertify}>
+          <label htmlFor="certificate-reason"><Bi en="Certification reason" bn="সনদের কারণ" /></label><textarea id="certificate-reason" value={certificateReason} onChange={(event) => setCertificateReason(event.target.value)} minLength="10" maxLength="500" required />
+          <label className="checkbox-label" htmlFor="clao-confirm"><input id="clao-confirm" type="checkbox" checked={claoConfirmed} onChange={(event) => setClaoConfirmed(event.target.checked)} required /><Bi en="I read this settlement and I sign this certification myself." bn="আমি এই মীমাংসাপত্র পড়েছি এবং নিজে এই সনদে স্বাক্ষর করছি।" /></label>
+          <p className="muted"><Bi en="Your signing key is made in this browser for this one signature and then discarded." bn="এই একটি স্বাক্ষরের জন্য আপনার ব্রাউজারে চাবি তৈরি হয় এবং পরে মুছে যায়।" /></p>
+          <button type="submit" disabled={busy || !claoConfirmed || !online || !mediation.draft}>{busy ? bi('Signing…', 'স্বাক্ষর হচ্ছে…') : bi('Sign and certify', 'স্বাক্ষর করে সনদ দিন')}</button>
+          {!online && <p role="status" className="muted"><Bi en="Connect to the internet to certify." bn="সনদ দিতে ইন্টারনেট সংযোগ দরকার।" /></p>}
+        </form> : <p className="muted"><Bi en="Record verified applicability first." bn="আগে যাচাইকৃত প্রযোজ্যতা নথিভুক্ত করুন।" /></p>}
       </section>}
 
-      {mediation.stage === 'CERTIFIED_FINAL' && <p role="status" className="safety-note"><Bi en="CLAO certification recorded. Court-decree status is not decided here." bn="সিএলএও সনদ নথিভুক্ত হয়েছে। এটি আদালতের সমমানের ডিক্রি কি না, সে সিদ্ধান্ত এখানে প্রদান করা হয় না।" /></p>}
+      {mediation.stage === 'CERTIFIED_FINAL' && <div role="status" className="safety-note">
+        <p><Bi en="CLAO certification recorded. Court-decree status is not decided here." bn="সিএলএও সনদ নথিভুক্ত হয়েছে। এটি আদালতের সমমানের ডিক্রি কি না, সে সিদ্ধান্ত এখানে প্রদান করা হয় না।" /></p>
+        {mediation.certifiedAt && <p><Bi en="Certified" bn="সনদের তারিখ" /> {when(mediation.certifiedAt)}{mediation.certificateReason ? ` · ${mediation.certificateReason}` : ''}</p>}
+        {signatures.filter(({ signerRole }) => signerRole === 'CLAO').map((record) => <p key={record.signerRole}><Bi en="CLAO signature" bn="সিএলএও-র স্বাক্ষর" /> · {when(record.receivedAt)} · <code>{record.documentHash.slice(0, 12)}…</code></p>)}
+        {role === 'CLAO' && <p>{verifier}</p>}
+      </div>}
       {['SIGNATURES', 'PENDING_CLAO_CERTIFICATION', 'CERTIFIED_FINAL'].includes(mediation.stage) && role !== 'CLAO' && !signing && <p>{verifier}</p>}
     </>}
   </Panel>

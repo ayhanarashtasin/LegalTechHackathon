@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { ClientFeedbackForm } from '../components/LawyerWorkspace.jsx'
 import { Link } from 'react-router'
 import { api } from '../services/api.js'
 import { bi } from '../components/Bi.jsx'
@@ -330,6 +331,7 @@ export default function CitizenDashboard({ session }) {
                       ) : c.lawyer ? (
                         <div>
                           <p className="bento-highlight">{c.lawyer.lawyerName}</p>
+                          {c.lawyer.assignmentId && <ClientFeedbackForm assignmentId={c.lawyer.assignmentId} token={session.token} />}
                           <p className="bento-sub">{bi('Office Contact: ', 'যোগাযোগের মাধ্যম: ')}{c.lawyer.lawyerPhone || bi('Provided via DLAO office', 'ডিএলএও কার্যালয়ের মাধ্যমে যোগাযোগযোগ্য')}</p>
                           <span className="bento-status-tag">{bi('Status: Active Representation', 'স্থিতি: সক্রিয় আইনি প্রতিনিধিত্ব')}</span>
 

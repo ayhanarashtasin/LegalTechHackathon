@@ -1,10 +1,10 @@
 import { Router } from 'express'
-import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, reviewCancellation, search, submit, trackStatus, updateSafeContact } from '../controllers/applicationController.js'
+import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, reviewCancellation, search, sendNotice, submit, trackStatus, updateCaseInfo, updateSafeContact, verifyPreMediation } from '../controllers/applicationController.js'
 import { addDocument, approveDocumentBriefing, generateBriefing, readBriefing, readDocuments, readEvidenceAccess } from '../controllers/documentController.js'
 import { readForApplication, routingDecision, send } from '../controllers/referralController.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { limitStatusLookup } from '../middleware/rateLimit.js'
-import { applicationIdParam, validateAdviceOutcome, factIdParam, taskIdParam, validateAcceptance, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEmptyBody, validateFact, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask, validateTrackLookup } from '../validators/requests.js'
+import { applicationIdParam, factIdParam, taskIdParam, validateAcceptance, validateAdviceOutcome, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEditCaseInfo, validateEmptyBody, validateFact, validateNoticeDispatch, validatePreMediationVerify, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask, validateTrackLookup } from '../validators/requests.js'
 import { cancellationRequestParam, validateCancellationReview } from '../validators/cancellation.js'
 
 const router = Router()
@@ -39,10 +39,13 @@ router.get('/:applicationId/facts', applicationIdParam, requireRole('DLAO_OFFICE
 router.post('/:applicationId/facts', applicationIdParam, requireRole('DLAO_OFFICER'), validateFact, recordFact)
 router.post('/:applicationId/facts/:factId/corrections', applicationIdParam, factIdParam, requireRole('DLAO_OFFICER'), validateCorrection, recordCorrection)
 router.post('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER'), validateSafeContact, updateSafeContact)
-router.get('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER'), readSafeContact)
+router.get('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER', 'PANEL_LAWYER'), readSafeContact)
 router.post('/:applicationId/consents', applicationIdParam, requireRole('DLAO_OFFICER'), validateConsent, addConsent)
 router.get('/:applicationId/audit', applicationIdParam, requireRole('DLAO_OFFICER'), readAudit)
 router.get('/:applicationId/history', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), readHistory)
-router.get('/:applicationId/transcript', applicationIdParam, requireRole('DLAO_OFFICER'), readTranscript)
-router.get('/:applicationId/recording', applicationIdParam, requireRole('DLAO_OFFICER'), readRecording)
+router.put('/:applicationId/case-info', applicationIdParam, requireRole('DLAO_OFFICER'), validateEditCaseInfo, updateCaseInfo)
+router.post('/:applicationId/pre-mediation-verify', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validatePreMediationVerify, verifyPreMediation)
+router.post('/:applicationId/notices', applicationIdParam, requireRole('DLAO_OFFICER', 'MEDIATOR'), validateNoticeDispatch, sendNotice)
+router.get('/:applicationId/transcript', applicationIdParam, requireRole('DLAO_OFFICER', 'PANEL_LAWYER'), readTranscript)
+router.get('/:applicationId/recording', applicationIdParam, requireRole('DLAO_OFFICER', 'PANEL_LAWYER'), readRecording)
 export default router

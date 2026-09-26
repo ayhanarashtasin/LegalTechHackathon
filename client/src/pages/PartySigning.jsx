@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Bi, Term, bi, when } from '../components/Bi.jsx'
 import { api } from '../services/api.js'
+import { PartyIdentityVerification, SignatureImageUpload } from '../components/IdentityVerification.jsx'
 import { createSignaturePacket, settlementHash } from '../utils/settlementCrypto.js'
 import {
   listSignaturePackets, loadDraft, loadSignaturePacket, removeDraft, removeSignaturePacket,
@@ -16,6 +17,7 @@ export default function PartySigning() {
   const [code, setCode] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [invitation, setInvitation] = useState(null)
+  const [identity, setIdentity] = useState(null)
   const [pending, setPending] = useState([])
   const [confirmed, setConfirmed] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
@@ -40,6 +42,7 @@ export default function PartySigning() {
       }
       await removeDraft(snapshotId(ownerId))
       setInvitation(null)
+      setIdentity(null)
       setConfirmed(false)
       setCode('')
       setPassphrase('')
@@ -68,6 +71,12 @@ export default function PartySigning() {
       await refreshPending(ownerId)
       let result
       if (navigator.onLine) {
+        const state = await api('/api/mediation-signing/verification/state', { method: 'POST', body: { code: trimmed } })
+        if (state.verification?.status !== 'VERIFIED') {
+          setIdentity(state)
+          setInvitation(null)
+          return
+        }
         result = await api('/api/mediation-signing/open', { method: 'POST', body: { code: trimmed } })
         if (await settlementHash(result.draft) !== result.documentHash) throw new Error(bi('The document hash does not match. Do not sign.', 'নথির নিরাপত্তা কোড (হ্যাশ) মিলছে না। স্বাক্ষর করবেন না।'))
         resumeOfflineDrafts()
@@ -75,11 +84,13 @@ export default function PartySigning() {
         setNotice(bi('The approved draft is encrypted on this device for offline signing.', 'অফলাইনে স্বাক্ষরের সুবিধার্থে অনুমোদিত খসড়াটি এই ডিভাইসে সুরক্ষিতভাবে সংরক্ষণ করা হয়েছে।'))
       } else {
         result = (await loadDraft(snapshotId(ownerId), ownerId, passphrase)).value
+        if (!result.identityVerificationId) throw new Error(bi('Connect to complete your identity check before signing.', 'স্বাক্ষরের আগে অনলাইনে পরিচয় যাচাই সম্পন্ন করুন।'))
         if (await settlementHash(result.draft) !== result.documentHash) throw new Error(bi('The saved document hash does not match. Do not sign.', 'সংরক্ষিত নথির নিরাপত্তা কোড (হ্যাশ) মিলছে না। স্বাক্ষর করবেন না।'))
         if (new Date(result.expiresAt) <= new Date()) throw new Error(bi('The signing code has expired. Ask the mediator for a new one.', 'স্বাক্ষরের কোডের মেয়াদ শেষ হয়ে গেছে। মধ্যস্থতাকারীর কাছ থেকে নতুন কোড সংগ্রহ করুন।'))
       }
       resumeOfflineDrafts()
       setInvitation(result)
+      setIdentity(null)
       setConfirmed(false)
     } catch (failure) { setError(failure.message) }
     finally { setBusy(false) }
@@ -124,14 +135,16 @@ export default function PartySigning() {
     <p className="safety-note"><Bi en="Enter the private code the mediator gave you. Read the complete approved draft before signing. The code grants access to this draft; it does not prove your identity, capacity, consent, or legal effect." bn="মধ্যস্থতাকারীর দেওয়া গোপন কোড লিখুন। স্বাক্ষরের আগে সম্পূর্ণ অনুমোদিত খসড়া পড়ুন। কোডটি এই খসড়া দেখার সুযোগ দেয়; এটি পরিচয়, সক্ষমতা, সম্মতি বা আইনি কার্যকারিতা প্রমাণ করে না।" /></p>
     <form className="form-stack" onSubmit={openDraft}>
       <label htmlFor="party-signing-code"><Bi en="Private signing code" bn="স্বাক্ষরের গোপন কোড" /></label>
-      <input id="party-signing-code" type="password" value={code} onChange={(event) => { setCode(event.target.value); setInvitation(null); setPending([]) }} minLength={43} maxLength={43} autoComplete="off" required />
+      <input id="party-signing-code" type="password" value={code} onChange={(event) => { setCode(event.target.value); setInvitation(null); setIdentity(null); setPending([]) }} minLength={43} maxLength={43} autoComplete="off" required />
       <label htmlFor="party-signing-passphrase"><Bi en="Local passphrase for encrypted offline copy" bn="অফলাইনে সুরক্ষিত রাখার পাসফ্রেজ" /></label>
       <input id="party-signing-passphrase" type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} minLength={8} autoComplete="off" required />
       <button type="submit" disabled={busy}><Bi en={online ? 'Open approved draft' : 'Open saved draft offline'} bn={online ? 'অনুমোদিত খসড়া দেখুন' : 'অফলাইনে সংরক্ষিত খসড়া দেখুন'} /></button>
     </form>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
+    {identity && <PartyIdentityVerification key={code.trim()} code={code.trim()} initial={identity} onApproved={() => openDraft({ preventDefault() {} })} />}
     {invitation && <section aria-labelledby="approved-draft-title" className="form-stack">
+      {online && <SignatureImageUpload code={code.trim()} onBusy={setBusy} />}
       <h2 id="approved-draft-title"><Bi en="Approved draft" bn="অনুমোদিত খসড়া" /> · <Term code={invitation.signerRole} /> · v{invitation.draft.version}</h2>
       <p><Bi en="Code expires" bn="কোডের মেয়াদ উত্তীর্ণের সময়" />: {when(invitation.expiresAt)}</p>
       <p><Bi en="Document SHA-256" bn="নথির নিরাপত্তা কোড (SHA-256)" />: <code>{invitation.documentHash}</code></p>

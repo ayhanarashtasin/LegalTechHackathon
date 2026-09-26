@@ -69,12 +69,14 @@ export function correct(call, field) {
 // The first choice travels as `mode`; every other active answer is sent for the server to validate again.
 export function payload(call, { confirmation = 'BUTTON', transcript = [] } = {}) {
   const fields = activeFields(call).filter((field) => field !== 'service')
+  // Only the active questions travel: the server rejects any answer its own question list does not expect.
+  const answers = Object.fromEntries(fields.map((field) => [field, call.answers[field]]))
   return {
     mode: modeOf(call),
     confirmation,
     // The model may flag possible danger in the caller's words; only a human acts on it.
     ...(call.aiSensitive ? { aiSensitive: true } : {}),
-    answers: Object.fromEntries(fields.map((field) => [field, call.answers[field]])),
+    answers,
     correctedFields: call.corrected.filter((field) => fields.includes(field)),
     aiFields: call.aiFields.filter((field) => fields.includes(field)),
     // The whole call is recorded under the greeting's notice, so its transcript is kept with it.

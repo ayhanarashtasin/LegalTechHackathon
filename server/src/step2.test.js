@@ -120,11 +120,15 @@ test('Step 2–3 shared record, workflow, server authority, provenance, and audi
     const queue = await request('/api/workspace?role=DLAO_OFFICER', { token: officer.token })
     assert.equal(queue.status, 200)
     assert.ok(queue.data.records.some((record) => record.applicationId === applicationId && record.caseId === caseId))
-    for (const [role, token] of [['MEDIATOR', mediator.token], ['RECEIVING_DLAO', receiving.token], ['CLAO', clao.token]]) {
+    for (const [role, token] of [['MEDIATOR', mediator.token], ['RECEIVING_DLAO', receiving.token]]) {
       const shell = await request(`/api/workspace?role=${role}`, { token })
       assert.equal(shell.status, 200)
       assert.deepEqual(shell.data.records, [])
     }
+    // The CLAO sees the same office queue as the DLAO, read-only.
+    const claoView = await request('/api/workspace?role=CLAO', { token: clao.token })
+    assert.equal(claoView.data.readOnly, true)
+    assert.deepEqual(claoView.data.records.map((record) => record.applicationId), queue.data.records.map((record) => record.applicationId))
     assert.equal((await request(`/api/applications/${applicationId}/tasks`, { token: udc.token })).status, 403)
     const tasks = await request(`/api/applications/${applicationId}/tasks`, { token: support.token })
     assert.ok(tasks.data.some((task) => task.kind === 'INTAKE_REVIEW' && task.status === 'DONE'))
@@ -146,9 +150,30 @@ test('Step 2–3 shared record, workflow, server authority, provenance, and audi
 
   await t.test('unassigned lawyer and helpline cannot read protected material', async () => {
     assert.equal((await request(`/api/cases/${caseId}`, { token: lawyer.token })).status, 403)
-    await models.LawyerAssignment.create({ applicationId, caseId, lawyerUserId: lawyer.user._id })
-    assert.equal((await request(`/api/cases/${caseId}`, { token: lawyer.token })).status, 200)
+
+    // A pending assignment shows the case summary but redacts contact details, transcript, recording, and documents:
+    const assignment = await models.LawyerAssignment.create({ applicationId, caseId, lawyerUserId: lawyer.user._id, status: 'PENDING' })
+    const pendingCase = await request(`/api/cases/${caseId}`, { token: lawyer.token })
+    assert.equal(pendingCase.status, 200)
+    assert.equal(pendingCase.data.assignmentStatus, 'PENDING')
+    assert.equal('safeContact' in pendingCase.data, false)
+    assert.equal('transcript' in pendingCase.data, false)
+    assert.equal('hasRecording' in pendingCase.data, false)
+    assert.equal('documents' in pendingCase.data, false)
+    assert.equal((await request(`/api/applications/${applicationId}/recording`, { token: lawyer.token })).status, 403)
+    assert.equal((await request(`/api/applications/${applicationId}/safe-contact`, { token: lawyer.token })).status, 403)
+    assert.equal((await request(`/api/applications/${applicationId}/transcript`, { token: lawyer.token })).status, 403)
+
+    // Once accepted, the case route opens documents, updates, and protected access:
+    await models.LawyerAssignment.updateOne({ _id: assignment._id }, { status: 'ACCEPTED' })
+    const acceptedCase = await request(`/api/cases/${caseId}`, { token: lawyer.token })
+    assert.equal(acceptedCase.status, 200)
+    assert.equal(acceptedCase.data.assignmentStatus, 'ACCEPTED')
+    assert.equal(Array.isArray(acceptedCase.data.documents), true)
     assert.equal((await request(`/api/cases/${caseId}`, { token: otherLawyer.token })).status, 403)
+    assert.equal((await request(`/api/applications/${applicationId}/safe-contact`, { token: otherLawyer.token })).status, 403)
+    assert.equal((await request(`/api/applications/${applicationId}/recording`, { token: otherLawyer.token })).status, 403)
+
     const document = await models.Document.create({ applicationId, caseId, label: 'Fictional restricted evidence metadata', sensitivity: 'RESTRICTED', accessState: 'EXPLICIT_GRANT', allowedUserIds: [officer.user._id] })
     assert.equal((await request(`/api/documents/${document.id}`, { token: helpline.token })).status, 403)
     assert.equal((await request(`/api/documents/${document.id}`, { token: support.token })).status, 403)
@@ -412,7 +437,7 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
   assert.ok(queue.data.records.find(({ applicationId: id }) => id === uncertain.data.applicationId).flags
     .some(({ code, reason }) => code === 'URGENT_RECOMMENDATION' && /human verification/.test(reason)))
 
-  // The full call recording attaches once, only with this submission's one-time code, and only an officer can play it.
+  // The full call recording attaches once, only with this submission's one-time code; an officer and the accepted panel lawyer can play it.
   const upload = (headers, bytes = 4000) => fetch(`${baseUrl}/api/voice/intakes/${applicationId}/recording`, { method: 'POST', headers: { 'content-type': 'audio/webm;codecs=opus', ...headers }, body: Buffer.alloc(bytes, 7) })
   const code = submitted.data.lookupCode
   assert.equal((await upload({})).status, 400)
@@ -425,6 +450,17 @@ test('Step 5 voice AI: transcription route guards, AI provenance, transcript, an
   assert.equal(played.headers.get('content-type'), 'audio/webm')
   assert.deepEqual(Buffer.from(await played.arrayBuffer()), Buffer.alloc(4000, 7))
   assert.equal((await fetch(`${baseUrl}/api/applications/${applicationId}/recording`)).status, 401)
+
+  // A lawyer without an accepted assignment cannot access the recording; once accepted, they can play it.
+  const lawyerActor = await actor('test5.lawyer', 'PANEL_LAWYER')
+  assert.equal((await fetch(`${baseUrl}/api/applications/${applicationId}/recording`, { headers: { authorization: `Bearer ${lawyerActor.token}` } })).status, 403)
+  const lawyerAssignment = await models.LawyerAssignment.create({ applicationId, caseId: 'CASE-STEP5-RECORDING', lawyerUserId: lawyerActor.user._id, status: 'PENDING' })
+  assert.equal((await fetch(`${baseUrl}/api/applications/${applicationId}/recording`, { headers: { authorization: `Bearer ${lawyerActor.token}` } })).status, 403)
+  await models.LawyerAssignment.updateOne({ _id: lawyerAssignment._id }, { status: 'ACCEPTED' })
+  const lawyerPlayed = await fetch(`${baseUrl}/api/applications/${applicationId}/recording`, { headers: { authorization: `Bearer ${lawyerActor.token}` } })
+  assert.equal(lawyerPlayed.status, 200)
+  assert.deepEqual(Buffer.from(await lawyerPlayed.arrayBuffer()), Buffer.alloc(4000, 7))
+
   const trail = (await request(`/api/applications/${applicationId}/audit`, { token: officer.token })).data
   assert.equal(trail.valid, true)
   assert.equal(trail.events.find((event) => event.action === 'CALL_RECORDING_STORED').newState.bytes, 4000)

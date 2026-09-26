@@ -4,6 +4,17 @@ export const apiUrl = (path) => `${(import.meta.env.VITE_API_ORIGIN || '').repla
 
 // The server explains errors in English; in Bangla each error code gets a natural Bangla sentence.
 const errorsBn = {
+  IDENTITY_VERIFICATION_REQUIRED: 'স্বাক্ষরের আগে নিযুক্ত মধ্যস্থতাকারীকে আপনার পরিচয় যাচাই অনুমোদন করতে হবে।',
+  VERIFICATION_CONSENT_REQUIRED: 'যাচাই পদ্ধতি বেছে নিন এবং ব্যক্তিগত পরিচয় পর্যালোচনায় সম্মতি দিন।',
+  INVALID_IDENTITY_MEDIA: 'পরিচয়পত্র বা স্বাক্ষরের ছবি সর্বোচ্চ ২ MB এবং ভিডিও সর্বোচ্চ ৪ MB ও ৩–১২ সেকেন্ড হতে হবে। সঠিক PNG/JPEG/PDF বা WebM/MP4 ফাইল দিন।',
+  VERIFICATION_NOT_OPEN: 'যাচাইয়ের অবস্থা বদলেছে বা মেয়াদ শেষ। অবস্থা হালনাগাদ করুন বা মধ্যস্থতাকারীর সহায়তা নিন।',
+  INVALID_IDENTITY_REVIEW: 'যাচাইয়ের সিদ্ধান্ত, বিবরণ এবং প্রয়োজনীয় প্রত্যয়ন দিন।',
+  IDENTITY_STORAGE_UNAVAILABLE: 'ব্যক্তিগত প্রমাণ সংরক্ষণ বা ভিডিও যাচাই অনুপলব্ধ। সরাসরি যাচাইয়ের জন্য মধ্যস্থতাকারীর সঙ্গে যোগাযোগ করুন।',
+  IDENTITY_EVIDENCE_EXPIRED: 'প্রমাণের মেয়াদ শেষ। নতুন পরিচয় যাচাইয়ের অনুরোধ করুন।',
+  VERIFICATION_ATTEMPTS_EXCEEDED: 'চেষ্টার সীমা শেষ। নতুন কোড বা সরাসরি যাচাইয়ের জন্য মধ্যস্থতাকারীর সহায়তা নিন।',
+  INVALID_IDENTITY_DOCUMENT: 'পরিচয়পত্রের ধরন বেছে নিন।',
+  INVALID_SIGNING_CODE: 'মধ্যস্থতাকারীর দেওয়া ৪৩ অক্ষরের গোপন কোড দিন।',
+  IDENTITY_EVIDENCE_CHANGED: 'প্রমাণের নিরাপত্তা যাচাই ব্যর্থ হয়েছে। মধ্যস্থতাকারীর সহায়তা নিন।',
   INVALID_CREDENTIALS: 'ইউজারনেম বা পাসওয়ার্ড সঠিক নয়।',
   UNAUTHENTICATED: 'সেশন মেয়াদোত্তীর্ণ হয়েছে। পুনরায় লগইন করুন।',
   LOGIN_RATE_LIMITED: 'অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।',

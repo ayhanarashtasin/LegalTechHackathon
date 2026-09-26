@@ -1,6 +1,6 @@
 import {
   advanceMediation, amendSettlementDraft, certifyMediation, claimMediation, createSettlementDraft, getMediation,
-  recordAttendance, recordDocumentReview, recordLegalApplicability, recordOutcome, recordScheduling,
+  recordAttendance, recordDocumentReview, recordLegalApplicability, recordMediationSession, recordOutcome, recordScheduling,
   issueSigningInvitation, openPartySigning, recordPartySignature, recordSignature,
   reviewSettlementDraft, startMediation, verifyMediation,
 } from '../services/mediationService.js'
@@ -23,3 +23,4 @@ export async function signParty(request, response) { response.status(201).json(a
 export async function verify(request, response) { response.json(await verifyMediation(request.params.applicationId, request.auth)) }
 export async function legalApplicability(request, response) { response.json(await recordLegalApplicability(request.params.applicationId, request.body, request.auth)) }
 export async function certify(request, response) { response.json(await certifyMediation(request.params.applicationId, request.body, request.auth)) }
+export async function addSession(request, response) { response.status(201).json(await recordMediationSession(request.params.applicationId, request.body, request.auth)) }

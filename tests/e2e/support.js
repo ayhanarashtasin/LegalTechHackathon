@@ -17,7 +17,12 @@ export async function signIn(page, role) {
   const actor = JSON.parse(process.env.E2E_ACTORS)[role]
   await page.goto('/')
   await page.getByRole('button', { name: 'English', exact: true }).click()
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  // The session survives navigation, so switching to another role signs the previous user out first.
+  const signInButton = page.getByRole('button', { name: 'Sign in', exact: true })
+  const accountMenu = page.getByRole('button', { name: 'Account menu' })
+  await expect(signInButton.or(accountMenu)).toBeVisible()
+  if (await accountMenu.isVisible()) await signOut(page)
+  await signInButton.click()
   await page.getByRole('tab', { name: 'Officer' }).click()
   await page.getByLabel('Officer ID').fill(actor.username)
   await page.getByLabel('Password', { exact: true }).fill(actor.password)

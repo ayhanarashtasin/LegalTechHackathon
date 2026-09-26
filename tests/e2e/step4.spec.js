@@ -58,7 +58,7 @@ test('Ripon reports for Moyuri by keyboard; the DLAO sees one pending representa
   await expect(page.getByRole('heading', { level: 1 })).toContainText('লিগ্যাল এইড হেল্পলাইন')
   await expect(page.getByText('ওয়েবে তৈরি নমুনা কল · আসল ১৬৬৯৯ ফোনসেবা নয়')).toBeVisible()
   // A clean call screen: one call button, no instructions, consent questions, or placeholder notes.
-  await expect(page.getByRole('button')).toHaveText(['বাংলা', 'English', 'হালকা মোড', 'কল করুন'])
+  await expect(page.getByRole('button')).toHaveText(['বাংলা', 'English', 'লাইট মোড', 'কল করুন'])
   await press(page, 'কল করুন')
   await expect(page.getByText('কলটি রেকর্ড হচ্ছে')).toBeVisible()
   await expect(page.getByRole('button', { name: 'মানুষের সাথে কথা বলতে চাই' })).toHaveCount(0)
@@ -96,7 +96,8 @@ test('Ripon reports for Moyuri by keyboard; the DLAO sees one pending representa
   await signIn(page, 'DLAO_OFFICER')
   const queueEntry = page.getByRole('link', { name: new RegExp(applicationId) })
   await expect(queueEntry).toHaveCount(1)
-  await expect(queueEntry).toContainText('Reported by a representative · NID unknown: verify at a UDC')
+  await expect(queueEntry).toContainText('Reported by a representative')
+  await expect(queueEntry).toContainText('NID unknown: verify at a UDC')
   await queueEntry.click()
   await expect(page.getByRole('heading', { name: applicationId })).toBeVisible()
   await expect(page.getByText(/Ripon \(fictional\) · Brother · authority/)).toContainText('Pending')
