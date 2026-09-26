@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api } from '../services/api.js'
+import { listDrafts } from '../utils/offlineDrafts.js'
 import { Bi, bi, num, overdueText, say, tr, when } from '../components/Bi.jsx'
 import { DlaoCalendar } from '../components/DlaoCalendar.jsx'
 import { HearingListView, MediationCaseListView, LawyerFeedbackView, ClaoCertificationView } from '../components/DlaoViews.jsx'
@@ -124,6 +125,7 @@ function QueueCard({ record, role, urgent, pending }) {
       {record.status && <span className="queue-tag">{say(record.status)}</span>}
       {record.reviewState && <span className="queue-tag">{say(record.reviewState)}</span>}
       {record.vulnerability?.map((item) => <span key={item} className="queue-tag is-warn">{say(item)}</span>)}
+      {record.category && <span className="queue-tag">{bi('Type:', 'ধরন:')} {say(record.category)}</span>}
       {record.complaintType && <span className="queue-tag">{bi('Complaint type (AI suggestion):', 'অভিযোগের ধরন (এআই প্রস্তাবিত):')} {say(record.complaintType)}</span>}
       {record.mediationStage && <span className="queue-tag">{bi('Mediation stage:', 'মধ্যস্থতার ধাপ:')} {say(record.mediationStage)}</span>}
       {record.legalEffectState && <span className="queue-tag">{bi('Legal effect:', 'আইনি কার্যকারিতা:')} {say(record.legalEffectState)}</span>}
@@ -142,6 +144,18 @@ function QueueCard({ record, role, urgent, pending }) {
       </span>)}
     </span>}
   </Link>
+}
+
+// Only the submitting worker, within the correction window, may open the full intake; other rows show status only.
+function UdcSubmittedRow({ record }) {
+  const body = <>
+    <span><span className="record-badge is-submitted">{bi('Submitted', 'দাখিলকৃত')}</span> <strong>{record.applicationId}</strong> · {say(record.status)}</span>
+    <span>{tr(record.applicantName)} · {when(record.createdAt)} · {bi('Review:', 'পর্যালোচনা:')} {say(record.reviewState)}</span>
+    {!record.canOpen && <small className="muted">{bi('Now with the DLAO office; the full intake is no longer open to UDC.', 'এখন ডিএলএও কার্যালয়ে; পূর্ণ আবেদন আর ইউডিসির জন্য খোলা নেই।')}</small>}
+  </>
+  return record.canOpen
+    ? <Link to={`/assisted?view=${encodeURIComponent(record.applicationId)}`} className="card udc-row">{body}</Link>
+    : <div className="card udc-row">{body}</div>
 }
 
 export default function Dashboard({ session }) {
@@ -168,6 +182,13 @@ export default function Dashboard({ session }) {
   const [togglingAvailability, setTogglingAvailability] = useState(false)
   const [lawyerFilter, setLawyerFilter] = useState('ALL')
   const [dlaoTab, setDlaoTab] = useState('QUEUE')
+  const [localDrafts, setLocalDrafts] = useState([])
+
+  // UDC drafts stay encrypted on this device; the list shows only that they exist, the content opens with the passphrase.
+  useEffect(() => {
+    if (role !== 'UDC_OPERATOR') return
+    listDrafts(String(session.user.id)).then(setLocalDrafts).catch(() => setLocalDrafts([]))
+  }, [role, session.user.id])
 
   useEffect(() => {
     if (role === 'PANEL_LAWYER') {
@@ -266,7 +287,7 @@ export default function Dashboard({ session }) {
   const dlaoView = role === 'DLAO_OFFICER' || role === 'CLAO'
   const officeView = staff || role === 'CLAO'
   const pendingCertifications = workspace?.certifications?.filter(({ stage }) => stage === 'PENDING_CLAO_CERTIFICATION').length ?? 0
-  const canSubmit = staff || role === 'HELPLINE_AGENT' || role === 'UDC_OPERATOR'
+  const canSubmit = staff || role === 'HELPLINE_AGENT'
   const isUrgent = (record) => Boolean(record.urgent || record.priorityDecision === 'URGENT' || (record.priorityDecision !== 'ROUTINE' && record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION')))
   const isHearingToday = (record) => record.flags?.some((flag) => flag.code === 'HEARING_TODAY')
   const isPending = (record) => !isUrgent(record) && record.status !== 'ACCEPTED'
@@ -394,7 +415,7 @@ export default function Dashboard({ session }) {
 
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
-    {role === 'UDC_OPERATOR' && <p><Link to="/assisted">{bi('Open assisted intake and offline drafts', 'সহায়তাকৃত আবেদন ও অফলাইন খসড়া দেখুন')}</Link></p>}
+    {role === 'UDC_OPERATOR' && <p><Link to="/assisted" className="secondary-button">{bi('Start a new assisted intake', 'নতুন সহায়তাকৃত আবেদন শুরু করুন')}</Link></p>}
     {submitted && <p role="status" className="success">{bi(`Application ${submitted.applicationId} submitted to the DLAO queue. No Case ID exists yet. Give this lookup code to the caller once, through the agreed safe route:`, `আবেদন ${submitted.applicationId} ডিএলএও কর্মকর্তাদের পর্যালোচনার তালিকায় জমা হয়েছে। এখনো মামলা নম্বর বরাদ্দ হয়নি। নির্ধারিত নিরাপদ মাধ্যমে আবেদনকারীকে এই অনুসন্ধান কোডটি একবার দিন:`)} <code>{submitted.lookupCode}</code>. {bi('It will not be shown again.', 'কোডটি পরবর্তীতে আর দেখানো হবে না।')}</p>}
 
     {role === 'CLAO' && <p className="safety-note" role="note">{bi('View only. Case decisions stay with the DLAO office; your action here is certification.', 'শুধু দেখার জন্য। মামলার সিদ্ধান্ত ডিএলএও কার্যালয় নেয়; এখানে আপনার কাজ হলো সনদ প্রদান।')}</p>}
@@ -554,6 +575,12 @@ export default function Dashboard({ session }) {
         <div className="queue-search"><label htmlFor="history-filter">{bi('Search shown history', 'রেকর্ড ফিল্টার করুন')}</label><input id="history-filter" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={bi('Name, Application ID, or Case ID', 'নাম, আবেদন বা মামলা নম্বর')} /></div>
       </div>}
       {loading && <p role="status">{bi('Loading workspace…', 'লোড হচ্ছে…')}</p>}
+      {role === 'UDC_OPERATOR' && localDrafts.length > 0 && <ul className="plain-list">{localDrafts.map((draft) => <li key={draft.id}>
+        <Link to={`/assisted?draft=${encodeURIComponent(draft.id)}`} className="card udc-row">
+          <span><span className="record-badge is-draft">{draft.status === 'QUEUED' ? bi('Draft · waiting to send', 'খসড়া · পাঠানোর অপেক্ষায়') : draft.status === 'CONFLICT' ? bi('Draft · needs review', 'খসড়া · যাচাই দরকার') : bi('Draft', 'খসড়া')}</span> <code>{draft.id.slice(0, 8)}</code></span>
+          <small className="muted">{bi('Saved on this device', 'এই ডিভাইসে সংরক্ষিত')} {when(draft.updatedAt)} · {bi('open with the device passphrase', 'ডিভাইসের পাসফ্রেজ দিয়ে খুলুন')}</small>
+        </Link>
+      </li>)}</ul>}
       {!loading && workspace?.records.length === 0 && <p className="empty-state">
         {role === 'PANEL_LAWYER' ? bi('No current or pending panel-lawyer assignments.', 'বর্তমানে কোনো সক্রিয় বা অপেক্ষমাণ মামলা বরাদ্দ নেই।') :
          role === 'HELPLINE_AGENT' ? bi('No advice requests are waiting for a callback.', 'পরামর্শের অপেক্ষায় কোনো কল পেন্ডিং নেই।') :
@@ -572,14 +599,7 @@ export default function Dashboard({ session }) {
         : role === 'RECEIVING_DLAO'
           ? <Link to={`/referrals/${record.referralId}`}><strong>{record.caseId}</strong><span>{bi(`Referral from ${record.sendingOfficeCode}`, `${record.sendingOfficeCode} থেকে রেফারেল`)} · {say(record.status)}</span><small>{bi('Acknowledge by', 'প্রাপ্তি স্বীকারের শেষ সময়')} {when(record.dueAt)}{record.overdue ? ` · ${bi('acknowledgement overdue', 'প্রাপ্তি স্বীকারের সময় উত্তীর্ণ')}` : ''}</small></Link>
           : role === 'UDC_OPERATOR'
-            ? <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', margin: 0, padding: '0.85rem 1.15rem' }}>
-                <div>
-                  <strong>{record.applicationId} · {say(record.status)}</strong>
-                  <p style={{ margin: '0.25rem 0' }}>{tr(record.applicantName)} · {bi('Assisted intake submitted from UDC', 'ইউডিসি থেকে সহায়তাকৃত আবেদন দাখিল')} · {when(record.createdAt)}</p>
-                  <small className="muted">{bi('Review state:', 'পর্যালোচনার অবস্থা:')} {say(record.reviewState)}</small>
-                </div>
-                <Link to="/assisted" className="secondary-button" style={{ textDecoration: 'none', padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}>{bi('Open UDC console', 'ইউডিসি কনসোল')}</Link>
-              </div>
+            ? <UdcSubmittedRow record={record} />
             : <QueueCard record={record} role={role} urgent={isUrgent(record)} pending={isPending(record)} />}</li>)}</ul>}
       </section>
     )}

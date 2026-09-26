@@ -3398,3 +3398,10 @@ thead th { font-size: .8rem; color: #4e5751; }
 .link-button:hover { background: none; color: #174f75; }
 .button-row { display: flex; flex-wrap: wrap; gap: .5rem; }
 .warn-text { color: #9f2f2d; }
+
+/* UDC workspace: submitted and draft rows, flagged with small pastel badges. */
+.record-badge { display: inline-block; padding: .1rem .55rem; border-radius: 9999px; font-size: .72rem; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+.record-badge.is-submitted { background: #edf3ec; color: #346538; }
+.record-badge.is-draft { background: #fbf3db; color: #7a5200; }
+.udc-row { display: flex; flex-direction: column; gap: .25rem; margin: 0; padding: .85rem 1.15rem; color: inherit; text-decoration: none; }
+a.udc-row:hover, a.udc-row:focus-visible { border-color: #c9c7c0; }

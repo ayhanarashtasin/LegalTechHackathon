@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { api } from '../services/api.js'
 import { listDrafts, loadDraft, removeDraft, saveDraft } from '../utils/offlineDrafts.js'
 import { closeMicrophone, openMicrophone, startRecording } from '../utils/voiceAgent.js'
-import { bi, num, say } from '../components/Bi.jsx'
+import { bi, num, say, when } from '../components/Bi.jsx'
 
-const blank = () => ({ applicantName: '', translatorName: '', typistName: '', helperPhone: '', originalLanguage: 'Marma', originalStatement: '', translatedStatement: '', caseType: 'LAND', consentAttestation: '', originalConfirmed: false, translationConfirmed: false, contactChannel: 'IN_PERSON', contactValue: '', safeTime: '' })
+const blank = () => ({ applicantName: '', plaintiffName: '', defendantName: '', defendantRelationship: '', translatorName: '', typistName: '', helperPhone: '', originalLanguage: 'Marma', originalStatement: '', translatedStatement: '', caseType: 'LAND', consentAttestation: '', originalConfirmed: false, translationConfirmed: false, contactChannel: 'IN_PERSON', contactValue: '', safeTime: '' })
 const checklist = {
   FAMILY: ['Applicant identity evidence', 'Relationship record', 'Relevant communication'],
   LAND: ['Applicant identity evidence', 'Land record or deed', 'Location or plot details', 'Witness or other supporting record'],
@@ -21,6 +21,36 @@ const itemsBn = {
 }
 const emptyDraft = () => crypto.randomUUID()
 
+// Read-only copy of what this worker submitted, opened from the workspace list.
+function SubmittedApplication({ record, onCorrect }) {
+  const yes = (value) => value ? bi('yes', 'হ্যাঁ') : bi('no', 'না')
+  const rows = [
+    [bi('Applicant / original speaker', 'আবেদনকারী / মূল বক্তা'), record.applicantName],
+    [bi('Plaintiff (বাদী)', 'বাদী'), record.plaintiffName],
+    [bi('Defendant (বিবাদী)', 'বিবাদী'), record.defendantRelationship ? `${record.defendantName} (${record.defendantRelationship})` : record.defendantName],
+    [bi('Translator', 'অনুবাদক'), record.translatorName],
+    [bi('Person who typed the form', 'যিনি ফর্ম টাইপ করেছেন'), record.typistName],
+    [bi('UDC helper phone', 'ইউডিসি সহায়তাকারীর ফোন'), record.helperPhone],
+    [bi('Language spoken', 'যে ভাষায় বলেছেন'), record.originalLanguage],
+    [bi('Matter type', 'মামলার ধরন'), say(record.caseType)],
+    [bi('Original words', 'মূল বক্তব্য'), record.originalStatement],
+    [bi('Bangla translation', 'বাংলা অনুবাদ'), record.translatedStatement],
+    [bi('Read-back confirmed', 'পড়ে শোনানোর পর নিশ্চিত'), `${bi('Original', 'মূল')}: ${yes(record.originalConfirmed)} · ${bi('Translation', 'অনুবাদ')}: ${yes(record.translationConfirmed)}`],
+    [bi('Oral consent', 'মৌখিক সম্মতি'), record.consentAttestation],
+    [bi('Safe contact', 'নিরাপদ যোগাযোগ'), say(record.contactChannel)],
+    [bi('Safe time', 'নিরাপদ সময়'), record.safeTime],
+  ]
+  return <section className="card" aria-labelledby="submitted-title">
+    <div className="section-heading">
+      <h2 id="submitted-title">{record.applicationId}</h2>
+      <span className="record-badge is-submitted">{bi('Submitted', 'দাখিলকৃত')}</span>
+    </div>
+    <p className="muted">{bi('Submitted', 'দাখিল')} {when(record.submittedAt)} · {say(record.status)} · {say(record.reviewState)} · {bi('version', 'সংস্করণ')} {num(record.version)}</p>
+    <dl className="details">{rows.filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+    <button type="button" className="secondary-button" onClick={onCorrect}>{bi('Correct the statements', 'বক্তব্য সংশোধন করুন')}</button>
+  </section>
+}
+
 // Marma voice fill stays a translator-verified draft: AI text is appended, never auto-confirmed.
 export function applyMarmaTranscript(form, text) {
   const clean = String(text ?? '').trim().slice(0, 4000)
@@ -32,6 +62,10 @@ export function applyMarmaTranscript(form, text) {
 
 export default function AssistedIntake({ session }) {
   const ownerId = String(session.user.id)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const viewId = searchParams.get('view')
+  const requestedDraft = searchParams.get('draft')
+  const [submittedRecord, setSubmittedRecord] = useState(null)
   const [passphrase, setPassphrase] = useState('')
   const [form, setForm] = useState(blank)
   const [draftId, setDraftId] = useState(emptyDraft)
@@ -124,7 +158,21 @@ export default function AssistedIntake({ session }) {
     return () => clearTimeout(timer)
   }, [form, passphrase, draftId, ownerId, mode, applicationId, baseVersion, startedAt, refreshDrafts])
 
-  function change(field, value) { setForm((current) => ({ ...current, [field]: value })) }
+  useEffect(() => {
+    if (!viewId) return
+    const controller = new AbortController()
+    api(`/api/assisted/${encodeURIComponent(viewId)}`, { token: session.token, signal: controller.signal })
+      .then(setSubmittedRecord)
+      .catch((failure) => { if (failure.name !== 'AbortError') setError(failure.message) })
+    return () => controller.abort()
+  }, [viewId, session.token])
+
+  // The plaintiff is usually the applicant, so it follows the applicant's name until someone types a different one.
+  function change(field, value) {
+    setForm((current) => field === 'applicantName' && (!current.plaintiffName || current.plaintiffName === current.applicantName)
+      ? { ...current, applicantName: value, plaintiffName: value }
+      : { ...current, [field]: value })
+  }
 
   function reset() {
     stopMicTracks()
@@ -152,6 +200,8 @@ export default function AssistedIntake({ session }) {
         setApplicationId(row.value.applicationId)
         setBaseVersion(row.value.baseVersion)
         setStartedAt(row.value.startedAt)
+        setIntakeTask(row.value.mode === 'REVISION' ? 'CORRECTION' : 'NEW')
+        if (requestedDraft) setSearchParams({}, { replace: true })
         setNotice(bi('Encrypted draft unlocked and integrity verified.', 'খসড়া খোলা হয়েছে, সত্যতা যাচাই হয়েছে।'))
       } else if (row.status === 'CONFLICT') {
         setConflict({ id, ...row.value.conflict })
@@ -202,7 +252,9 @@ export default function AssistedIntake({ session }) {
       const clientMutationId = crypto.randomUUID()
       const payload = mode === 'CREATE' ? {
         temporaryId: draftId, clientMutationId, offlineCreatedAt: startedAt,
-        applicantName: form.applicantName, translatorName: form.translatorName, typistName: form.typistName,
+        applicantName: form.applicantName, plaintiffName: form.plaintiffName, defendantName: form.defendantName,
+        ...(form.defendantRelationship ? { defendantRelationship: form.defendantRelationship } : {}),
+        translatorName: form.translatorName, typistName: form.typistName,
         ...(form.helperPhone ? { helperPhone: form.helperPhone } : {}), originalLanguage: form.originalLanguage,
         originalStatement: form.originalStatement, translatedStatement: form.translatedStatement,
         caseType: form.caseType, consentAttestation: form.consentAttestation,
@@ -220,11 +272,12 @@ export default function AssistedIntake({ session }) {
     } catch (failure) { setError(failure.message) }
   }
 
-  async function openRevision(event) {
-    event.preventDefault()
+  async function openRevision(event, id = applicationId) {
+    event?.preventDefault()
     setError('')
     try {
-      const record = await api(`/api/assisted/${applicationId.trim().toUpperCase()}`, { token: session.token })
+      const record = await api(`/api/assisted/${id.trim().toUpperCase()}`, { token: session.token })
+      if (viewId) setSearchParams({}, { replace: true })
       setMode('REVISION')
       setIntakeTask('CORRECTION')
       setApplicationId(record.applicationId)
@@ -263,7 +316,7 @@ export default function AssistedIntake({ session }) {
   }
 
   function loadExample() {
-    setForm({ ...blank(), applicantName: 'Fictional Nuching Marma', translatorName: 'Fictional Marma translator', typistName: session.user.displayName,
+    setForm({ ...blank(), applicantName: 'Fictional Nuching Marma', plaintiffName: 'Fictional Nuching Marma', defendantName: 'Fictional neighbouring landholder', defendantRelationship: 'Neighbour', translatorName: 'Fictional Marma translator', typistName: session.user.displayName,
       helperPhone: '01700000000', originalLanguage: 'Marma', originalStatement: 'Fictional original account spoken in Marma, captured by the named typist.',
       translatedStatement: 'নমুনা বাংলা অনুবাদ: জমির নথিটি একজন কর্মকর্তার দেখে দেওয়া দরকার।', caseType: 'LAND',
       consentAttestation: 'Oral assisted-intake consent was given through the named translator for this fictional demo.', safeTime: 'Weekday morning' })
@@ -280,12 +333,14 @@ export default function AssistedIntake({ session }) {
       <strong>{online ? bi('Internet connected', 'ইন্টারনেট সংযুক্ত') : bi('No internet connection', 'ইন্টারনেট সংযোগ নেই')}</strong>
       <span>{saving ? bi('Saving a protected copy on this device…', 'এই ডিভাইসে সুরক্ষিত কপি রাখা হচ্ছে…') : online ? bi('Saved applications can be sent to the server.', 'সংরক্ষিত আবেদন সার্ভারে পাঠানো যাবে।') : bi('Continue working. The application stays on this device until you reconnect.', 'কাজ চালিয়ে যান। সংযোগ ফিরে না আসা পর্যন্ত আবেদনটি এই ডিভাইসেই থাকবে।')}</span>
     </div>
-    <p className="safety-note"><strong>{bi('Legal aid is free.', 'আইনি সহায়তা বিনামূল্যে।')}</strong> {bi("No UDC worker may charge for this. The applicant's original words, Bangla translation, and the typist are recorded separately; an officer checks them later.", 'কোনো ইউডিসি কর্মী এর জন্য টাকা নিতে পারবেন না। আবেদনকারীর মূল কথা, বাংলা অনুবাদ ও টাইপিস্টের পরিচয় আলাদাভাবে নথিভুক্ত করা হয়; পরে একজন কর্মকর্তা যাচাই করেন।')}</p>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" aria-live="polite" className="success">{notice}</p>}
     {receipt?.lookupCode && <p className="safety-note">{bi('Application', 'আবেদন')} {receipt.applicationId} · {bi('one-time lookup code:', 'একবার ব্যবহারযোগ্য কোড:')} <code>{receipt.lookupCode}</code>. {bi('Share only by an agreed safe route.', 'শুধু সম্মত নিরাপদ পথে জানান।')}</p>}
 
-    <div className="assisted-workspace">
+    {viewId ? (submittedRecord?.applicationId === viewId
+      ? <SubmittedApplication record={submittedRecord} onCorrect={() => openRevision(null, submittedRecord.applicationId)} />
+      : !error && <p role="status">{bi('Loading the submitted application…', 'দাখিলকৃত আবেদন লোড হচ্ছে…')}</p>)
+    : <div className="assisted-workspace">
       <aside className="card draft-workspace" aria-labelledby="drafts-title">
         <h2 id="drafts-title">{bi('Saved drafts and sync', 'সংরক্ষিত খসড়া ও সিঙ্ক')}</h2>
         <p className="muted">{bi('Applications save on this device first. When the internet returns, send waiting applications to the server.', 'আবেদন আগে এই ডিভাইসে সংরক্ষিত হয়। ইন্টারনেট ফিরলে অপেক্ষমাণ আবেদন সার্ভারে পাঠান।')}</p>
@@ -298,6 +353,11 @@ export default function AssistedIntake({ session }) {
           <input id="draft-passphrase" name="draftPassphrase" type="password" minLength="8" autoComplete="off" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} aria-describedby="passphrase-help" />
           <p id="passphrase-help" className="muted">{bi('Use the same passphrase to open, check, or send drafts. Use at least 8 characters. It is never sent to the server. If forgotten, drafts cannot be recovered; signing out clears them.', 'খসড়া খুলতে, যাচাই করতে বা পাঠাতে একই পাসফ্রেজ ব্যবহার করুন। কমপক্ষে ৮ অক্ষর দিন। এটি সার্ভারে পাঠানো হয় না। ভুলে গেলে খসড়া ফেরত পাওয়া যাবে না; সাইন আউট করলে মুছে যাবে।')}</p>
         </div>
+        {requestedDraft && <div className="form-stack">
+          <p><span className="record-badge is-draft">{bi('Draft', 'খসড়া')}</span> <code>{requestedDraft}</code></p>
+          <p className="muted">{bi('Enter the device passphrase above, then open the draft to see what was saved.', 'উপরে ডিভাইসের পাসফ্রেজ দিন, তারপর সংরক্ষিত তথ্য দেখতে খসড়াটি খুলুন।')}</p>
+          <button type="button" onClick={() => openLocal(requestedDraft)} disabled={passphrase.length < 8}>{bi('Open this draft', 'এই খসড়া খুলুন')}</button>
+        </div>}
         <div className="draft-actions">
           <button type="button" onClick={() => syncQueued()} disabled={!online || passphrase.length < 8 || queuedCount === 0}>{bi('Send waiting applications', 'অপেক্ষমাণ আবেদন পাঠান')}</button>
           <button type="button" className="secondary-button" onClick={verifyIntegrity} disabled={passphrase.length < 8 || drafts.length === 0}>{bi('Check saved drafts', 'সংরক্ষিত খসড়া যাচাই করুন')}</button>
@@ -353,6 +413,9 @@ export default function AssistedIntake({ session }) {
             {mode === 'CREATE' && <fieldset className="intake-step form-stack">
               <legend>{bi('1. People and language', '১. ব্যক্তি ও ভাষা')}</legend>
               <label htmlFor="applicant-name">{bi('Applicant / original speaker name', 'আবেদনকারী / মূল বক্তার নাম')}</label><input id="applicant-name" name="applicantName" autoComplete="off" value={form.applicantName} onChange={(event) => change('applicantName', event.target.value)} minLength="2" maxLength="120" required />
+              <label htmlFor="plaintiff-name">{bi('Plaintiff (বাদী): who brings the complaint', 'বাদী: যিনি অভিযোগ করছেন')}</label><input id="plaintiff-name" name="plaintiffName" autoComplete="off" value={form.plaintiffName} onChange={(event) => change('plaintiffName', event.target.value)} minLength="2" maxLength="120" required />
+              <label htmlFor="defendant-name">{bi('Defendant (বিবাদী): who the complaint is against', 'বিবাদী: যার বিরুদ্ধে অভিযোগ')}</label><input id="defendant-name" name="defendantName" autoComplete="off" value={form.defendantName} onChange={(event) => change('defendantName', event.target.value)} minLength="2" maxLength="120" required />
+              <label htmlFor="defendant-relationship">{bi('Defendant’s relation to the plaintiff (optional)', 'বাদীর সাথে বিবাদীর সম্পর্ক (ঐচ্ছিক)')}</label><input id="defendant-relationship" name="defendantRelationship" autoComplete="off" value={form.defendantRelationship} onChange={(event) => change('defendantRelationship', event.target.value)} maxLength="80" />
               <p className="muted">{bi('UDC helper:', 'ইউডিসি সহায়তাকারী:')} <strong>{session.user.displayName}</strong>. {bi('The translator and typist may be different people.', 'অনুবাদক ও টাইপিস্ট ভিন্ন ব্যক্তি হতে পারেন।')}</p>
               <label htmlFor="translator-name">{bi('Translator', 'অনুবাদক')}</label><input id="translator-name" name="translatorName" autoComplete="off" value={form.translatorName} onChange={(event) => change('translatorName', event.target.value)} minLength="2" maxLength="120" required />
               <label htmlFor="typist-name">{bi('Person typing this form', 'যিনি এই ফর্ম টাইপ করছেন')}</label><input id="typist-name" name="typistName" autoComplete="off" value={form.typistName} onChange={(event) => change('typistName', event.target.value)} minLength="2" maxLength="120" required />
@@ -398,6 +461,6 @@ export default function AssistedIntake({ session }) {
           </form>
         </>}
       </section>
-    </div>
+    </div>}
   </section>
 }

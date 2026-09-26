@@ -15,12 +15,17 @@ function udcOffice(actor) {
   return assignment.officeCode
 }
 
+// ponytail: 24-hour correction window is a demo ceiling; replace with an approved office policy before real use.
+const withinUdcWindow = (application) => application.status === 'SUBMITTED' && application.reviewState === 'PENDING_REVIEW' && Date.now() - new Date(application.createdAt).getTime() <= 86400000
+const ownSubmission = (application, actor) => hasOfficeRole(actor, 'UDC_OPERATOR', application.officeCode) && Boolean(application.assistedByUserId?.equals(actor.userId))
+// Lets the workspace mark which rows this worker may still open, using the same rule as ownAssisted.
+export const udcCanOpen = (application, actor) => ownSubmission(application, actor) && withinUdcWindow(application)
+
 async function ownAssisted(applicationId, actor, session) {
   const application = await Application.findOne({ applicationId }).session(session)
   if (!application) throw new HttpError(404, 'NOT_FOUND', 'Assisted intake not found.')
-  if (!hasOfficeRole(actor, 'UDC_OPERATOR', application.officeCode) || !application.assistedByUserId?.equals(actor.userId)) throw new HttpError(403, 'FORBIDDEN', 'Only the submitting UDC worker may access this limited intake.')
-  // ponytail: 24-hour correction window is a demo ceiling; replace with an approved office policy before real use.
-  if (application.status !== 'SUBMITTED' || application.reviewState !== 'PENDING_REVIEW' || Date.now() - application.createdAt.getTime() > 86400000) throw new HttpError(403, 'FORBIDDEN', 'UDC access ended; request a DLAO review.')
+  if (!ownSubmission(application, actor)) throw new HttpError(403, 'FORBIDDEN', 'Only the submitting UDC worker may access this limited intake.')
+  if (!withinUdcWindow(application)) throw new HttpError(403, 'FORBIDDEN', 'UDC access ended; request a DLAO review.')
   return application
 }
 
@@ -93,7 +98,7 @@ export async function createAssisted(input, actor) {
     const translator = await namedPerson(input.translatorName)
     const typist = input.typistName.trim().toLowerCase() === input.translatorName.trim().toLowerCase() ? translator : await namedPerson(input.typistName)
     const events = [
-      { action: 'APPLICATION_SUBMITTED', newState: { status: 'SUBMITTED', channel: 'UDC', applicantPersonId: applicant.id } },
+      { action: 'APPLICATION_SUBMITTED', newState: { status: 'SUBMITTED', channel: 'UDC', applicantPersonId: applicant.id, plaintiffRecorded: true, defendantRecorded: true } },
       { action: 'OFFLINE_DRAFT_CREATED', newState: { temporaryId: input.temporaryId, offlineCreatedAt: input.offlineCreatedAt ?? null } },
       { action: 'ASSISTANCE_RECORDED', newState: { helperPersonId: helper.id, translatorPersonId: translator.id, typistPersonId: typist.id, originalLanguage: input.originalLanguage, caseType: input.caseType, originalConfirmed: input.originalConfirmed, translationConfirmed: input.translationConfirmed } },
       { action: 'CONSENT_RECORDED', newState: { scope: 'ASSISTED_INTAKE', state: 'GRANTED' }, reason: input.consentAttestation },
@@ -105,7 +110,10 @@ export async function createAssisted(input, actor) {
     ]
     const [application] = await Application.create([{
       applicationId, applicantPersonId: applicant._id, officeCode, channel: 'UDC', submittedByUserId: actor.userId,
-      assistedByUserId: actor.userId, lookupCodeHash: createHash('sha256').update(code).digest('hex'), auditSequence: events.length,
+      assistedByUserId: actor.userId,
+      petitioner: { name: input.plaintiffName },
+      respondent: { name: input.defendantName, ...(input.defendantRelationship ? { relationship: input.defendantRelationship } : {}) },
+      lookupCodeHash: createHash('sha256').update(code).digest('hex'), auditSequence: events.length,
     }], { session })
     const [assistance] = await AssistanceRecord.create([{
       applicationId, applicantPersonId: applicant._id, helperPersonId: helper._id, translatorPersonId: translator._id,
@@ -136,11 +144,20 @@ export async function createAssisted(input, actor) {
 
 export async function getAssisted(applicationId, actor) {
   const application = await ownAssisted(applicationId, actor)
-  const [assistance, statements, trail] = await Promise.all([
-    AssistanceRecord.findOne({ applicationId }).select('caseType originalLanguage originalConfirmed translationConfirmed').lean(),
+  const [assistance, statements, trail, consent, contact] = await Promise.all([
+    AssistanceRecord.findOne({ applicationId }).select('caseType originalLanguage originalConfirmed translationConfirmed helperPhone applicantPersonId translatorPersonId typistPersonId')
+      .populate('applicantPersonId', 'displayName').populate('translatorPersonId', 'displayName').populate('typistPersonId', 'displayName').lean(),
     latestStatements(applicationId), getAuditTrail(applicationId),
+    ConsentRecord.findOne({ applicationId, scope: 'ASSISTED_INTAKE' }).sort({ revision: -1 }).select('attestation').lean(),
+    SafeContactProfile.findOne({ applicationId }).sort({ version: -1 }).select('allowedChannels safeTimeWindow').lean(),
   ])
-  return { applicationId, version: application.version, caseType: assistance.caseType, originalLanguage: assistance.originalLanguage,
+  // Everything the submitting worker typed, read back for them; the applicant's phone number is not repeated.
+  return { applicationId, version: application.version, status: application.status, reviewState: application.reviewState, submittedAt: application.createdAt,
+    applicantName: assistance.applicantPersonId?.displayName ?? '', translatorName: assistance.translatorPersonId?.displayName ?? '', typistName: assistance.typistPersonId?.displayName ?? '',
+    helperPhone: assistance.helperPhone ?? '', plaintiffName: application.petitioner?.name ?? '', defendantName: application.respondent?.name ?? '',
+    defendantRelationship: application.respondent?.relationship ?? '', consentAttestation: consent?.attestation ?? '',
+    contactChannel: contact?.allowedChannels?.[0] ?? 'IN_PERSON', safeTime: contact?.safeTimeWindow ?? '',
+    caseType: assistance.caseType, originalLanguage: assistance.originalLanguage,
     originalStatement: statements.originalStatement, translatedStatement: statements.translatedStatement,
     originalConfirmed: assistance.originalConfirmed, translationConfirmed: assistance.translationConfirmed, integrityValid: trail.valid }
 }

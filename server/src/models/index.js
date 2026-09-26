@@ -59,6 +59,8 @@ const applicationSchema = new Schema({
   acceptedByUserId: ref('User', false),
   acceptedAt: Date,
   assistedByUserId: ref('User', false),
+  // The DLAO officer responsible for the case; restricted evidence opens to this officer (see assignOfficer).
+  assignedOfficerUserId: ref('User', false),
   // Latest authorised human routing decision; a REFER route binds the next referral to that office.
   routingDecision: {
     route: { type: String, enum: ['RETAIN', 'REFER'] },

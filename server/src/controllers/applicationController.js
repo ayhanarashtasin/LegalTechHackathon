@@ -1,5 +1,5 @@
 import { extractAnswers, transcribeAnswer } from '../services/ai/groq.js'
-import { acceptApplication, addFact, recordApplicantWithdrawal, verifyFact, recordAdviceOutcome, addRepresentation, completeTask, correctFact, createTask, editCaseInformation, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, preMediationVerify, recordConsent, recordContactAttempt, recordNoticeSent, reviewApplication, reviewCaseCancellationRequest, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake, trackApplicationStatus } from '../services/applicationService.js'
+import { acceptApplication, addFact, assignOfficer, recordApplicantWithdrawal, verifyFact, recordAdviceOutcome, addRepresentation, completeTask, correctFact, createTask, editCaseInformation, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, preMediationVerify, recordConsent, recordContactAttempt, recordNoticeSent, reviewApplication, reviewCaseCancellationRequest, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake, trackApplicationStatus } from '../services/applicationService.js'
 
 export async function submit(request, response) {
   response.status(201).json(await submitApplication(request.body, request.auth))
@@ -63,6 +63,10 @@ export async function readHistory(request, response) {
 
 export async function helplineStatus(request, response) {
   response.json(await lookupHelplineStatus(request.body.identifier, request.body.lookupCode, request.auth, request.body.contactChannel))
+}
+
+export async function takeCase(request, response) {
+  response.json(await assignOfficer(request.params.applicationId, request.body, request.auth))
 }
 
 export async function accept(request, response) {

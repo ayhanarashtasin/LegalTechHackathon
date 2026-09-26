@@ -6,8 +6,7 @@ import { expand, signIn, signOut } from './support.js'
 test('Step 7 Nuching offline intake survives loss, syncs once, resolves a conflict, and has a cited document briefing', async ({ page, request }) => {
   test.setTimeout(60000)
   await signIn(page, 'UDC_OPERATOR')
-  await page.getByRole('link', { name: 'Open assisted intake and offline drafts' }).click()
-  await expect(page.getByText('Legal aid is free.')).toBeVisible()
+  await page.getByRole('link', { name: 'Start a new assisted intake' }).click()
   await page.getByLabel(/Device passphrase|Local draft passphrase/).fill('FictionalSecretPhrase!')
   await page.getByRole('button', { name: /(?:Fill with )?fictional Nuching example/i }).click()
   await page.getByLabel(/Applicant.*name/i).fill('Fictional Nuching Offline 1')
@@ -97,7 +96,7 @@ test('Step 7 assisted intake remains labeled and keyboard reachable on a narrow 
   await page.setViewportSize({ width: 390, height: 844 })
   await signIn(page, 'UDC_OPERATOR')
   expect(await page.evaluate(() => globalThis.localStorage.getItem('dlas_token'))).toBeNull()
-  await page.getByRole('link', { name: 'Open assisted intake and offline drafts' }).click()
+  await page.getByRole('link', { name: 'Start a new assisted intake' }).click()
   await expect(page.getByLabel(/Device passphrase|Local draft passphrase/i)).toBeVisible()
   await expect(page.getByLabel(/^Original (?:words|statement)/i)).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
@@ -112,7 +111,7 @@ test('T6 briefing links each point to a readable source and reserves approval fo
   const login = await request.post('/api/auth/login', { data: actors.UDC_OPERATOR })
   const { token } = await login.json()
   const created = await request.post('/api/assisted', { headers: { authorization: `Bearer ${token}` }, data: {
-    temporaryId: randomUUID(), clientMutationId: randomUUID(), applicantName: 'Fictional T6 Browser Applicant',
+    temporaryId: randomUUID(), clientMutationId: randomUUID(), applicantName: 'Fictional T6 Browser Applicant', plaintiffName: 'Fictional T6 Browser Applicant', defendantName: 'Fictional landholder',
     translatorName: 'Fictional translator', typistName: 'Fictional typist',
     originalLanguage: 'Marma', originalStatement: 'Fictional land statement.', translatedStatement: 'Fictional Bangla land statement.',
     caseType: 'LAND', consentAttestation: 'Fictional oral consent after translation.',

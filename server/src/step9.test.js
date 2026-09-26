@@ -189,7 +189,7 @@ test('T1 citizen portal: owner request, human replacement, stage history, and au
   assert.equal(owner.status, 201)
   assert.equal(other.status, 201)
   const submitted = await request('/api/citizen/applications', { method: 'POST', token: owner.data.token, body: {
-    applicantName: 'Fictional Abdul Malek', problem: 'The appointed panel lawyer has not responded about the hearing.',
+    applicantName: 'Fictional Abdul Malek', problem: 'The appointed panel lawyer has not responded about the hearing.', category: 'LABOUR_WAGE',
     district: 'Barguna', urgent: false, identityDocument: 'NONE', contactPhone: '',
   } })
   assert.equal(submitted.status, 201)

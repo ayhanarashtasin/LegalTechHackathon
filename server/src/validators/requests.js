@@ -46,6 +46,13 @@ export function validateAcceptance(request, _response, next) {
   next()
 }
 
+export function validateOfficerAssignment(request, _response, next) {
+  const value = body(request, ['reason'], [])
+  if (typeof value.reason === 'string' && value.reason.trim()) value.reason = text(value.reason, 'Reason', 5, 500)
+  else delete value.reason
+  next()
+}
+
 export function validateReview(request, _response, next) {
   const value = body(request, ['reviewState', 'reason'])
   if (!['NEEDS_INFORMATION', 'READY_FOR_DECISION'].includes(value.reviewState)) fail('Review state is invalid.')

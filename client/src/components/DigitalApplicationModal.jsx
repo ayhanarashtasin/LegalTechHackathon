@@ -1,6 +1,22 @@
 import { useState, useRef } from 'react'
-import { bi } from './Bi.jsx'
+import { bi, say } from './Bi.jsx'
 import { processImageFile } from '../utils/imageProcess.js'
+
+// The applicant's own choice; each example helps her find the right one. The server decides what each category flags.
+const CASE_CATEGORIES = [
+  ['FAMILY_DOMESTIC', 'Spousal abuse, dowry, separation', 'স্বামীর নির্যাতন, যৌতুক, বিচ্ছেদ'],
+  ['ONLINE_HARASSMENT', 'Threats, blackmail or private images shared online', 'অনলাইনে হুমকি, ব্ল্যাকমেইল বা ব্যক্তিগত ছবি ছড়ানো'],
+  ['MAINTENANCE', 'Maintenance for a wife or children', 'স্ত্রী বা সন্তানের ভরণপোষণ দাবি'],
+  ['MARRIAGE_DIVORCE', 'Divorce, dower (denmohor)', 'তালাক, দেনমোহর'],
+  ['INHERITANCE', 'Dividing property after a death', 'মৃত্যুর পর সম্পত্তি বণ্টন'],
+  ['LAND_PROPERTY', 'Boundary, tenancy, illegal possession', 'সীমানা, ভাড়াটিয়া, অবৈধ দখল'],
+  ['LABOUR_WAGE', 'Unpaid wages, workplace injury', 'বকেয়া মজুরি, কর্মস্থলে দুর্ঘটনা'],
+  ['CRIMINAL_AID', 'Accused of a crime and needing a lawyer', 'মামলায় অভিযুক্ত, আইনজীবী প্রয়োজন'],
+  ['CHILD_CUSTODY', 'Who the children live with', 'সন্তান কার কাছে থাকবে'],
+  ['FINANCIAL_FRAUD', 'Microfinance, loan harassment, fraud', 'ক্ষুদ্রঋণ, ঋণের হয়রানি, প্রতারণা'],
+  ['ADVICE_ONLY', 'Only guidance, no case', 'শুধু পরামর্শ, মামলা নয়'],
+  ['OTHER', 'None of these', 'এগুলোর কোনোটি নয়'],
+]
 
 const DISTRICTS = [
   'Dhaka', 'Chattogram', 'Rajshahi', 'Khulna', 'Barishal', 'Sylhet', 'Rangpur', 'Mymensingh',
@@ -53,6 +69,7 @@ export default function DigitalApplicationModal({
     return 'Dhaka'
   })
   const [problem, setProblem] = useState('')
+  const [category, setCategory] = useState('')
   const [urgent, setUrgent] = useState(false)
 
   // Identity document selection & conditional data
@@ -141,6 +158,10 @@ export default function DigitalApplicationModal({
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (!category) {
+      setFormError(bi('Please choose the type of your legal matter.', 'দয়া করে আপনার আইনি বিষয়ের ধরন নির্বাচন করুন।'))
+      return
+    }
     if (!problem.trim()) {
       setFormError(bi('Please describe your legal matter or problem.', 'দয়া করে আপনার আইনি সমস্যা বা বিরোধের বিবরণ লিখুন।'))
       return
@@ -158,6 +179,7 @@ export default function DigitalApplicationModal({
     const payload = {
       applicantName: applicantName.trim() || session?.user?.displayName || 'Citizen Applicant',
       problem: problem.trim(),
+      category,
       district,
       contactPhone: phone.trim(),
       urgent,
@@ -294,6 +316,30 @@ export default function DigitalApplicationModal({
                 <span className="section-number">2</span>
                 {bi('Describe Your Legal Matter / Incident', 'আপনার আইনি সমস্যা, বিরোধ বা ঘটনার বিবরণ')}
               </legend>
+
+              <div className="form-field-group">
+                <label htmlFor="app-category" className="digital-app-label">
+                  {bi('Type of matter', 'বিষয়ের ধরন')} <span className="req-star">*</span>
+                </label>
+                <select
+                  id="app-category"
+                  required
+                  className="digital-app-select"
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  aria-describedby="app-category-hint"
+                >
+                  <option value="">{bi('Choose one', 'একটি নির্বাচন করুন')}</option>
+                  {CASE_CATEGORIES.map(([code, en, bn]) => (
+                    <option key={code} value={code}>{say(code)} ({bi(en, bn)})</option>
+                  ))}
+                </select>
+                <p id="app-category-hint" className="field-hint" aria-live="polite">
+                  {category === 'ADVICE_ONLY'
+                    ? bi('No case will be opened. The 16699 helpline will call you back with guidance.', 'কোনো মামলা খোলা হবে না। ১৬৬৯৯ হেল্পলাইন থেকে আপনাকে ফোন করে পরামর্শ দেওয়া হবে।')
+                    : bi('Not sure? Choose "Other" and an officer will decide.', 'নিশ্চিত না হলে "অন্যান্য" বেছে নিন, কর্মকর্তা ঠিক করে দেবেন।')}
+                </p>
+              </div>
 
               <div className="form-field-group">
                 <label htmlFor="app-problem" className="digital-app-label">

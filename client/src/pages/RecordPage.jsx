@@ -86,6 +86,7 @@ export default function RecordPage({ session }) {
   const [reviewReason, setReviewReason] = useState('')
   const [priorityDecision, setPriorityDecision] = useState('URGENT')
   const [priorityReason, setPriorityReason] = useState('')
+  const [takeoverReason, setTakeoverReason] = useState('')
   const [cancellationReviewReason, setCancellationReviewReason] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskAction, setTaskAction] = useState('')
@@ -187,6 +188,12 @@ export default function RecordPage({ session }) {
     const override = reviewState === 'PENDING_REVIEW' || data.record.reviewState === 'READY_FOR_DECISION'
     const result = await change(`/api/applications/${applicationId}/${override ? 'review-override' : 'review'}`, { reviewState, reason: reviewReason }, override ? bi('Override saved.', 'সংশোধিত সিদ্ধান্ত সংরক্ষিত হয়েছে।') : bi('Review saved.', 'প্রাথমিক যাচাই সংরক্ষিত হয়েছে।'))
     if (result) setReviewReason('')
+  }
+
+  async function takeResponsibility(event) {
+    event.preventDefault()
+    const result = await change(`/api/applications/${applicationId}/assigned-officer`, takeoverReason.trim() ? { reason: takeoverReason } : {}, bi('You are now the assigned officer. Restricted evidence is open to you.', 'আপনি এখন দায়িত্বপ্রাপ্ত কর্মকর্তা। সংরক্ষিত প্রমাণ আপনার জন্য খোলা।'))
+    if (result) setTakeoverReason('')
   }
 
   async function submitAcceptance(event) {
@@ -495,6 +502,15 @@ export default function RecordPage({ session }) {
                 </div>
               )}
               {record.vulnerability?.length > 0 && <div className="wide"><dt><Bi en="Weigh first" bn="অগ্রাধিকার বিবেচনা (ঝুঁকি)" /></dt><dd>{record.vulnerability.map(say).join(' · ')}</dd></div>}
+              {record.category && <div><dt><Bi en="Type of matter (applicant chose)" bn="বিষয়ের ধরন (আবেদনকারী নির্বাচিত)" /></dt><dd><Term code={record.category} /></dd></div>}
+              <div className="wide"><dt><Bi en="Assigned officer" bn="দায়িত্বপ্রাপ্ত কর্মকর্তা" /></dt><dd>
+                {record.assignedOfficer?.name ?? bi('Not assigned yet', 'এখনো নির্ধারিত হয়নি')}
+                {officer && String(record.assignedOfficer?.id) !== String(session.user.id) && <form onSubmit={takeResponsibility} className="form-stack inline-form">
+                  {record.assignedOfficer && <><label htmlFor="takeover-reason"><Bi en="Why are you taking over?" bn="কেন দায়িত্ব নিচ্ছেন?" /></label><input id="takeover-reason" value={takeoverReason} onChange={(event) => setTakeoverReason(event.target.value)} minLength="5" maxLength="500" required /></>}
+                  <button type="submit" className="secondary-button"><Bi en="Take responsibility for this case" bn="এই মামলার দায়িত্ব নিন" /></button>
+                </form>}
+                {record.vulnerability?.includes('RESTRICTED_CATEGORY') && <p className="muted"><Bi en="Evidence is restricted: only the assigned officer and an officer it is referred to can open it." bn="প্রমাণ সংরক্ষিত: শুধু দায়িত্বপ্রাপ্ত কর্মকর্তা ও যাঁর কাছে রেফার করা হয়েছে তিনি খুলতে পারবেন।" /></p>}
+              </dd></div>
               {record.complaintType && <div><dt><Bi en="Complaint type (AI suggestion)" bn="অভিযোগের ধরন (এআই প্রস্তাবিত)" /></dt><dd><Term code={record.complaintType} /></dd></div>}
               {record.legalNeed && <div className="wide"><dt><Bi en="Legal need (AI suggestion)" bn="আইনি প্রতিকার (এআই প্রস্তাবিত)" /></dt><dd lang="bn">{record.legalNeed}</dd></div>}
             </dl>

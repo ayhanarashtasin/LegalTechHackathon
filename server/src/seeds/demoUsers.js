@@ -105,7 +105,7 @@ try {
     const udcRole = await RoleAssignment.findOne({ userId: udc._id, role: 'UDC_OPERATOR', active: true })
     const created = await createAssisted({
       temporaryId: randomUUID(), clientMutationId: randomUUID(), offlineCreatedAt: new Date().toISOString(),
-      applicantName: 'Fictional Nuching (demo)', translatorName: 'Fictional Marma translator', typistName: udc.displayName,
+      applicantName: 'Fictional Nuching (demo)', plaintiffName: 'Fictional Nuching (demo)', defendantName: 'Fictional neighbouring landholder', translatorName: 'Fictional Marma translator', typistName: udc.displayName,
       originalLanguage: 'Marma', originalStatement: 'Fictional Marma account: a land record needs review.',
       translatedStatement: 'নমুনা বাংলা অনুবাদ: জমির নথিটি একজন কর্মকর্তার দেখে দেওয়া দরকার।',
       caseType: 'LAND', consentAttestation: 'Fictional applicant gave oral consent to assisted intake.',

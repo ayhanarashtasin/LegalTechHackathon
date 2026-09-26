@@ -58,6 +58,7 @@ test('citizen digital application creates facts, NID document, prottayonpotro do
     body: {
       applicantName: 'Fictional Rashida Begum',
       problem: 'Dispute over boundary wall and inheritance share; threatened with dispossession.',
+      category: 'LAND_PROPERTY',
       district: 'Gazipur',
       contactPhone: '01711002233',
       urgent: true,
@@ -156,6 +157,7 @@ test('citizen digital application with Birth Certificate and photo', async () =>
     body: {
       applicantName: 'Fictional Kabir Hossain',
       problem: 'Employment wages unpaid for 4 months by construction contractor.',
+      category: 'LABOUR_WAGE',
       district: 'Dhaka',
       contactPhone: '01811223344',
       urgent: false,
@@ -189,6 +191,7 @@ test('citizen digital application with NONE identity document succeeds gracefull
     body: {
       applicantName: 'Fictional Salma Khatun',
       problem: 'Tenancy eviction notice without legal reason.',
+      category: 'LAND_PROPERTY',
       district: 'Rajshahi',
       contactPhone: '01999887766',
       urgent: false,

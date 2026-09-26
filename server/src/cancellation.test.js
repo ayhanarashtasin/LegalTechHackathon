@@ -57,7 +57,7 @@ test('Cancel: citizen withdraws an un-accepted application immediately, no offic
   const other = await citizen('cancel.other1')
 
   const submitted = await request('/api/citizen/applications', { method: 'POST', token: owner.token, body: {
-    applicantName: 'Fictional Applicant', problem: 'Fictional dispute needing legal aid.', district: 'Dhaka', urgent: false, identityDocument: 'NONE', contactPhone: '',
+    applicantName: 'Fictional Applicant', problem: 'Fictional dispute needing legal aid.', category: 'FAMILY_DOMESTIC', district: 'Dhaka', urgent: false, identityDocument: 'NONE', contactPhone: '',
   } })
   assert.equal(submitted.status, 201)
   const { applicationId } = submitted.data
@@ -89,7 +89,7 @@ test('Cancel: an accepted case needs DLAO officer approval, is blocked by an act
   const owner = await citizen('cancel.owner2')
 
   const submitted = await request('/api/citizen/applications', { method: 'POST', token: owner.token, body: {
-    applicantName: 'Fictional Accepted Applicant', problem: 'Fictional labour dispute.', district: 'Dhaka', urgent: false, identityDocument: 'NONE', contactPhone: '',
+    applicantName: 'Fictional Accepted Applicant', problem: 'Fictional labour dispute.', category: 'LABOUR_WAGE', district: 'Dhaka', urgent: false, identityDocument: 'NONE', contactPhone: '',
   } })
   const { applicationId } = submitted.data
   await request(`/api/applications/${applicationId}/review`, { method: 'POST', token: officer.token, body: {
@@ -167,7 +167,7 @@ test('Cancel: approval is blocked while a mediation is actively in progress', as
   const owner = await citizen('cancel.owner3')
 
   const submitted = await request('/api/citizen/applications', { method: 'POST', token: owner.token, body: {
-    applicantName: 'Fictional Mediation Applicant', problem: 'Fictional property dispute.', district: 'Dhaka', urgent: false, identityDocument: 'NONE', contactPhone: '',
+    applicantName: 'Fictional Mediation Applicant', problem: 'Fictional property dispute.', category: 'LAND_PROPERTY', district: 'Dhaka', urgent: false, identityDocument: 'NONE', contactPhone: '',
   } })
   const { applicationId } = submitted.data
   await request(`/api/applications/${applicationId}/review`, { method: 'POST', token: officer.token, body: {

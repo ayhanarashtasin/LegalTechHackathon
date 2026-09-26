@@ -7,6 +7,8 @@ import { daysOverdue } from '../utils/overdue.js'
 import { nextRecordId } from '../utils/recordId.js'
 import { extractionModel, outlineComplaint, speechModel } from './ai/groq.js'
 import { appendAudit, getAuditTrail } from './auditService.js'
+import { udcCanOpen } from './assistedService.js'
+import { categorySignals, categoryUrgencyReason } from './caseCategories.js'
 
 const intakeChannels = {
   HELPLINE_AGENT: 'HELPLINE_SIM',
@@ -21,8 +23,9 @@ export const lookupHash = (code) => createHash('sha256').update(code).digest('he
 const dhakaDay = (value) => new Date(new Date(value).getTime() + 6 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
 // Demo rules only (urgency criteria await law-team approval); the officer's priorityDecision stays the final priority.
-export function urgencyReasons({ urgentFact, aiSensitive, safetyNeedsReview, restrictedEvidence }) {
+export function urgencyReasons({ urgentFact, aiSensitive, safetyNeedsReview, restrictedEvidence, category, harassmentKeywords }) {
   return [
+    categoryUrgencyReason(category, harassmentKeywords),
     urgentFact && `An urgent fact is recorded (safety.urgent revision ${urgentFact.revision}, ${urgentFact.sourceType.replaceAll('_', ' ').toLowerCase()}).`,
     aiSensitive && 'AI flagged possible violence or danger in the intake words.',
     safetyNeedsReview && 'The voice safety answer needs human verification before anyone relies on a no-risk response.',
@@ -31,8 +34,8 @@ export function urgencyReasons({ urgentFact, aiSensitive, safetyNeedsReview, res
 }
 
 // What an officer weighs first. Each signal comes from a recorded fact or event; none is a judgement made here.
-function vulnerabilities({ urgent, representative, nidKnown, aiSensitive, safetyNeedsReview }) {
-  return [urgent && 'SAFETY_RISK', safetyNeedsReview && 'SAFETY_UNVERIFIED', representative && 'REPRESENTATIVE_CALLER', nidKnown === 'NO' && 'NID_UNKNOWN', aiSensitive && 'AI_FLAGGED_DANGER'].filter(Boolean)
+function vulnerabilities({ urgent, representative, nidKnown, aiSensitive, safetyNeedsReview, category, harassmentKeywords }) {
+  return [urgent && 'SAFETY_RISK', safetyNeedsReview && 'SAFETY_UNVERIFIED', representative && 'REPRESENTATIVE_CALLER', nidKnown === 'NO' && 'NID_UNKNOWN', aiSensitive && 'AI_FLAGGED_DANGER', ...categorySignals(category, harassmentKeywords)].filter(Boolean)
 }
 const latestValues = (facts) => { const values = {}; for (const fact of facts) values[fact.field] ??= fact.value; return values }
 
@@ -352,11 +355,12 @@ export async function acceptApplication(applicationId, reason, actor) {
     if (application.reviewState !== 'READY_FOR_DECISION') throw new HttpError(409, 'REVIEW_REQUIRED', 'Human review must be ready for decision before acceptance.')
     const updated = await Application.findOneAndUpdate(
       { applicationId, status: 'SUBMITTED', version: application.version },
-      { $set: { status: 'ACCEPTED', caseId, acceptedByUserId: actor.userId, acceptedAt: new Date() }, $inc: { version: 1, auditSequence: 1 } },
+      { $set: { status: 'ACCEPTED', caseId, acceptedByUserId: actor.userId, acceptedAt: new Date(), ...(application.assignedOfficerUserId ? {} : { assignedOfficerUserId: actor.userId }) }, $inc: { version: 1, auditSequence: 1 } },
       { returnDocument: 'after', session },
     )
     if (!updated) throw new HttpError(409, 'CONFLICT', 'The application changed. Refresh and retry.')
     await Case.create([{ caseId, applicationId, officeCode: application.officeCode, acceptedByUserId: actor.userId }], { session })
+    if (!application.assignedOfficerUserId) await grantRestrictedEvidence(applicationId, actor.userId, null, session)
     await Task.updateMany({ applicationId, status: 'OPEN' }, { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } }, { session })
     await Task.create([{
       applicationId,
@@ -750,19 +754,20 @@ export async function getApplication(applicationId, actor) {
   if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode) && !mediationAccess) {
     throw new HttpError(403, 'FORBIDDEN', 'This role cannot read the application.')
   }
-  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence, summaryFacts, complaintSummaryFact, safeContactProfile, cancellationRequest] = await Promise.all([
+  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence, summaryFacts, complaintSummaryFact, safeContactProfile, cancellationRequest, assignedOfficer] = await Promise.all([
     Person.findById(application.applicantPersonId).select('displayName identityStatus').lean(),
     Task.findOne({ applicationId, status: 'OPEN' }).sort({ createdAt: 1 }).select('title ownerRole nextAction dueAt').lean(),
     Representation.findOne({ applicationId }).sort({ createdAt: -1 }).populate('representativePersonId', 'displayName').lean(),
     AssistanceRecord.findOne({ applicationId }).populate('helperPersonId', 'displayName').populate('translatorPersonId', 'displayName').populate('typistPersonId', 'displayName').lean(),
     ConsentRecord.findOne({ applicationId, scope: 'ASSISTED_INTAKE' }).sort({ revision: -1 }).select('state').lean(),
     CaseFact.findOne({ applicationId, field: 'safety.urgent' }).sort({ revision: -1 }).select('value revision sourceType').lean(),
-    AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive newState.safetyNeedsReview').lean(),
+    AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive newState.safetyNeedsReview newState.harassmentKeywords').lean(),
     Document.countDocuments({ applicationId, sensitivity: 'RESTRICTED' }),
-    CaseFact.find({ applicationId, field: { $in: ['complaint.type', 'complaint.legal_need', 'identity.nid_known', 'incident.what', 'incident.when', 'incident.where', 'incident.who', 'location.district'] } }).sort({ revision: -1 }).select('field value').lean(),
+    CaseFact.find({ applicationId, field: { $in: ['complaint.category', 'complaint.type', 'complaint.legal_need', 'identity.nid_known', 'incident.what', 'incident.when', 'incident.where', 'incident.who', 'location.district'] } }).sort({ revision: -1 }).select('field value').lean(),
     CaseFact.findOne({ applicationId, field: 'complaint.summary' }).sort({ revision: -1 }).lean(),
     SafeContactProfile.findOne({ applicationId }).sort({ version: -1 }).lean(),
     CancellationRequest.findOne({ applicationId, status: 'OPEN' }).select('reason createdAt').lean(),
+    application.assignedOfficerUserId ? User.findById(application.assignedOfficerUserId).select('displayName').lean() : null,
   ])
   const summary = latestValues(summaryFacts)
   return {
@@ -770,7 +775,8 @@ export async function getApplication(applicationId, actor) {
     reviewState: application.reviewState, priorityDecision: application.priorityDecision ?? null, version: application.version, channel: application.channel,
     officeCode: application.officeCode, applicantName: person?.displayName ?? 'Unavailable',
     identityStatus: person?.identityStatus ?? 'INCOMPLETE', nextTask,
-    urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview, restrictedEvidence }),
+    assignedOfficer: assignedOfficer ? { id: assignedOfficer._id, name: assignedOfficer.displayName } : null,
+    urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview, restrictedEvidence, category: summary['complaint.category'], harassmentKeywords: submitted?.newState?.harassmentKeywords }),
     service: application.service ?? 'COMPLAINT',
     complaintSummary: complaintSummaryFact?.value ?? null,
     safeContactPhone: safeContactProfile?.contactValue ?? null,
@@ -788,7 +794,9 @@ export async function getApplication(applicationId, actor) {
     } : null,
     // AI suggestions from the caller's own account; the officer confirms or ignores them.
     complaintType: summary['complaint.type'] ?? null, legalNeed: summary['complaint.legal_need'] ?? null,
-    vulnerability: vulnerabilities({ urgent: urgentFact?.value === 'YES', representative: Boolean(representation), nidKnown: summary['identity.nid_known'], aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview }),
+    // The applicant's own choice of category on the digital form, not an officer's classification.
+    category: summary['complaint.category'] ?? null,
+    vulnerability: vulnerabilities({ urgent: urgentFact?.value === 'YES', representative: Boolean(representation), nidKnown: summary['identity.nid_known'], aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview, category: summary['complaint.category'], harassmentKeywords: submitted?.newState?.harassmentKeywords }),
     representation: representation ? {
       representativeName: representation.representativePersonId?.displayName ?? 'Unavailable',
       relationship: representation.relationship, authorityStatus: representation.authorityStatus,
@@ -833,13 +841,13 @@ export async function listWorkspace(role, actor) {
       .sort({ updatedAt: -1 }).select('applicationId caseId status reviewState priorityDecision channel applicantPersonId createdAt updatedAt').lean()
     const ids = applications.map(({ applicationId }) => applicationId)
     const summaryFields = dlaoView
-      ? ['complaint.type', 'identity.nid_known', 'complaint.summary']
-      : ['complaint.type', 'identity.nid_known']
+      ? ['complaint.category', 'complaint.type', 'identity.nid_known', 'complaint.summary']
+      : ['complaint.category', 'complaint.type', 'identity.nid_known']
     const [people, tasks, urgentFacts, aiEvents, restricted, referrals, lawyerUpdates, summaryFacts, representations, hearings] = await Promise.all([
       Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName identityStatus').lean(),
       Task.find({ applicationId: { $in: ids }, status: 'OPEN' }).select('applicationId kind dueAt createdAt nextAction').lean(),
       CaseFact.find({ applicationId: { $in: ids }, field: 'safety.urgent' }).sort({ revision: -1 }).select('applicationId value revision sourceType').lean(),
-      AuditEvent.find({ applicationId: { $in: ids }, action: 'APPLICATION_SUBMITTED' }).select('applicationId newState.aiSensitive newState.safetyNeedsReview').lean(),
+      AuditEvent.find({ applicationId: { $in: ids }, action: 'APPLICATION_SUBMITTED' }).select('applicationId newState.aiSensitive newState.safetyNeedsReview newState.harassmentKeywords').lean(),
       Document.find({ applicationId: { $in: ids }, sensitivity: 'RESTRICTED' }).select('applicationId').lean(),
       Referral.find({ applicationId: { $in: ids }, status: { $in: ['SENT', 'ACKNOWLEDGED'] } }).select('applicationId status dueAt receivingOfficeCode').lean(),
       LawyerUpdate.find({ applicationId: { $in: ids }, $or: [{ status: 'MISSED' }, { status: 'PENDING', dueAt: { $lte: new Date() } }] }).select('applicationId sequence status dueAt').lean(),
@@ -855,6 +863,7 @@ export async function listWorkspace(role, actor) {
     for (const fact of urgentFacts) if (!urgency.has(fact.applicationId)) urgency.set(fact.applicationId, fact.value === 'YES' && fact)
     const aiSensitive = new Set(aiEvents.filter((event) => event.newState?.aiSensitive).map((event) => event.applicationId))
     const safetyNeedsReview = new Set(aiEvents.filter((event) => event.newState?.safetyNeedsReview).map((event) => event.applicationId))
+    const harassmentKeywords = new Set(aiEvents.filter((event) => event.newState?.harassmentKeywords).map((event) => event.applicationId))
     const restrictedCounts = Map.groupBy(restricted, (item) => item.applicationId)
     const waiting = new Map(referrals.map((referral) => [referral.applicationId, referral]))
     const missedUpdates = Map.groupBy(lawyerUpdates, (item) => item.applicationId)
@@ -879,14 +888,15 @@ export async function listWorkspace(role, actor) {
         createdAt: item.createdAt, updatedAt: item.updatedAt,
         nextHearingAt: hearing?.nextHearingAt ?? null, nextAction: hearing?.nextAction ?? null,
         complaintType: summaries.get(item.applicationId)?.['complaint.type'] ?? null,
+        category: summaries.get(item.applicationId)?.['complaint.category'] ?? null,
         ...(dlaoView ? { problemSummary: problem ? {
           value: problem.value, sourceType: problem.sourceType,
           applicantConfirmed: problem.applicantConfirmed, aiInferred: problem.aiInferred,
         } : null } : {}),
         vulnerability: vulnerabilities({ urgent: Boolean(urgency.get(item.applicationId)), representative: represented.has(item.applicationId),
-          nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId) }),
+          nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), category: summaries.get(item.applicationId)?.['complaint.category'], harassmentKeywords: harassmentKeywords.has(item.applicationId) }),
         flags: queueFlags(item, identities.get(item.applicantPersonId.toString()), tasksByApplication.get(item.applicationId) ?? [],
-          urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0 }),
+          urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0, category: summaries.get(item.applicationId)?.['complaint.category'], harassmentKeywords: harassmentKeywords.has(item.applicationId) }),
           waiting.get(item.applicationId), missedUpdates.get(item.applicationId) ?? [], now, hearing?.nextHearingAt ?? null),
       }
     })
@@ -1044,7 +1054,7 @@ export async function listWorkspace(role, actor) {
   }
   if (role === 'UDC_OPERATOR') {
     const applications = await Application.find({ channel: 'UDC', officeCode: assignment.officeCode })
-      .sort({ createdAt: -1 }).limit(25).select('applicationId status reviewState applicantPersonId createdAt channel').lean()
+      .sort({ createdAt: -1 }).limit(25).select('applicationId status reviewState applicantPersonId createdAt channel assistedByUserId officeCode').lean()
     const people = await Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName').lean()
     const names = new Map(people.map((person) => [person._id.toString(), person.displayName]))
     return {
@@ -1056,6 +1066,7 @@ export async function listWorkspace(role, actor) {
         applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
         createdAt: item.createdAt,
         channel: item.channel,
+        canOpen: udcCanOpen(item, actor),
       })),
     }
   }
@@ -1363,6 +1374,34 @@ export async function getCase(caseId, actor) {
   }
 }
 
+// Restricted evidence opens to the assigned officer only: the previous assignee's grant goes, the uploader's stays.
+async function grantRestrictedEvidence(applicationId, officerUserId, previousUserId, session) {
+  if (previousUserId && !previousUserId.equals(officerUserId)) {
+    const uploads = await DocumentVersion.find({ applicationId, version: 1, recordedByUserId: previousUserId }).select('documentId').session(session).lean()
+    await Document.updateMany({ applicationId, sensitivity: 'RESTRICTED', _id: { $nin: uploads.map(({ documentId }) => documentId) } }, { $pull: { allowedUserIds: previousUserId } }, { session })
+  }
+  await Document.updateMany({ applicationId, sensitivity: 'RESTRICTED' }, { $set: { accessState: 'EXPLICIT_GRANT' }, $addToSet: { allowedUserIds: officerUserId } }, { session })
+}
+
+// A DLAO officer takes responsibility for the record; taking it over from a colleague needs a recorded reason.
+export async function assignOfficer(applicationId, { reason }, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const application = await officeApplication(applicationId, actor, session)
+    const previous = application.assignedOfficerUserId ?? null
+    if (previous?.equals(actor.userId)) throw new HttpError(409, 'ALREADY_ASSIGNED', 'You are already the assigned officer.')
+    if (previous && !reason) throw new HttpError(400, 'VALIDATION_ERROR', 'Give a reason for taking over from the assigned officer.')
+    const updated = await advance(application, session, { assignedOfficerUserId: actor.userId })
+    await grantRestrictedEvidence(applicationId, actor.userId, previous, session)
+    await appendAudit({
+      applicationId, caseId: application.caseId, sequence: updated.auditSequence, action: 'OFFICER_ASSIGNED',
+      actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
+      previousState: { assignedOfficerUserId: previous ? String(previous) : null }, newState: { assignedOfficerUserId: String(actor.userId) },
+      reason: reason || 'Officer took responsibility for the record.',
+    }, session)
+    return { applicationId, version: updated.version, assignedOfficer: { id: actor.userId, name: actor.displayName } }
+  })
+}
+
 const explicitlyGranted = (document, actor) => document.accessState === 'EXPLICIT_GRANT' && document.allowedUserIds.some((id) => id.equals(actor.userId))
 
 // Office roles read standard documents; restricted evidence needs a per-user grant or an active referral naming this user.
@@ -1426,7 +1465,7 @@ export async function createDocumentMetadata(applicationId, { label, qualityStat
     // Restricting at first upload leaves no window where every office role could read it; only the classifying officer is granted.
     const [document] = await Document.create([{
       applicationId, caseId: application.caseId, label, checklistItem, sensitivity,
-      ...(sensitivity === 'RESTRICTED' ? { accessState: 'EXPLICIT_GRANT', allowedUserIds: [actor.userId] } : {}),
+      ...(sensitivity === 'RESTRICTED' ? { accessState: 'EXPLICIT_GRANT', allowedUserIds: [...new Set([actor.userId, application.assignedOfficerUserId].filter(Boolean).map(String))] } : {}),
     }], { session })
     await DocumentVersion.create([{
       applicationId, caseId: application.caseId, documentId: document._id,

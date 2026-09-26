@@ -25,12 +25,16 @@ export function assistedParam(request, _response, next) {
 }
 
 export function validateAssistedCreate(request, _response, next) {
-  const value = body(request, ['temporaryId', 'clientMutationId', 'offlineCreatedAt', 'applicantName', 'translatorName', 'typistName', 'helperPhone', 'originalLanguage', 'originalStatement', 'translatedStatement', 'caseType', 'consentAttestation', 'originalConfirmed', 'translationConfirmed', 'contactChannel', 'contactValue', 'safeTime'])
+  const value = body(request, ['temporaryId', 'clientMutationId', 'offlineCreatedAt', 'applicantName', 'translatorName', 'typistName', 'helperPhone', 'originalLanguage', 'originalStatement', 'translatedStatement', 'caseType', 'consentAttestation', 'originalConfirmed', 'translationConfirmed', 'contactChannel', 'contactValue', 'safeTime', 'plaintiffName', 'defendantName', 'defendantRelationship'])
   id(value.temporaryId, 'Temporary ID')
   id(value.clientMutationId, 'Mutation ID')
   value.applicantName = words(value.applicantName, 'Applicant name', 2, 120)
   value.translatorName = words(value.translatorName, 'Translator name', 2, 120)
   value.typistName = words(value.typistName, 'Typist name', 2, 120)
+  // Every complaint names the plaintiff (বাদী) and the defendant (বিবাদী).
+  value.plaintiffName = words(value.plaintiffName, 'Plaintiff (Badi) name', 2, 120)
+  value.defendantName = words(value.defendantName, 'Defendant (Bibadi) name', 2, 120)
+  if (value.defendantRelationship !== undefined) value.defendantRelationship = words(value.defendantRelationship, 'Relationship to the defendant', 2, 80)
   value.originalLanguage = words(value.originalLanguage, 'Original language', 2, 60)
   value.originalStatement = words(value.originalStatement, 'Original statement', 5, 4000)
   value.translatedStatement = words(value.translatedStatement, 'Translated statement', 5, 4000)

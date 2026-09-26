@@ -575,7 +575,7 @@ test('Step 7 assisted offline sync is idempotent, provenance-safe, and conflicts
   assert.equal((await request('/api/applications', { method: 'POST', token: udc.token, body: {} })).status, 403)
   const payload = (number) => ({
     temporaryId: randomUUID(), clientMutationId: randomUUID(), offlineCreatedAt: new Date().toISOString(),
-    applicantName: `Fictional Nuching ${number}`, translatorName: 'Fictional Marma translator', typistName: 'Fictional UDC typist',
+    applicantName: `Fictional Nuching ${number}`, plaintiffName: `Fictional Nuching ${number}`, defendantName: 'Fictional landholder', translatorName: 'Fictional Marma translator', typistName: 'Fictional UDC typist',
     helperPhone: '01700000000', originalLanguage: 'Marma', originalStatement: `Original Marma statement ${number}`,
     translatedStatement: `Translated Bangla statement ${number}`, caseType: 'LAND',
     consentAttestation: 'The fictional applicant gave oral consent through the named translator.',
@@ -597,6 +597,24 @@ test('Step 7 assisted offline sync is idempotent, provenance-safe, and conflicts
   const { input, applicationId } = created[0]
   assert.equal((await request('/api/assisted', { method: 'POST', token: udc.token, body: { ...input, originalStatement: 'Different text using same mutation ID' } })).data.error.code, 'IDEMPOTENCY_CONFLICT')
   assert.equal((await request(`/api/assisted/${applicationId}`, { token: otherUdc.token })).status, 403)
+  // Every UDC complaint names the plaintiff and defendant; the worker reads back everything they submitted.
+  const withoutDefendant = payload(9)
+  delete withoutDefendant.defendantName
+  assert.equal((await request('/api/assisted', { method: 'POST', token: udc.token, body: withoutDefendant })).status, 400)
+  const readBack = (await request(`/api/assisted/${applicationId}`, { token: udc.token })).data
+  assert.equal(readBack.applicantName, input.applicantName)
+  assert.equal(readBack.plaintiffName, input.plaintiffName)
+  assert.equal(readBack.defendantName, 'Fictional landholder')
+  assert.equal(readBack.translatorName, 'Fictional Marma translator')
+  assert.equal(readBack.consentAttestation, input.consentAttestation)
+  assert.equal(readBack.safeTime, 'Weekday morning')
+  assert.equal(readBack.contactValue, undefined)
+  const stored = await models.Application.findOne({ applicationId }).lean()
+  assert.equal(stored.petitioner.name, input.plaintiffName)
+  assert.equal(stored.respondent.name, 'Fictional landholder')
+  const udcRows = (await request('/api/workspace?role=UDC_OPERATOR', { token: udc.token })).data.records
+  assert.equal(udcRows.find((row) => row.applicationId === applicationId).canOpen, true)
+  assert.equal((await request('/api/workspace?role=UDC_OPERATOR', { token: otherUdc.token })).data.records.find((row) => row.applicationId === applicationId)?.canOpen ?? false, false)
   const profile = await models.SafeContactProfile.findOne({ applicationId }).lean()
   assert.deepEqual(profile.allowedChannels, ['IN_PERSON'])
   assert.equal(profile.contactValue, undefined)
@@ -646,7 +664,7 @@ test('Step 7 document briefing cites readable fictional text, exposes missing/un
     const officer = await actor('test7.docsofficer', 'DLAO_OFFICER')
     const support = await actor('test7.docssupport', 'CASE_SUPPORT')
     const created = await request('/api/assisted', { method: 'POST', token: udc.token, body: {
-      temporaryId: randomUUID(), clientMutationId: randomUUID(), applicantName: 'Fictional Nuching',
+      temporaryId: randomUUID(), clientMutationId: randomUUID(), applicantName: 'Fictional Nuching', plaintiffName: 'Fictional Nuching', defendantName: 'Fictional landholder',
       translatorName: 'Fictional translator', typistName: 'Fictional typist', originalLanguage: 'Marma',
       originalStatement: 'Fictional original Marma account.', translatedStatement: 'Fictional Bangla account about land.',
       caseType: 'LAND', consentAttestation: 'Fictional oral consent was given after translation.',

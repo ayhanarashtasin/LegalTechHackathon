@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import { Application, CancellationRequest, Case, CaseFact, Document, DocumentVersion, LawyerAssignment, LawyerChangeRequest, Mediation, Person, SafeContactProfile, Task, User } from '../models/index.js'
 import { advance, requireOpenCase } from './applicationService.js'
 import { appendAudit } from './auditService.js'
+import { CASE_CATEGORIES, isCaseCategory, mentionsOnlineHarassment } from './caseCategories.js'
 import { HttpError } from '../utils/httpError.js'
 import { nextRecordId } from '../utils/recordId.js'
 
@@ -260,6 +261,7 @@ export async function cancelOrRequestCancellation(applicationId, { reason }, act
 export async function submitDigitalApplication(input, actor) {
   const {
     problem,
+    category,
     district,
     urgent,
     contactPhone,
@@ -279,6 +281,16 @@ export async function submitDigitalApplication(input, actor) {
   if (!district || !district.trim()) {
     throw new HttpError(400, 'DISTRICT_REQUIRED', 'Please select or enter your district.')
   }
+  if (!isCaseCategory(category)) {
+    throw new HttpError(400, 'CATEGORY_REQUIRED', 'Please choose the type of your legal matter.')
+  }
+  // What the chosen category puts in front of people: advice goes to a helpline callback instead of a case, a
+  // criminal-aid applicant's documents start restricted, and "other" asks the officer to choose the category.
+  const rule = CASE_CATEGORIES[category]
+  const advice = Boolean(rule.advice)
+  // Words naming non-consensual imagery / online harassment get the same flag and restriction as choosing that category.
+  const harassmentKeywords = !advice && !rule.urgent && mentionsOnlineHarassment(problem)
+  const sensitivity = rule.restricted || harassmentKeywords ? 'RESTRICTED' : 'STANDARD'
 
   const user = await User.findById(actor.userId)
   const effectiveApplicantName = (applicantName || user?.displayName || user?.username || 'Citizen Applicant').trim()
@@ -294,6 +306,8 @@ export async function submitDigitalApplication(input, actor) {
     }], { session })
 
     const factValues = [
+      ['complaint.category', category],
+      ...(advice ? [['advice.topic', problem.trim()]] : []),
       ['complaint.summary', problem.trim()],
       ['location.district', district.trim()],
       ['safety.urgent', urgent ? 'YES' : 'NO'],
@@ -356,7 +370,7 @@ export async function submitDigitalApplication(input, actor) {
         applicationId,
         label: 'National ID (NID) Card',
         checklistItem: 'Applicant identity evidence',
-        sensitivity: 'STANDARD',
+        sensitivity,
         currentVersion: 1,
       }], { session })
 
@@ -382,7 +396,7 @@ export async function submitDigitalApplication(input, actor) {
         applicationId,
         label: 'Birth Registration Certificate',
         checklistItem: 'Applicant identity evidence',
-        sensitivity: 'STANDARD',
+        sensitivity,
         currentVersion: 1,
       }], { session })
 
@@ -408,7 +422,7 @@ export async function submitDigitalApplication(input, actor) {
         applicationId,
         label: 'Prottayonpotro (Chairman/Councilor Certificate)',
         checklistItem: 'Income/Insolvency Certificate (প্রত্যয়নপত্র)',
-        sensitivity: 'STANDARD',
+        sensitivity,
         currentVersion: 1,
       }], { session })
 
@@ -440,7 +454,7 @@ export async function submitDigitalApplication(input, actor) {
           applicationId,
           label: extra.label?.trim() || extra.filename || 'Extra Supporting Evidence',
           checklistItem: 'Available supporting record',
-          sensitivity: 'STANDARD',
+          sensitivity,
           currentVersion: 1,
         }], { session })
 
@@ -475,19 +489,32 @@ export async function submitDigitalApplication(input, actor) {
       recordedByUserId: actor.userId,
     }], { session })
 
-    await Task.create([{
+    await Task.create(advice ? [{
+      applicationId,
+      kind: 'ADVICE_CALLBACK',
+      ownerRole: 'HELPLINE_AGENT',
+      title: 'Call back with legal information',
+      nextAction: 'The applicant asked for guidance only. Call back on the safe number at the safe time; if formal legal aid is needed, record it for DLAO review.',
+    }] : [{
       applicationId,
       kind: 'INTAKE_REVIEW',
       ownerRole: 'DLAO_OFFICER',
-      title: urgent ? 'Urgent citizen digital application' : 'Review citizen digital application',
+      title: urgent || rule.urgent || harassmentKeywords ? 'Urgent citizen digital application' : 'Review citizen digital application',
       nextAction: 'Review submitted complaint facts, district jurisdiction, and safe contact profile; determine legal aid eligibility.',
-    }], { session })
+    }, ...(rule.needsCategory ? [{
+      applicationId,
+      kind: 'MANUAL',
+      ownerRole: 'DLAO_OFFICER',
+      title: 'Choose the case category',
+      nextAction: 'The applicant chose "Other". Read the description and record the right case category.',
+    }] : [])], { session, ordered: true })
 
     const [createdApp] = await Application.create([{
       applicationId,
       applicantPersonId: person._id,
       officeCode: 'DEMO',
       channel: 'WEB',
+      service: advice ? 'ADVICE' : 'COMPLAINT',
       submittedByUserId: actor.userId,
       citizenUserId: actor.userId.toString(),
       auditSequence: 0,
@@ -503,6 +530,9 @@ export async function submitDigitalApplication(input, actor) {
         applicantPersonId: person.id,
         documentsAttached: createdDocuments.length,
         identityDocument: identityDocument || 'NONE',
+        category,
+        service: advice ? 'ADVICE' : 'COMPLAINT',
+        ...(harassmentKeywords ? { harassmentKeywords: true } : {}),
       },
       'Citizen submitted application digitally via citizen portal with supporting documents.',
       actor.userId,
@@ -525,7 +555,10 @@ export async function submitDigitalApplication(input, actor) {
       applicationId,
       status: 'SUBMITTED',
       documentsCount: createdDocuments.length,
-      message: 'Your application has been successfully submitted and forwarded to the DLAO officer for review.',
+      service: advice ? 'ADVICE' : 'COMPLAINT',
+      message: advice
+        ? 'Your request for legal information has been sent to the 16699 helpline, which will call you back.'
+        : 'Your application has been successfully submitted and forwarded to the DLAO officer for review.',
     }
   })
 }
