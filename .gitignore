@@ -12,3 +12,4 @@ tts-service/models/
 __pycache__/
 .DS_Store
 Thumbs.db
+.playwright-mcp/
