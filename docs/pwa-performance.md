@@ -4,7 +4,7 @@
 
 The app can be installed from a production build. Its service worker precaches the HTML shell, manifest, icons, and entry JavaScript/CSS. It caches same-origin `/assets/` files when opened, including provider-page chunks. Public voice intake and UDC assisted intake stay in the entry bundle so their screens can open after the shell has been cached. Provider pages download when visited; a provider page that has never been opened may be unavailable offline, and its live case data always needs the API.
 
-On a first visit, the browser's Save-Data preference, 2G connection hint, or reduced-data preference selects light mode. The user can switch modes in the header; that explicit choice is retained. Both modes render the same text questions and use the same initial shell. During a Bangla voice call, light mode skips recorded question audio and the audio-file availability probes. A notice on the voice screen explains that Normal mode restores recorded prompts. Light mode does not make the initial shell smaller than Normal mode.
+On a first visit, the browser's Save-Data preference, 2G connection hint, or reduced-data preference selects light mode. The user can switch modes in the header; that explicit choice is retained. Both modes render the same text questions and use the same initial shell. During a voice call, light mode skips recorded question audio and the audio-file availability probes. A notice on the voice screen explains that Normal mode restores recorded prompts. Light mode does not make the initial shell smaller than Normal mode.
 
 ## Reproducible browser measurement
 

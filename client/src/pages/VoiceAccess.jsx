@@ -8,8 +8,9 @@ import { getLang, useLang } from '../components/Bi.jsx'
 // after the beep, the caller answers by voice (then pauses or presses #) or on the keypad. A spoken number (phone or
 // NID) is read back digit by digit for the caller to confirm, so it is taken by voice only once those clips exist.
 // A complaint ends by reading out the application number and status PIN; an advice request ends with a callback.
-// The whole call is recorded under the greeting's notice. The clips are recorded in Bangla only, so English mode shows
-// the questions as text and skips the clips (like light mode) until English recordings exist.
+// The whole call is recorded under the greeting's notice. 16699 is a Bangla line, so its Bangla clips play whatever the
+// site language is; English mode shows the questions as English text and has the browser read them only if the clips
+// cannot play. Light mode skips the clips to save data, and says so on screen.
 const copies = { bn: {
   simulation: 'ওয়েবে তৈরি নমুনা কল · আসল ১৬৬৯৯ ফোনসেবা নয়',
   call: 'কল করুন',
@@ -150,21 +151,27 @@ const kindOf = (field) => (!field ? 'READBACK' : steps[field].choices ? 'CHOICE'
 
 const PhoneIcon = () => <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.6 21 3 13.4 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.6a1 1 0 0 1-.25 1z" /></svg>
 
-// Plays recorded clips in order. Resolves true when they finish (a missing clip is skipped), false when stopped.
+// Plays recorded clips in order. Resolves true when they finish (a missing clip is skipped), 'FAILED' when none could
+// play, false when stopped.
 function createClipPlayer() {
   const audio = new Audio()
   let settle = null
   const playOne = (clip) => new Promise((resolve) => {
     settle = resolve
-    audio.onended = () => resolve(true)
-    audio.onerror = () => resolve(true)
+    audio.onended = () => resolve('PLAYED')
+    audio.onerror = () => resolve('FAILED')
     audio.src = `/audio/${clip}.mp3`
-    audio.play().catch(() => resolve(true))
+    audio.play().catch(() => resolve('FAILED'))
   })
   return {
     async play(clips) {
-      for (const clip of clips) if (!await playOne(clip)) return false
-      return true
+      let played = false
+      for (const clip of clips) {
+        const result = await playOne(clip)
+        if (!result) return false
+        played ||= result === 'PLAYED'
+      }
+      return played || !clips.length || 'FAILED'
     },
     speak(text, lang = 'en-US') {
       return new Promise((resolve) => {
@@ -293,7 +300,7 @@ export default function VoiceAccess({ session, lightMode }) {
   const editDigits = (update) => setDigitState({ turn, value: update(digits) })
 
   useEffect(() => {
-    if (!call || lightMode || language !== 'bn' || checkedClipsCallRef.current === callIdRef.current) return
+    if (!call || lightMode || checkedClipsCallRef.current === callIdRef.current) return
     const callId = callIdRef.current
     checkedClipsCallRef.current = callId
     Promise.all(READ_BACK_CLIPS.map(clipExists)).then((found) => {
@@ -302,7 +309,7 @@ export default function VoiceAccess({ session, lightMode }) {
     clipExists('numberWrong').then((found) => {
       if (callId === callIdRef.current) numberWrongRef.current = found
     })
-  }, [call, lightMode, language])
+  }, [call, lightMode])
 
   // Each question (or a repeat) takes focus for screen readers, plays its clip, then waits for the caller.
   const askTurn = useEffectEvent(async () => {
@@ -318,20 +325,14 @@ export default function VoiceAccess({ session, lightMode }) {
     const ask = done ? endClips(call, submission) : kind === 'CONFIRM' ? [...digitClips(spokenNumber), 'numberConfirm'] : [field ?? 'readback']
     const clips = [...leadRef.current, ...intros, ...ask]
     leadRef.current = []
-    let finished = lightMode
-    if (!finished) {
-      if (bn()) {
-        finished = await playerRef.current.play(clips)
-      } else if (typeof window !== 'undefined' && window.speechSynthesis) {
-        const promptText = done
-          ? (modeOf(call) === 'ADVICE' ? `${copy.adviceDone}. ${copy.adviceNext}` : `${copy.submitted}. ${copy.review}`)
-          : kind === 'CONFIRM'
-            ? `${copy.heardNumber}: ${spokenNumber}. Press 1 if correct, press 2 if wrong.`
-            : field ? promptOf(field) : copy.readback
-        finished = await playerRef.current.speak(promptText, 'en-US')
-      } else {
-        finished = true
-      }
+    let finished = lightMode || await playerRef.current.play(clips)
+    if (finished === 'FAILED' && !bn()) {
+      const promptText = done
+        ? (modeOf(call) === 'ADVICE' ? `${copy.adviceDone}. ${copy.adviceNext}` : `${copy.submitted}. ${copy.review}`)
+        : kind === 'CONFIRM'
+          ? `${copy.heardNumber}: ${spokenNumber}. Press 1 if correct, press 2 if wrong.`
+          : field ? promptOf(field) : copy.readback
+      finished = await playerRef.current.speak(promptText, 'en-US')
     }
     if (finished && run === runRef.current && !done) listen()
   })
@@ -375,7 +376,7 @@ export default function VoiceAccess({ session, lightMode }) {
   // working. The number is spoken only when its read-back will be heard. Without voice, a spoken question opens the
   // typed answer and the rest wait for keys.
   function listen() {
-    const readBackHeard = (readBackReadyRef.current && bn() && !lightMode) || (!bn() && typeof window !== 'undefined' && typeof speechSynthesis !== 'undefined')
+    const readBackHeard = !lightMode && (readBackReadyRef.current || (!bn() && typeof speechSynthesis !== 'undefined'))
     if (voiceOff || !streamRef.current || (kind === 'DIGITS' && !readBackHeard)) return waitForKeys()
     const words = kind === 'SPOKEN' || kind === 'DIGITS'
     try {
@@ -713,7 +714,7 @@ export default function VoiceAccess({ session, lightMode }) {
                   <p>{copy.review}</p>
                   <p className="call-code">{copy.code}: <strong translate="no">{bnDigits(submission.lookupCode)}</strong></p>
                   <p className="muted">{copy.codeNote}</p></>}
-              {bn() && !lightMode && <button type="button" className="text-button" onClick={() => repeat()}>{copy.repeatKey}</button>}
+              {!lightMode && <button type="button" className="text-button" onClick={() => repeat()}>{copy.repeatKey}</button>}
               {submission.status === 'UPLOADING_RECORDING' && <p role="status">{copy.uploading}</p>}
               {submission.status === 'RECORDING_FAILED' && <p role="alert" className="error">{!pendingRecordingRef.current ? copy.recordingMissing : submission.retryable ? copy.recordingFailed : copy.recordingUnavailable}</p>}
               {submission.status === 'RECORDING_FAILED' && submission.retryable && <button type="button" className="secondary-button" onClick={() => uploadRecording(submission)}>{copy.retryRecording}</button>}
