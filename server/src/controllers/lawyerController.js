@@ -1,6 +1,6 @@
 import {
-  assignLawyer, getLawyerActivity, getLawyerManagement, getLawyerWorklist, remindLawyerUpdate, requestLawyerChange,
-  respondToAssignment, reviewLawyerChange, reviewLawyerHold, scheduleLawyerUpdate, submitLawyerUpdate, updateCasePlan,
+  assignLawyer, getLawyerActivity, getLawyerAvailability, getLawyerManagement, getLawyerWorklist, remindLawyerUpdate, requestLawyerChange,
+  respondToAssignment, reviewLawyerChange, reviewLawyerHold, scheduleLawyerUpdate, setLawyerAvailability, submitLawyerUpdate, updateCasePlan,
   updateLawyerPaymentStatus,
 } from '../services/lawyerService.js'
 
@@ -55,3 +55,13 @@ export async function holdReview(request, response) {
 export async function paymentStatus(request, response) {
   response.status(201).json(await updateLawyerPaymentStatus(request.params.assignmentId, request.body, request.auth))
 }
+
+export async function lawyerAvailability(request, response) {
+  response.json(await getLawyerAvailability(request.auth.userId))
+}
+
+export async function updateAvailability(request, response) {
+  const { acceptingCases } = request.body || {}
+  response.json(await setLawyerAvailability(request.auth.userId, acceptingCases))
+}
+

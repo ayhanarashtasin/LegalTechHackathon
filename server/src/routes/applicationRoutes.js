@@ -37,10 +37,10 @@ router.get('/:applicationId/facts', applicationIdParam, requireRole('DLAO_OFFICE
 router.post('/:applicationId/facts', applicationIdParam, requireRole('DLAO_OFFICER'), validateFact, recordFact)
 router.post('/:applicationId/facts/:factId/corrections', applicationIdParam, factIdParam, requireRole('DLAO_OFFICER'), validateCorrection, recordCorrection)
 router.post('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER'), validateSafeContact, updateSafeContact)
-router.get('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER'), readSafeContact)
+router.get('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER', 'PANEL_LAWYER'), readSafeContact)
 router.post('/:applicationId/consents', applicationIdParam, requireRole('DLAO_OFFICER'), validateConsent, addConsent)
 router.get('/:applicationId/audit', applicationIdParam, requireRole('DLAO_OFFICER'), readAudit)
 router.get('/:applicationId/history', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), readHistory)
-router.get('/:applicationId/transcript', applicationIdParam, requireRole('DLAO_OFFICER'), readTranscript)
-router.get('/:applicationId/recording', applicationIdParam, requireRole('DLAO_OFFICER'), readRecording)
+router.get('/:applicationId/transcript', applicationIdParam, requireRole('DLAO_OFFICER', 'PANEL_LAWYER'), readTranscript)
+router.get('/:applicationId/recording', applicationIdParam, requireRole('DLAO_OFFICER', 'PANEL_LAWYER'), readRecording)
 export default router

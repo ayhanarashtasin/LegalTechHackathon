@@ -209,9 +209,74 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
 
         {data.assignments.length === 0 ? <p className="muted"><Bi en="No lawyer yet." bn="এখনো আইনজীবী নিযুক্ত হননি।" /></p> : <ul className="plain-list">{data.assignments.map((item) => <li key={item.id}><div><strong>{item.lawyerName}</strong> <Badge code={item.status} />{!item.active && <small className="muted"> · <Bi en="past" bn="পূর্ববর্তী" /></small>}{item.hold && <p><small><Bi en="Hold" bn="স্থগিতাদেশ" />: <Term code={item.hold.reviewState} /></small></p>}</div>{item.active && item.lawyerUserId && <button type="button" className="secondary-button" aria-expanded={activity?.lawyerUserId === String(item.lawyerUserId)} onClick={() => toggleActivity(item.lawyerUserId)}><Bi en="Review activity" bn="কার্যক্রম পর্যালোচনা" /></button>}</li>)}</ul>}
         {pendingAssignments.length > 0 && <p role="status"><Bi en="Waiting for the lawyer to accept or decline." bn="নিয়োগ প্রস্তাবে আইনজীবীর আনুষ্ঠানিক সম্মতির অপেক্ষায় রয়েছে।" /></p>}
+
+        {/* Panel Lawyers Directory & Availability Roster */}
+        {data.panelLawyers?.length > 0 && (
+          <div style={{ margin: '1rem 0', background: '#fafaf8', border: '1px solid #eaeaea', borderRadius: '7px', padding: '0.85rem 1rem' }}>
+            <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.92rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span><Bi en="Panel Lawyer Directory & Availability" bn="প্যানেল আইনজীবীদের তালিকা ও প্রাপ্যতা স্থিতি" /></span>
+              <span className="muted" style={{ fontSize: '0.8rem', fontWeight: 400 }}>
+                {bi(`${data.panelLawyers.length} lawyers on panel`, `প্যানেলে মোট ${num(data.panelLawyers.length)} জন আইনজীবী`)}
+              </span>
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '0.65rem' }}>
+              {data.panelLawyers.map((person) => {
+                const isAccepting = person.acceptingCases !== false
+                const isSelected = lawyerUserId === String(person.id)
+                return (
+                  <div
+                    key={person.id}
+                    onClick={() => setLawyerUserId(String(person.id))}
+                    style={{
+                      padding: '0.6rem 0.75rem',
+                      background: isSelected ? '#f5f8f5' : '#ffffff',
+                      border: isSelected ? '1.5px solid #28562d' : '1px solid #e2e2dc',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                      <strong style={{ fontSize: '0.88rem' }}>{person.displayName}</strong>
+                      <span className={`availability-badge ${isAccepting ? 'accepting' : 'not-accepting'}`} style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}>
+                        <span className="availability-dot" />
+                        {isAccepting ? bi('Accepting', 'প্রস্তুত') : bi('Not Accepting', 'স্থগিত')}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span style={{ textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 600, fontSize: '0.72rem', background: '#ececec', padding: '0.1rem 0.35rem', borderRadius: '3px' }}>
+                        {person.userType || 'lawyer'}
+                      </span>
+                      <span>{person.username || person.email}</span>
+                    </div>
+                    {person.hold?.newAssignmentHold && (
+                      <small style={{ color: '#9f2f2d', display: 'block', marginTop: '0.2rem' }}>
+                        <Bi en="Assignment on hold" bn="নতুন বরাদ্দ স্থগিত" />
+                      </small>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         <AddForm en="Offer to a lawyer" bn="প্যানেল আইনজীবীকে নিয়োগের প্রস্তাব পাঠান">
           <form onSubmit={offerAssignment} className="form-stack inline-form">
-            <label htmlFor="panel-lawyer"><Bi en="Panel lawyer" bn="প্যানেল আইনজীবী" /></label><select id="panel-lawyer" value={lawyerUserId} onChange={(event) => setLawyerUserId(event.target.value)} required><option value="">{bi('Choose', 'আইনজীবী নির্বাচন করুন')}</option>{data.panelLawyers.map((person) => <option key={person.id} value={person.id} disabled={person.hold?.newAssignmentHold}>{person.displayName}{person.hold?.newAssignmentHold ? ` · ${bi('on hold', 'বরাদ্দ স্থগিত')}` : ''}</option>)}</select>
+            <label htmlFor="panel-lawyer"><Bi en="Panel lawyer" bn="প্যানেল আইনজীবী" /></label>
+            <select id="panel-lawyer" value={lawyerUserId} onChange={(event) => setLawyerUserId(event.target.value)} required>
+              <option value="">{bi('Choose panel lawyer…', 'প্যানেল আইনজীবী নির্বাচন করুন…')}</option>
+              {data.panelLawyers.map((person) => {
+                const isAccepting = person.acceptingCases !== false
+                const statusTag = isAccepting ? bi('[Accepting]', '[মামলা গ্রহণে প্রস্তুত]') : bi('[Not Accepting]', '[মামলা গ্রহণ স্থগিত]')
+                const holdTag = person.hold?.newAssignmentHold ? ` · ${bi('on hold', 'বরাদ্দ স্থগিত')}` : ''
+                return (
+                  <option key={person.id} value={person.id}>
+                    {person.displayName} · {person.userType || 'lawyer'} ({person.username || person.email}) — {statusTag}{holdTag}
+                  </option>
+                )
+              })}
+            </select>
             <label htmlFor="assignment-change-request"><Bi en="Linked change request" bn="আইনজীবী পরিবর্তনের আবেদন সূত্র" /></label><select id="assignment-change-request" value={changeRequestId} onChange={(event) => setChangeRequestId(event.target.value)}><option value="">{bi('None: officer decision', 'প্রযোজ্য নয়: সরাসরি কর্মকর্তার সিদ্ধান্ত')}</option>{approvedRequests.map((item) => <option key={item.id} value={item.id}>{bi('Approved request', 'অনুমোদিত আবেদন')} · {when(item.createdAt)}</option>)}</select>
             <label htmlFor="assignment-reason"><Bi en="Reason" bn="নিয়োগের কারণ ও আইনি নির্দেশনা" /></label><textarea id="assignment-reason" value={assignmentReason} onChange={(event) => setAssignmentReason(event.target.value)} minLength="10" maxLength="500" required />
             <button type="submit" disabled={busy || !lawyerUserId || pendingAssignments.length > 0 || canBearCosts}><Bi en="Send offer" bn="নিয়োগের প্রস্তাব পাঠান" /></button>

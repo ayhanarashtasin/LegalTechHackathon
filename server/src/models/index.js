@@ -10,12 +10,14 @@ const userSchema = new Schema({
   username: { type: String, required: true, unique: true, lowercase: true, trim: true },
   displayName: { type: String, required: true },
   passwordHash: { type: String, required: true, select: false },
+  userType: { type: String, trim: true, lowercase: true, index: true },
   nid: { type: String, trim: true },
   phone: { type: String, trim: true },
   district: { type: String, trim: true },
   safeTimeWindow: { type: String, trim: true },
   personId: ref('Person', false),
   active: { type: Boolean, default: true },
+  acceptingCases: { type: Boolean, default: true },
   fictional: { type: Boolean, default: true },
 }, { timestamps: true })
 export const User = model('User', userSchema)

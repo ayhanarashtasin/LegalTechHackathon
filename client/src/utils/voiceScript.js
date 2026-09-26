@@ -34,7 +34,7 @@ const flow = [['service'], ['adviceTopic', advice],
   ['callerRole', complaint], ['callerName', complaint], ['relationship', representative], ['applicantName', representative],
   ['district', complaint], ['nidKnown', complaint], ['nid', (answers) => complaint(answers) && answers.nidKnown === true],
   ['problem', complaint], ['urgent', complaint], ['contactChannel', complaint],
-  ['contactValue', (answers) => advice(answers) || (complaint(answers) && answers.contactChannel === 'PHONE')],
+  ['contactValue', (answers) => advice(answers) || (complaint(answers) && answers.contactChannel === 'PHONE') || Boolean(answers.contactValue)],
   ['trustedPerson', trusted], ['trustedPhone', trusted], ['safeTime', (answers) => answers.service !== undefined]]
 
 export const startCall = () => ({ answers: {}, previous: {}, corrected: [], aiFields: [], safetyNoPending: false })
@@ -69,12 +69,16 @@ export function correct(call, field) {
 // The first choice travels as `mode`; every other active answer is sent for the server to validate again.
 export function payload(call, { confirmation = 'BUTTON', transcript = [] } = {}) {
   const fields = activeFields(call).filter((field) => field !== 'service')
+  const answers = Object.fromEntries(fields.map((field) => [field, call.answers[field]]))
+  if (call.answers.contactValue && !answers.contactValue) {
+    answers.contactValue = call.answers.contactValue
+  }
   return {
     mode: modeOf(call),
     confirmation,
     // The model may flag possible danger in the caller's words; only a human acts on it.
     ...(call.aiSensitive ? { aiSensitive: true } : {}),
-    answers: Object.fromEntries(fields.map((field) => [field, call.answers[field]])),
+    answers,
     correctedFields: call.corrected.filter((field) => fields.includes(field)),
     aiFields: call.aiFields.filter((field) => fields.includes(field)),
     // The whole call is recorded under the greeting's notice, so its transcript is kept with it.

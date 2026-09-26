@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import {
   assignment, assignmentResponse, casePlan, changeRequest, changeReview, holdReview, lawyerActivity,
-  management, paymentStatus, progressUpdate, scheduleUpdate, updateReminder, worklist,
+  lawyerAvailability, management, paymentStatus, progressUpdate, scheduleUpdate, updateAvailability, updateReminder, worklist,
 } from '../controllers/lawyerController.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { applicationIdParam, validateEmptyBody } from '../validators/requests.js'
@@ -13,6 +13,8 @@ import {
 
 const router = Router()
 router.use(requireAuth)
+router.get('/availability', requireRole('PANEL_LAWYER'), lawyerAvailability)
+router.put('/availability', requireRole('PANEL_LAWYER'), updateAvailability)
 router.get('/worklist', requireRole('PANEL_LAWYER'), worklist)
 router.get('/applications/:applicationId', applicationIdParam, requireRole('DLAO_OFFICER'), management)
 router.post('/applications/:applicationId/case-plan', applicationIdParam, requireRole('DLAO_OFFICER'), validateCasePlan, casePlan)

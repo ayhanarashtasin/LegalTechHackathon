@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api } from '../services/api.js'
-import { bi, num, overdueText, say, tr, when } from '../components/Bi.jsx'
+import { Bi, bi, num, overdueText, say, tr, when } from '../components/Bi.jsx'
 
 const roles = {
   DLAO_OFFICER: [['DLAO officer', 'ডিএলএও কর্মকর্তা'], ['Review the shared queue and make recorded human decisions.', 'সবার কার্যতালিকা পর্যালোচনা করুন এবং সিদ্ধান্তের যৌক্তিকতা নথিভুক্ত করুন।']],
@@ -84,6 +84,40 @@ export default function Dashboard({ session }) {
   const [queue, setQueue] = useState('ALL')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [acceptingCases, setAcceptingCases] = useState(() => session.user.acceptingCases ?? true)
+  const [togglingAvailability, setTogglingAvailability] = useState(false)
+  const [lawyerFilter, setLawyerFilter] = useState('ALL')
+
+  useEffect(() => {
+    if (role === 'PANEL_LAWYER') {
+      api('/api/lawyers/availability', { token: session.token })
+        .then((res) => { if (typeof res.acceptingCases === 'boolean') setAcceptingCases(res.acceptingCases) })
+        .catch(() => {})
+    }
+  }, [role, session.token])
+
+  async function handleToggleAvailability() {
+    setTogglingAvailability(true)
+    setError('')
+    try {
+      const next = !acceptingCases
+      const res = await api('/api/lawyers/availability', {
+        token: session.token,
+        method: 'PUT',
+        body: { acceptingCases: next }
+      })
+      setAcceptingCases(res.acceptingCases)
+      session.user.acceptingCases = res.acceptingCases
+      setNotice(res.acceptingCases
+        ? bi('Status updated: You are now accepting cases.', 'অবস্থা হালনাগাদ: আপনি এখন নতুন মামলা গ্রহণে প্রস্তুত।')
+        : bi('Status updated: Case acceptance paused.', 'অবস্থা হালনাগাদ: নতুন মামলা গ্রহণ স্থগিত করা হয়েছে।')
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setTogglingAvailability(false)
+    }
+  }
 
   useEffect(() => {
     if (!role) return
@@ -152,6 +186,13 @@ export default function Dashboard({ session }) {
   const isUrgent = (record) => Boolean(record.urgent || record.priorityDecision === 'URGENT' || (record.priorityDecision !== 'ROUTINE' && record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION')))
   const isPending = (record) => !isUrgent(record) && record.status !== 'ACCEPTED'
 
+  const lawyerStats = role === 'PANEL_LAWYER' ? {
+    totalRequests: workspace?.stats?.totalRequests ?? (workspace?.records?.length ?? 0),
+    acceptedCases: workspace?.stats?.acceptedCases ?? (workspace?.records?.filter((r) => r.assignmentStatus === 'ACCEPTED').length ?? 0),
+    pendingRequests: workspace?.stats?.pendingRequests ?? (workspace?.records?.filter((r) => r.assignmentStatus === 'PENDING').length ?? 0),
+    urgentCases: workspace?.stats?.urgentCases ?? (workspace?.records?.filter(isUrgent).length ?? 0),
+  } : null
+
   // Show each record once. Keyed by record ID, never by name: two applicants may share a name,
   // and possible duplicates are a DLAO officer's decision in Duplicate review.
   const seen = new Set()
@@ -162,10 +203,17 @@ export default function Dashboard({ session }) {
     return true
   })
 
-  const filtered = deduplicated.filter((record) =>
-    (queue === 'ALL' || record.flags?.some((flag) => flag.code === queue)) &&
-    (!filter || [record.applicationId, record.caseId, record.applicantName].some((value) => value?.toLowerCase().includes(filter.toLowerCase())))
-  )
+  const filtered = deduplicated.filter((record) => {
+    if (role === 'PANEL_LAWYER' && lawyerFilter !== 'ALL') {
+      if (lawyerFilter === 'ACCEPTED' && record.assignmentStatus !== 'ACCEPTED') return false
+      if (lawyerFilter === 'PENDING' && record.assignmentStatus !== 'PENDING') return false
+      if (lawyerFilter === 'URGENT' && !isUrgent(record)) return false
+    }
+    return (
+      (queue === 'ALL' || record.flags?.some((flag) => flag.code === queue)) &&
+      (!filter || [record.applicationId, record.caseId, record.applicantName].some((value) => value?.toLowerCase().includes(filter.toLowerCase())))
+    )
+  })
 
   const sorted = [...filtered].sort((a, b) => {
     const aUrgent = isUrgent(a) ? 1 : 0
@@ -182,8 +230,47 @@ export default function Dashboard({ session }) {
   return <section aria-labelledby="dashboard-title">
     <p className="eyebrow">{workspace?.officeCode || bi('Demo office', 'ডেমো কার্যালয়')} · {bi('Shared record', 'একীভূত প্রাতিষ্ঠানিক রেকর্ড')}</p>
     <h1 id="dashboard-title">{bi(`${roles[role]?.[0][0] || 'Provider'} workspace`, `${roles[role]?.[0][1] || 'সেবাদাতা'}-এর কর্মক্ষেত্র`)}</h1>
-    <p className="lede">{roles[role] && bi(...roles[role][1])}</p>
     {session.user.assignments.length > 1 && <div className="role-switch"><label htmlFor="active-role">{bi('Active role', 'সক্রিয় ভূমিকা')}</label><select id="active-role" value={role} onChange={(event) => { setWorkspace(null); setLoading(true); setLookup(null); setVerifiedLookup(null); setRole(event.target.value) }}>{session.user.assignments.map((assignment) => <option key={`${assignment.role}-${assignment.officeCode}`} value={assignment.role}>{roleName(assignment.role)}</option>)}</select></div>}
+    
+    {role === 'PANEL_LAWYER' && (
+      <div className="lawyer-availability-banner">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+          <span style={{ fontSize: '0.85rem', color: '#555', fontWeight: 500 }}>
+            <Bi en="Your Panel Case Acceptance Status:" bn="আপনার প্যানেল প্রাপ্যতা স্থিতি:" />
+          </span>
+          <span className={`availability-badge ${acceptingCases ? 'accepting' : 'not-accepting'}`}>
+            <span className="availability-dot" />
+            {acceptingCases
+              ? bi('Accepting Cases', 'নতুন মামলা গ্রহণে প্রস্তুত')
+              : bi('Not Accepting Cases', 'মামলা গ্রহণ স্থগিত')}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="secondary-button"
+          style={{ padding: '0.35rem 0.85rem', fontSize: '0.85rem' }}
+          disabled={togglingAvailability}
+          onClick={handleToggleAvailability}
+        >
+          {acceptingCases
+            ? bi('Pause Case Acceptance', 'মামলা গ্রহণ স্থগিত করুন')
+            : bi('Resume Case Acceptance', 'মামলা গ্রহণ পুনরায় শুরু করুন')}
+        </button>
+      </div>
+    )}
+
+    {role === 'PANEL_LAWYER' && lawyerStats && (
+      <section aria-labelledby="lawyer-report-title">
+        <h2 id="lawyer-report-title">{bi('Routine report', 'নিয়মিত কার্যক্রমের প্রতিবেদন')}</h2>
+        <p>
+          {bi(
+            `${lawyerStats.totalRequests} case requests · ${lawyerStats.acceptedCases} accepted · ${lawyerStats.pendingRequests} pending offers · ${lawyerStats.urgentCases} urgent`,
+            `${num(lawyerStats.totalRequests)}টি মামলা অনুরোধ · ${num(lawyerStats.acceptedCases)}টি গৃহীত · ${num(lawyerStats.pendingRequests)}টি অপেক্ষমাণ অফার · ${num(lawyerStats.urgentCases)}টি জরুরি`
+          )}
+        </p>
+      </section>
+    )}
+
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
     {role === 'UDC_OPERATOR' && <p><Link to="/assisted">{bi('Open assisted intake and offline drafts', 'সহায়তাকৃত আবেদন ও অফলাইন খসড়া দেখুন')}</Link></p>}
@@ -198,11 +285,51 @@ export default function Dashboard({ session }) {
 
     {staff && report && <section aria-labelledby="report-title"><h2 id="report-title">{bi('Routine report', 'নিয়মিত কার্যক্রমের প্রতিবেদন')}</h2><p>{bi(`${report.total} applications · ${report.accepted} accepted · ${report.counts.OVERDUE} overdue tasks · ${report.counts.LAWYER_UPDATE_OVERDUE} lawyer-update cases`, `${num(report.total)}টি আবেদন · ${num(report.accepted)}টি গৃহীত · ${num(report.counts.OVERDUE)}টি বকেয়া কাজ · ${num(report.counts.LAWYER_UPDATE_OVERDUE)}টি আইনজীবী প্রতিবেদন বিলম্বিত`)}</p><p className="muted">{bi('Channels:', 'মাধ্যম:')} {Object.entries(report.byChannel).map(([channel, count]) => `${say(channel)} ${num(count)}`).join(' · ') || bi('none', 'নেই')}</p></section>}
 
-    <section className="worklist" aria-labelledby="worklist-title"><div className="section-heading"><h2 id="worklist-title">{staff ? bi('Daily queue and history', 'দৈনিক কার্যতালিকা ও পূর্ববর্তী রেকর্ড') : role === 'PANEL_LAWYER' ? bi('Assigned cases', 'বরাদ্দকৃত মামলাসমূহ') : role === 'RECEIVING_DLAO' ? bi('Referrals to your office', 'অন্য কার্যালয় থেকে প্রাপ্ত রেফারেল') : role === 'HELPLINE_AGENT' ? bi('16699 advice callbacks', '১৬৬৯৯ আইনি পরামর্শের কলসমূহ') : bi('Role worklist', 'কার্যতালিকা')}</h2><span className="muted">{bi(`${workspace?.records.length || 0} records`, `${num(workspace?.records.length || 0)}টি রেকর্ড`)}</span></div>
-      {staff && <div className="dashboard-actions"><div><label htmlFor="history-filter">{bi('Search shown history', 'রেকর্ড ফিল্টার করুন')}</label><input id="history-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={bi('Name, Application ID, or Case ID', 'নাম, আবেদন বা মামলা নম্বর')} /></div><div><label htmlFor="queue-filter">{bi('Queue flag', 'কাজের ক্যাটাগরি')}</label><select id="queue-filter" value={queue} onChange={(event) => setQueue(event.target.value)}><option value="ALL">{bi('All records', 'সকল রেকর্ড')}</option>{Object.entries(report?.counts || {}).map(([code, count]) => <option key={code} value={code}>{say(code)} ({num(count)})</option>)}</select></div></div>}
+    <section className="worklist" aria-labelledby="worklist-title">
+      <div className="section-heading">
+        <h2 id="worklist-title">
+          {staff
+            ? bi('Daily queue and history', 'দৈনিক কার্যতালিকা ও পূর্ববর্তী রেকর্ড')
+            : role === 'PANEL_LAWYER'
+            ? (lawyerFilter === 'ACCEPTED'
+                ? bi('Accepted cases', 'গৃহীত মামলাসমূহ')
+                : lawyerFilter === 'PENDING'
+                ? bi('Pending assignment offers', 'অপেক্ষমাণ নিয়োগ প্রস্তাব')
+                : lawyerFilter === 'URGENT'
+                ? bi('Urgent priority cases', 'জরুরি অগ্রাধিকারভুক্ত মামলা')
+                : bi('Assigned cases & requests', 'বরাদ্দকৃত মামলা ও অনুরোধসমূহ'))
+            : role === 'RECEIVING_DLAO'
+            ? bi('Referrals to your office', 'অন্য কার্যালয় থেকে প্রাপ্ত রেফারেল')
+            : role === 'HELPLINE_AGENT'
+            ? bi('16699 advice callbacks', '১৬৬৯৯ আইনি পরামর্শের কলসমূহ')
+            : bi('Role worklist', 'কার্যতালিকা')}
+        </h2>
+        <span className="muted">
+          {role === 'PANEL_LAWYER' && lawyerFilter !== 'ALL'
+            ? bi(`${visible.length} of ${workspace?.records?.length || 0} records`, `${num(visible.length)} / ${num(workspace?.records?.length || 0)}টি রেকর্ড`)
+            : bi(`${workspace?.records?.length || 0} records`, `${num(workspace?.records?.length || 0)}টি রেকর্ড`)}
+        </span>
+      </div>
+      {(staff || role === 'PANEL_LAWYER') && <div className="dashboard-actions"><div><label htmlFor="history-filter">{bi('Search shown history', 'রেকর্ড ফিল্টার করুন')}</label><input id="history-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={bi('Name, Application ID, or Case ID', 'নাম, আবেদন বা মামলা নম্বর')} /></div><div><label htmlFor="queue-filter">{bi('Queue filter', 'কাজের ক্যাটাগরি')}</label>{staff ? <select id="queue-filter" value={queue} onChange={(event) => setQueue(event.target.value)}><option value="ALL">{bi('All records', 'সকল রেকর্ড')}</option>{Object.entries(report?.counts || {}).map(([code, count]) => <option key={code} value={code}>{say(code)} ({num(count)})</option>)}</select> : <select id="queue-filter" value={lawyerFilter} onChange={(event) => setLawyerFilter(event.target.value)}><option value="ALL">{bi('All records', 'সকল রেকর্ড')} ({num(lawyerStats?.totalRequests ?? 0)})</option><option value="ACCEPTED">{bi('Accepted', 'গৃহীত')} ({num(lawyerStats?.acceptedCases ?? 0)})</option><option value="PENDING">{bi('Pending offers', 'অপেক্ষমাণ অফার')} ({num(lawyerStats?.pendingRequests ?? 0)})</option><option value="URGENT">{bi('Urgent / Priority', 'জরুরি / অগ্রাধিকার')} ({num(lawyerStats?.urgentCases ?? 0)})</option></select>}</div></div>}
       {loading && <p role="status">{bi('Loading workspace…', 'লোড হচ্ছে…')}</p>}
       {!loading && workspace?.records.length === 0 && <p className="empty-state">{role === 'PANEL_LAWYER' ? bi('No current or pending panel-lawyer assignments.', 'বর্তমানে কোনো সক্রিয় বা অপেক্ষমাণ মামলা বরাদ্দ নেই।') : role === 'HELPLINE_AGENT' ? bi('No advice requests are waiting for a callback.', 'পরামর্শের অপেক্ষায় কোনো কল পেন্ডিং নেই।') : bi('No records are available to this role yet.', 'এই ভূমিকায় দেখার মতো কোনো রেকর্ড নেই।')}</p>}
-      {!loading && workspace?.records.length > 0 && visible.length === 0 && <p className="empty-state">{bi('No records match these filters.', 'নির্বাচিত শর্তে কোনো রেকর্ড পাওয়া যায়নি।')}</p>}
+      {!loading && workspace?.records.length > 0 && visible.length === 0 && (
+        <div className="empty-state">
+          <p>{bi('No records match these filters.', 'নির্বাচিত শর্তে কোনো রেকর্ড পাওয়া যায়নি।')}</p>
+          {role === 'PANEL_LAWYER' && lawyerFilter !== 'ALL' && (
+            <p>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ marginTop: '0.5rem' }}
+                onClick={() => setLawyerFilter('ALL')}
+              >
+                {bi('Show all case requests', 'সকল মামলা অনুরোধ প্রদর্শন করুন')}
+              </button>
+            </p>
+          )}
+        </div>
+      )}
       {!loading && role === 'HELPLINE_AGENT' && visible.map((record) => <AdviceCallback key={record.applicationId} request={record} token={session.token} onDone={(message) => { setNotice(message); setRefresh((value) => value + 1) }} />)}
       {!loading && role !== 'HELPLINE_AGENT' && visible.length > 0 && <ul className="record-list">{visible.map((record) => <li key={record.referralId ?? record.assignmentId ?? record.applicationId}>{role === 'PANEL_LAWYER'
         ? <Link to={`/cases/${record.caseId}`} className={isUrgent(record) ? 'urgent-record' : ''}><strong>{record.caseId} · {say(record.assignmentStatus)}</strong><span>{record.applicantName ? <>{tr(record.applicantName)} · </> : ''}{bi('Application', 'আবেদন')} {record.applicationId}{record.nextAction ? ` · ${bi('Next:', 'পরবর্তী:')} ${record.nextAction}` : ''}</span>{isUrgent(record) && <small className="urgent-flag">{say('URGENT')}</small>}{record.nextHearingAt && <small>{bi('Hearing:', 'শুনানি:')} {when(record.nextHearingAt)}</small>}{record.updates?.map((update) => <small key={update.id}>{bi('Update', 'আপডেট')} {num(update.sequence)}: {say(update.status)} · {bi('due', 'শেষ সময়')} {when(update.dueAt)}{update.status === 'MISSED' ? ` · ${overdueText(update.dueAt)}` : ''}{update.reminderCount ? ` · ${bi(`the DLAO asked ${update.reminderCount}×`, `ডিএলএও কার্যালয় থেকে ${num(update.reminderCount)} বার তাগিদ দেওয়া হয়েছে`)}` : ''}</small>)}</Link>

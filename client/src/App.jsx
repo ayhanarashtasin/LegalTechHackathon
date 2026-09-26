@@ -232,7 +232,7 @@ export default function App() {
                 <div className="account-dropdown-user-row">
                   <span className="account-dropdown-name">{session.user.displayName || session.user.username}</span>
                   <span className="account-dropdown-role">
-                    {session.user.assignments?.[0]?.role?.replace(/_/g, ' ') || 'Citizen'}
+                    {session.user.userType ? session.user.userType.toUpperCase() : (session.user.assignments?.[0]?.role?.replace(/_/g, ' ') || 'CITIZEN')}
                   </span>
                 </div>
 

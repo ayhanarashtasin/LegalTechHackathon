@@ -365,7 +365,45 @@ export default function RecordPage({ session }) {
               <div><dt><Bi en="Priority" bn="অগ্রাধিকার" /></dt><dd>{record.priorityDecision ? <Term code={record.priorityDecision} /> : bi('Not set', 'নির্ধারিত নয়')}</dd></div>
               <div><dt><Bi en="Case ID" bn="মামলা নম্বর" /></dt><dd>{record.caseId || bi('After acceptance', 'আবেদন গ্রহণের পর')}</dd></div>
               <div><dt><Bi en="Identity" bn="পরিচয় যাচাই" /></dt><dd><Term code={record.identityStatus} /></dd></div>
+              <div>
+                <dt><Bi en="Safe contact phone" bn="নিরাপদ ফোন নম্বর" /></dt>
+                <dd>
+                  {(record.safeContactPhone || data.safeContact?.contactValue) ? (
+                    <span className="safe-phone-highlight">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                      </svg>
+                      {record.safeContactPhone || data.safeContact?.contactValue}
+                    </span>
+                  ) : (
+                    <span className="muted" style={{ fontStyle: 'italic', fontSize: '0.88rem' }}>
+                      <Bi en="Not provided on call / Not recorded" bn="কলে নম্বর দেওয়া হয়নি / নথিতে নেই" />
+                    </span>
+                  )}
+                </dd>
+              </div>
               {record.representation && <div className="wide"><dt><Bi en="Reported by" bn="প্রতিনিধি / আবেদনকারী" /></dt><dd>{record.representation.representativeName} · {record.representation.relationship} · <Bi en="authority" bn="প্রতিনিধিত্বের ক্ষমতা" /> <Term code={record.representation.authorityStatus} /></dd></div>}
+              {record.complaintSummary && (
+                <div className="wide">
+                  <dt><Bi en="Application / Incident Description" bn="আবেদন / ঘটনার বিবরণ" /></dt>
+                  <dd style={{ background: '#fcfbf9', border: '1px solid #eaeaea', borderRadius: '6px', padding: '0.65rem 0.85rem', lineHeight: '1.5' }}>
+                    {record.complaintSummary}
+                  </dd>
+                </div>
+              )}
+              {record.incident && (record.incident.what || record.incident.when || record.incident.where || record.incident.who) && (
+                <div className="wide">
+                  <dt><Bi en="Incident Details" bn="ঘটনার বিস্তারিত তথ্য" /></dt>
+                  <dd>
+                    <dl className="details compact" style={{ background: '#faf9f6', padding: '0.5rem 0.75rem', borderRadius: '6px' }}>
+                      {record.incident.what && <div><dt><Bi en="What happened" bn="কী ঘটেছে" /></dt><dd>{record.incident.what}</dd></div>}
+                      {record.incident.when && <div><dt><Bi en="When" bn="কখন" /></dt><dd>{record.incident.when}</dd></div>}
+                      {record.incident.where && <div><dt><Bi en="Where" bn="কোথায়" /></dt><dd>{record.incident.where}</dd></div>}
+                      {record.incident.who && <div><dt><Bi en="Who involved" bn="জড়িত ব্যক্তি" /></dt><dd>{record.incident.who}</dd></div>}
+                    </dl>
+                  </dd>
+                </div>
+              )}
               {record.vulnerability?.length > 0 && <div className="wide"><dt><Bi en="Weigh first" bn="অগ্রাধিকার বিবেচনা (ঝুঁকি)" /></dt><dd>{record.vulnerability.map(say).join(' · ')}</dd></div>}
               {record.complaintType && <div><dt><Bi en="Complaint type (AI suggestion)" bn="অভিযোগের ধরন (এআই প্রস্তাবিত)" /></dt><dd><Term code={record.complaintType} /></dd></div>}
               {record.legalNeed && <div className="wide"><dt><Bi en="Legal need (AI suggestion)" bn="আইনি প্রতিকার (এআই প্রস্তাবিত)" /></dt><dd lang="bn">{record.legalNeed}</dd></div>}
@@ -373,13 +411,29 @@ export default function RecordPage({ session }) {
           </section>
           {officer && <section className="card safety-card" aria-labelledby="safe-title">
             <h2 id="safe-title"><Bi en="Safe contact" bn="নিরাপদ যোগাযোগের নিয়মাবলী" /></h2>
-            {!data.safeContact ? <p><Bi en="No safe route recorded. Do not contact or share details." bn="নিরাপদ যোগাযোগের কোনো নির্দিষ্ট মাধ্যম নথিতে সংরক্ষিত নেই। নিশ্চিত না হয়ে যোগাযোগ বা মামলার তথ্য প্রকাশ করবেন না।" /></p> : <dl className="details compact">
-              <div><dt><Bi en="Use" bn="অনুমোদিত মাধ্যম" /></dt><dd>{data.safeContact.allowedChannels.map(say).join(', ') || none()}</dd></div>
-              <div><dt><Bi en="Never use" bn="নিষিদ্ধ মাধ্যম" /></dt><dd>{data.safeContact.prohibitedChannels.map(say).join(', ') || none()}</dd></div>
-              <div><dt><Bi en="Safe time" bn="যোগাযোগের উপযুক্ত সময়" /></dt><dd>{data.safeContact.safeTimeWindow || bi('Not recorded', 'নথিতে উল্লেখ নেই')}</dd></div>
-              <div><dt><Bi en="If someone else answers" bn="অন্য ব্যক্তি কল রিসিভ করলে করণীয়" /></dt><dd><Term code={data.safeContact.unknownAnswerAction} /></dd></div>
+            {!data.safeContact && !record.safeContactPhone ? <p><Bi en="No safe route recorded. Do not contact or share details." bn="নিরাপদ যোগাযোগের কোনো নির্দিষ্ট মাধ্যম নথিতে সংরক্ষিত নেই। নিশ্চিত না হয়ে যোগাযোগ বা মামলার তথ্য প্রকাশ করবেন না।" /></p> : <dl className="details compact">
+              <div style={{ background: '#ffffff', padding: '0.45rem 0.65rem', borderRadius: '4px', border: '1px solid #d4c494' }}>
+                <dt><Bi en="Safe phone number" bn="নিরাপদ ফোন নম্বর" /></dt>
+                <dd>
+                  {(data.safeContact?.contactValue || record.safeContactPhone) ? (
+                    <strong style={{ fontSize: '1.05rem', letterSpacing: '0.04em', color: '#1f4523' }}>
+                      {data.safeContact?.contactValue || record.safeContactPhone}
+                    </strong>
+                  ) : (
+                    <span className="muted" style={{ fontStyle: 'italic', fontSize: '0.9rem' }}>
+                      <Bi en="Not provided during intake" bn="ইনটেকে নম্বর দেওয়া হয়নি" />
+                    </span>
+                  )}
+                </dd>
+              </div>
+              {data.safeContact?.trustedContactName && <div><dt><Bi en="Trusted contact name" bn="বিশ্বস্ত ব্যক্তির নাম" /></dt><dd>{data.safeContact.trustedContactName}</dd></div>}
+              {data.safeContact?.safeCallReason && <div><dt><Bi en="Safety context" bn="নিরাপত্তা সতর্কতা" /></dt><dd className="warn-text">{data.safeContact.safeCallReason}</dd></div>}
+              <div><dt><Bi en="Use" bn="অনুমোদিত মাধ্যম" /></dt><dd>{data.safeContact?.allowedChannels?.map(say).join(', ') || bi('PHONE', 'ফোন')}</dd></div>
+              <div><dt><Bi en="Never use" bn="নিষিদ্ধ মাধ্যম" /></dt><dd>{data.safeContact?.prohibitedChannels?.map(say).join(', ') || none()}</dd></div>
+              <div><dt><Bi en="Safe time" bn="যোগাযোগের উপযুক্ত সময়" /></dt><dd>{data.safeContact?.safeTimeWindow || data.safeContact?.callingWindow || bi('Anytime with caller discretion', 'আবেদনকারীর সুবিধাজনক সময়')}</dd></div>
+              <div><dt><Bi en="If someone else answers" bn="অন্য ব্যক্তি কল রিসিভ করলে করণীয়" /></dt><dd><Term code={data.safeContact?.unknownAnswerAction || 'DISCLOSE_NOTHING'} /></dd></div>
             </dl>}
-            {data.safeContact?.allowedChannels.includes('PHONE') && <button type="button" className="secondary-button" onClick={simulateUnknownAnswer}><Bi en="Simulate call: unknown person answers" bn="মহড়া: অপরিচিত ব্যক্তি কল রিসিভ করলে" /></button>}
+            {(data.safeContact?.allowedChannels?.includes('PHONE') || record.safeContactPhone) && <button type="button" className="secondary-button" onClick={simulateUnknownAnswer}><Bi en="Simulate call: unknown person answers" bn="মহড়া: অপরিচিত ব্যক্তি কল রিসিভ করলে" /></button>}
           </section>}
         </div>
 

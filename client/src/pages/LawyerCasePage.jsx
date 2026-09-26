@@ -1,7 +1,24 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
-import { api } from '../services/api.js'
+import { api, apiUrl } from '../services/api.js'
 import { AddForm, Badge, Bi, Term, bi, num, overdueText, say, when } from '../components/Bi.jsx'
+
+function CallRecording({ applicationId, token }) {
+  const [url, setUrl] = useState(null)
+  const [state, setState] = useState('LOADING')
+  useEffect(() => {
+    const controller = new AbortController()
+    let objectUrl
+    fetch(apiUrl(`/api/applications/${applicationId}/recording`), { headers: { authorization: `Bearer ${token}` }, cache: 'no-store', signal: controller.signal })
+      .then((response) => (response.ok ? response.blob() : Promise.reject(response.status)))
+      .then((blob) => { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); setState('READY') })
+      .catch((failure) => { if (failure?.name !== 'AbortError') setState(failure === 404 ? 'NONE' : 'FAILED') })
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [applicationId, token])
+  return state === 'READY'
+    ? <audio controls preload="metadata" src={url} aria-label={bi('Full call recording', 'সম্পূর্ণ কল রেকর্ডিং')} />
+    : <p className="muted">{{ LOADING: bi('Loading recording…', 'কল রেকর্ডিং লোড হচ্ছে…'), NONE: bi('No recording stored.', 'কোনো কল রেকর্ডিং সংরক্ষিত নেই।'), FAILED: bi('Recording could not load. Refresh to retry.', 'কল রেকর্ডিং লোড করা যায়নি। পৃষ্ঠাটি রিলোড করে পুনরায় চেষ্টা করুন।') }[state]}</p>
+}
 
 export default function LawyerCasePage({ session }) {
   const { caseId } = useParams()
@@ -12,6 +29,8 @@ export default function LawyerCasePage({ session }) {
   const [notice, setNotice] = useState('')
   const [responseReason, setResponseReason] = useState('')
   const [drafts, setDrafts] = useState({})
+  const [acceptingCases, setAcceptingCases] = useState(() => session.user.acceptingCases ?? true)
+  const [togglingAvailability, setTogglingAvailability] = useState(false)
 
   // Step 6: Client Consultation state
   const [consultDate, setConsultDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -61,6 +80,34 @@ export default function LawyerCasePage({ session }) {
       .then(setRecord).catch((failure) => { if (failure.name !== 'AbortError') setError(failure.message) })
     return () => controller.abort()
   }, [caseId, refresh, session.token])
+
+  useEffect(() => {
+    api('/api/lawyers/availability', { token: session.token })
+      .then((res) => { if (typeof res.acceptingCases === 'boolean') setAcceptingCases(res.acceptingCases) })
+      .catch(() => {})
+  }, [session.token])
+
+  async function handleToggleAvailability() {
+    setTogglingAvailability(true)
+    try {
+      const next = !acceptingCases
+      const res = await api('/api/lawyers/availability', {
+        token: session.token,
+        method: 'PUT',
+        body: { acceptingCases: next }
+      })
+      setAcceptingCases(res.acceptingCases)
+      session.user.acceptingCases = res.acceptingCases
+      setNotice(res.acceptingCases
+        ? bi('Status updated: You are now accepting cases.', 'অবস্থা হালনাগাদ: আপনি এখন নতুন মামলা গ্রহণে প্রস্তুত।')
+        : bi('Status updated: Case acceptance paused.', 'অবস্থা হালনাগাদ: নতুন মামলা গ্রহণ স্থগিত করা হয়েছে।')
+      )
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setTogglingAvailability(false)
+    }
+  }
 
   async function send(path, body, success) {
     setBusy(true)
@@ -200,6 +247,33 @@ export default function LawyerCasePage({ session }) {
   return (
     <section aria-labelledby="case-title">
       {back}
+
+      {/* Lawyer Case Acceptance Availability Banner */}
+      <div className="lawyer-availability-banner">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+          <span style={{ fontSize: '0.85rem', color: '#555', fontWeight: 500 }}>
+            <Bi en="Your Panel Availability:" bn="আপনার প্যানেল প্রাপ্যতা স্থিতি:" />
+          </span>
+          <span className={`availability-badge ${acceptingCases ? 'accepting' : 'not-accepting'}`}>
+            <span className="availability-dot" />
+            {acceptingCases
+              ? bi('Accepting Cases', 'মামলা গ্রহণে প্রস্তুত')
+              : bi('Not Accepting Cases', 'মামলা গ্রহণ স্থগিত')}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="secondary-button"
+          style={{ padding: '0.3rem 0.75rem', fontSize: '0.85rem' }}
+          disabled={togglingAvailability}
+          onClick={handleToggleAvailability}
+        >
+          {acceptingCases
+            ? bi('Change to: Not Accepting', 'মামলা গ্রহণ স্থগিত করুন')
+            : bi('Change to: Accepting', 'মামলা গ্রহণে প্রস্তুত করুন')}
+        </button>
+      </div>
+
       <div className={`record-head ${isUrgent ? 'urgent-record' : ''}`} style={isUrgent ? { padding: '1rem', borderRadius: '6px' } : {}}>
         <div>
           <p className="eyebrow"><Bi en="Panel Lawyer Case Record" bn="প্যানেল আইনজীবীর মামলা নথি" /></p>
@@ -277,6 +351,28 @@ export default function LawyerCasePage({ session }) {
           <div><dt><Bi en="Case status" bn="মামলার বর্তমান অবস্থা" /></dt><dd><Term code={record.status} /></dd></div>
           <div><dt><Bi en="Your assignment" bn="আপনার নিয়োগের অবস্থা" /></dt><dd><Term code={record.assignmentStatus} /></dd></div>
           {record.applicantName && <div><dt><Bi en="Client / Beneficiary" bn="মক্কেল / সুবিধাভোগী" /></dt><dd><strong>{record.applicantName}</strong></dd></div>}
+          <div>
+            <dt><Bi en="Safe Contact Phone" bn="নিরাপদ ফোন নম্বর" /></dt>
+            <dd>
+              {(record.safeContact?.contactValue || record.safeContactPhone) ? (
+                <span className="safe-phone-highlight">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                  </svg>
+                  {record.safeContact?.contactValue || record.safeContactPhone}
+                </span>
+              ) : (
+                <span className="muted" style={{ fontStyle: 'italic', fontSize: '0.88rem' }}>
+                  <Bi en="Not provided on call / Not recorded" bn="কলে নম্বর দেওয়া হয়নি / নথিতে নেই" />
+                </span>
+              )}
+              {(record.safeContact?.callingWindow || record.safeContact?.safeTimeWindow) && (
+                <small style={{ display: 'block', marginTop: '0.25rem', color: '#555' }}>
+                  <Bi en="Safe time window:" bn="যোগাযোগের নিরাপদ সময়:" /> {record.safeContact.callingWindow || record.safeContact.safeTimeWindow}
+                </small>
+              )}
+            </dd>
+          </div>
           {record.legalNeed && <div className="wide"><dt><Bi en="Legal Need & Guidance" bn="আইনি সহায়তা ও পরামর্শের ক্ষেত্র" /></dt><dd>{record.legalNeed}</dd></div>}
           {record.complaintType && <div><dt><Bi en="Complaint Category" bn="অভিযোগের ধরন" /></dt><dd><Term code={record.complaintType} /></dd></div>}
           {record.vulnerability?.length > 0 && <div className="wide"><dt><Bi en="Special Vulnerability" bn="বিশেষ সুরক্ষা বা ঝুঁকির কারণ" /></dt><dd>{record.vulnerability.map(say).join(' · ')}</dd></div>}
@@ -285,6 +381,78 @@ export default function LawyerCasePage({ session }) {
             <div className="wide"><dt><Bi en="Next step" bn="পরবর্তী করণীয় পদক্ষেপ" /></dt><dd>{record.nextAction || bi('Not set', 'নির্ধারিত নয়')}</dd></div>
           </>}
         </dl>
+      </section>
+
+      {/* Case Intake, Background & Call Recording Details */}
+      <section className="card" aria-labelledby="intake-title" style={{ marginBottom: '1.25rem' }}>
+        <h2 id="intake-title"><Bi en="Case Background & Intake Information" bn="মামলার বিবরণ ও ভয়েস ইনটেক তথ্য" /></h2>
+        
+        {record.complaintSummary ? (
+          <div style={{ marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.35rem 0', color: '#444' }}>
+              <Bi en="Problem / Application Description" bn="সমস্যা বা অভিযোগের বিবরণ" />
+            </h3>
+            <p style={{ background: '#fcfbf9', border: '1px solid #eaeaea', borderRadius: '6px', padding: '0.75rem 1rem', lineHeight: '1.6', margin: 0 }}>
+              {record.complaintSummary}
+            </p>
+          </div>
+        ) : (
+          <p className="muted" style={{ fontStyle: 'italic', marginBottom: '1rem' }}>
+            <Bi en="No specific description recorded during initial intake." bn="প্রাথমিক ইনটেকে কোনো অতিরিক্ত বিবরণ লিপিবদ্ধ নেই।" />
+          </p>
+        )}
+
+        {record.incident && (record.incident.what || record.incident.when || record.incident.where || record.incident.who) && (
+          <div style={{ marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.35rem 0', color: '#444' }}>
+              <Bi en="Incident Specifics" bn="ঘটনার সুনির্দিষ্ট তথ্য" />
+            </h3>
+            <dl className="details compact" style={{ background: '#faf9f6', padding: '0.65rem 0.85rem', borderRadius: '6px' }}>
+              {record.incident.what && <div><dt><Bi en="What Happened" bn="ঘটনা" /></dt><dd>{record.incident.what}</dd></div>}
+              {record.incident.when && <div><dt><Bi en="When" bn="তারিখ / সময়" /></dt><dd>{record.incident.when}</dd></div>}
+              {record.incident.where && <div><dt><Bi en="Where" bn="স্থান" /></dt><dd>{record.incident.where}</dd></div>}
+              {record.incident.who && <div><dt><Bi en="Persons Involved" bn="জড়িত ব্যক্তি" /></dt><dd>{record.incident.who}</dd></div>}
+            </dl>
+          </div>
+        )}
+
+        {record.safeContact?.safeCallReason && (
+          <div style={{ background: '#fff9e6', border: '1px solid #e0c878', borderRadius: '6px', padding: '0.65rem 0.85rem', marginBottom: '1rem' }}>
+            <strong style={{ color: '#7a5a00' }}><Bi en="Safety & Confidentiality Notice:" bn="নিরাপত্তা ও গোপনীয়তা সতর্কতা:" /></strong>
+            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.9rem', color: '#553e00' }}>
+              {record.safeContact.safeCallReason}
+            </p>
+          </div>
+        )}
+
+        {(record.hasRecording || record.channel === 'VOICE_SIM') && (
+          <div style={{ marginTop: '1rem', padding: '0.85rem 1rem', background: '#f8faf8', border: '1px solid #d5e5d5', borderRadius: '6px' }}>
+            <h3 style={{ margin: '0 0 0.4rem 0', fontSize: '0.95rem' }}><Bi en="Helpline / 16699 Voice Call Recording" bn="১৬৬৯৯ কল রেকর্ডিং অডিও" /></h3>
+            <CallRecording applicationId={record.applicationId} token={session.token} />
+            <p className="muted" style={{ margin: '0.35rem 0 0 0', fontSize: '0.82rem' }}>
+              <Bi en="Full audio recorded during citizen voice intake. For advocate legal preparation." bn="নাগরিকের ভয়েস ইনটেকের সম্পূর্ণ অডিও রেকর্ডিং। আইনজীবী কর্তৃক মামলা প্রস্তুতির সুবিধার্থে সংরক্ষিত।" />
+            </p>
+          </div>
+        )}
+
+        {record.transcript?.turns?.length > 0 && (
+          <div style={{ marginTop: '1rem' }}>
+            <h3 style={{ fontSize: '0.95rem', margin: '0 0 0.4rem 0' }}><Bi en="Intake Call Transcript" bn="কলের লিখিত প্রতিলিপি (ট্রান্সক্রিপ্ট)" /></h3>
+            {record.transcript.summary && (
+              <p style={{ fontStyle: 'italic', color: '#555', margin: '0 0 0.5rem 0' }}>
+                {record.transcript.summary}
+              </p>
+            )}
+            <ol className="timeline compact" style={{ maxHeight: '350px', overflowY: 'auto', background: '#faf9f6', padding: '0.75rem', borderRadius: '6px' }}>
+              {record.transcript.turns.map((turn, idx) => (
+                <li key={idx} style={{ padding: '0.35rem 0' }}>
+                  <strong>{turn.speaker === 'CALLER' ? <Bi en="Caller" bn="কলার" /> : <Bi en="Assistant" bn="সহকারী কর্মকর্তা" />}</strong>:
+                  <span style={{ marginLeft: '0.5rem' }}>{turn.text}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
       </section>
 
       {/* Respond to assignment offer */}

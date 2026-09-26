@@ -2336,3 +2336,163 @@ thead th { font-size: .8rem; color: #4e5751; }
 .lawyer-activity { border: 1px solid #eaeaea; background: #fbfbfa; border-radius: 7px; padding: 1rem 1.25rem; margin: 1rem 0; }
 .lawyer-activity h4 { margin: 0 0 .5rem; }
 .reminder-note { margin: .4rem 0 0; padding: .45rem .7rem; border-left: 3px solid #956400; background: #fbf3db; color: #5c3d00; font-size: .9rem; }
+
+/* Lawyer Availability Badges & Banners */
+.lawyer-availability-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1.15rem;
+  background: #fbfbf9;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
+  margin: 1rem 0 1.25rem 0;
+  flex-wrap: wrap;
+}
+
+.availability-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.availability-badge.accepting {
+  background: #edf3ec;
+  color: #28562d;
+  border: 1px solid #b8dab9;
+}
+
+.availability-badge.not-accepting {
+  background: #fdebec;
+  color: #9f2f2d;
+  border: 1px solid #f1babb;
+}
+
+.availability-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.availability-badge.accepting .availability-dot {
+  background: #2e7d32;
+}
+
+.availability-badge.not-accepting .availability-dot {
+  background: #c62828;
+}
+
+.safe-phone-highlight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: #edf3ec;
+  color: #28562d;
+  border: 1px solid #b8dab9;
+  border-radius: 6px;
+  font-weight: 700;
+  font-family: 'Geist Mono', 'SF Mono', monospace;
+  font-size: 1.05rem;
+}
+
+/* Lawyer Dashboard Statistics Bento Grid */
+.lawyer-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.85rem;
+  margin: 1.15rem 0 1.5rem 0;
+}
+
+.lawyer-stat-card {
+  background: #ffffff;
+  border: 1px solid #eaeaea;
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  position: relative;
+  text-align: left;
+}
+
+.lawyer-stat-card:hover {
+  border-color: #bbbbba;
+  background: #fbfbf9;
+}
+
+.lawyer-stat-card.active {
+  border-color: #111111;
+  background: #fafaf8;
+  box-shadow: inset 0 0 0 1px #111111;
+}
+
+.lawyer-stat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.lawyer-stat-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.lawyer-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.45rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.lawyer-stat-pill.blue {
+  background: #e1f3fe;
+  color: #1f6c9f;
+}
+
+.lawyer-stat-pill.green {
+  background: #edf3ec;
+  color: #28562d;
+}
+
+.lawyer-stat-pill.yellow {
+  background: #fbf3db;
+  color: #956400;
+}
+
+.lawyer-stat-pill.red {
+  background: #fdebec;
+  color: #9f2f2d;
+}
+
+.lawyer-stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #111111;
+  margin: 0.45rem 0 0.2rem 0;
+  font-family: 'Geist Mono', 'SF Mono', monospace;
+}
+
+.lawyer-stat-desc {
+  font-size: 0.8rem;
+  color: #787774;
+  margin: 0;
+  line-height: 1.4;
+}

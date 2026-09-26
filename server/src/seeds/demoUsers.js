@@ -14,7 +14,11 @@ const accounts = [
   ['demo.mediator', 'Demo Mediator', 'MEDIATOR'],
   ['demo.helpline', 'Demo Helpline Agent', 'HELPLINE_AGENT'],
   ['demo.udc', 'Demo UDC Operator', 'UDC_OPERATOR'],
-  ['demo.lawyer', 'Demo Panel Lawyer', 'PANEL_LAWYER'],
+  ['demo.lawyer', 'Adv. Shahana Parveen', 'PANEL_LAWYER'],
+  ['demo2.lawyer', 'Adv. Rafiqul Islam', 'PANEL_LAWYER'],
+  ['demo3.lawyer', 'Adv. Farhana Yasmin', 'PANEL_LAWYER'],
+  ['demo4.lawyer', 'Adv. Kamrul Hasan', 'PANEL_LAWYER'],
+  ['demo5.lawyer', 'Adv. Nasreen Akhter', 'PANEL_LAWYER'],
   // A separate office so referrals leave the sending DLAO.
   ['demo.receiving', 'Demo Receiving DLAO', 'RECEIVING_DLAO', 'JHENAIDAH-DEMO'],
   ['demo.support', 'Demo Case Support', 'CASE_SUPPORT'],
@@ -35,9 +39,11 @@ async function credentials() {
     ? randomBytes(24).toString('base64url')
     : (process.env.DEMO_USER_PASSWORD || '1234')
   let changed = false
-  for (const [username] of accounts) {
-    if (!existing[username]) {
-      existing[username] = defaultPassword
+  for (const [username, , role] of accounts) {
+    const isLawyer = role === 'PANEL_LAWYER'
+    const expectedPass = isLawyer ? '123' : defaultPassword
+    if (!existing[username] || (isLawyer && existing[username] !== '123')) {
+      existing[username] = expectedPass
       changed = true
     }
   }
@@ -81,7 +87,20 @@ try {
       }
       personId = person._id
     }
-    const update = { displayName, passwordHash, active: true, fictional: true }
+    function roleToUserType(r) {
+      if (r === 'CITIZEN') return 'citizen'
+      if (r === 'DLAO_OFFICER') return 'dlao'
+      if (r === 'PANEL_LAWYER') return 'lawyer'
+      if (r === 'MEDIATOR') return 'mediator'
+      if (r === 'HELPLINE_AGENT') return 'helpline'
+      if (r === 'UDC_OPERATOR') return 'udc'
+      if (r === 'RECEIVING_DLAO') return 'receiving_dlao'
+      if (r === 'CASE_SUPPORT') return 'case_support'
+      if (r === 'CLAO') return 'clao'
+      if (r === 'ADMIN') return 'admin'
+      return r.toLowerCase()
+    }
+    const update = { displayName, passwordHash, userType: roleToUserType(role), active: true, fictional: true }
     if (personId) update.personId = personId
     const user = await User.findOneAndUpdate(
       { username },

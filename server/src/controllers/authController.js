@@ -14,7 +14,15 @@ export async function signUp(request, response) {
 }
 
 export function currentUser(request, response) {
-  response.json({ user: { id: request.auth.userId, displayName: request.auth.displayName, assignments: request.auth.assignments.map(({ role, officeCode }) => ({ role, officeCode })) } })
+  response.json({
+    user: {
+      id: request.auth.userId,
+      username: request.auth.username,
+      displayName: request.auth.displayName,
+      acceptingCases: request.auth.acceptingCases ?? true,
+      assignments: request.auth.assignments.map(({ role, officeCode }) => ({ role, officeCode })),
+    },
+  })
 }
 
 export async function signOut(request, response) {

@@ -34,7 +34,7 @@ export async function getLawyerManagement(applicationId, actor) {
     LawyerChangeRequest.find({ applicationId }).sort({ createdAt: -1 }).lean(),
     LawyerUpdate.find({ applicationId }).sort({ dueAt: 1 }).lean(),
     LawyerPaymentEvent.find({ applicationId }).sort({ createdAt: -1, _id: -1 }).select('assignmentId stage status reason createdAt').lean(),
-    RoleAssignment.find({ role: 'PANEL_LAWYER', officeCode: application.officeCode, active: true }).populate('userId', 'displayName active').lean(),
+    RoleAssignment.find({ role: 'PANEL_LAWYER', officeCode: application.officeCode, active: true }).populate('userId', 'displayName username active acceptingCases userType').lean(),
     lawyerCaseSummaries([applicationId]),
   ])
   const lawyerIds = [...new Set([
@@ -58,7 +58,8 @@ export async function getLawyerManagement(applicationId, actor) {
     authorityNotice: 'Demo reviewer routing only. The legally authorised body for a temporary hold is pending policy verification.',
     panelLawyers: panelRoles.filter(({ userId }) => userId?.active).map(({ userId }) => {
       const hold = holdByLawyer.get(userId._id.toString())
-      return { id: userId._id, displayName: userId.displayName,
+      return { id: userId._id, displayName: userId.displayName, username: userId.username, userType: userId.userType || 'lawyer',
+        acceptingCases: userId.acceptingCases ?? true,
         hold: hold ? { newAssignmentHold: hold.newAssignmentHold, reviewState: hold.reviewState, reviewerRole: hold.reviewerRole, triggeredAt: hold.triggeredAt, reviewReason: hold.reviewReason ?? null } : null }
     }),
     assignments: assignments.map((assignment) => {
@@ -85,27 +86,46 @@ export async function getLawyerWorklist(actor) {
     .sort({ updatedAt: -1 }).limit(25).lean()
   const ids = assignments.map(({ _id }) => _id)
   const appIds = assignments.map(({ applicationId }) => applicationId)
-  const [cases, updates, payments, summaries] = await Promise.all([
+  const [cases, updates, payments, summaries, allAssignments] = await Promise.all([
     Case.find({ caseId: { $in: assignments.map(({ caseId }) => caseId) } }).select('caseId status nextHearingAt nextAction').lean(),
     LawyerUpdate.find({ assignmentId: { $in: ids }, status: { $ne: 'CANCELLED' } }).sort({ dueAt: 1 }).lean(),
     LawyerPaymentEvent.find({ assignmentId: { $in: ids } }).sort({ createdAt: -1 }).select('assignmentId stage status reason createdAt').lean(),
     lawyerCaseSummaries(appIds),
+    LawyerAssignment.find({ lawyerUserId: actor.userId, officeCode: { $in: offices } }).select('status active').lean(),
   ])
   const caseById = new Map(cases.map((record) => [record.caseId, record]))
   const updatesByAssignment = Map.groupBy(updates, (update) => update.assignmentId.toString())
   const paymentByAssignment = new Map()
   for (const payment of payments) if (!paymentByAssignment.has(payment.assignmentId.toString())) paymentByAssignment.set(payment.assignmentId.toString(), payment)
-  return { records: assignments.map((assignment) => {
-    const record = caseById.get(assignment.caseId)
-    const summary = summaries.get(assignment.applicationId)
-    const accepted = assignment.status === 'ACCEPTED'
-    return { assignmentId: assignment._id, applicationId: assignment.applicationId, caseId: assignment.caseId,
-      applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, priorityDecision: summary?.priorityDecision ?? null,
-      assignmentStatus: assignment.status, caseStatus: accepted ? record?.status ?? 'OPEN' : null,
-      nextHearingAt: accepted ? record?.nextHearingAt ?? null : null, nextAction: accepted ? record?.nextAction ?? null : null,
-      updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt, reminders }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt, ...reminderSummary(reminders) })) : [],
-      payment: accepted ? paymentByAssignment.get(assignment._id.toString()) ?? null : null }
-  }) }
+
+  const pendingRequests = allAssignments.filter((a) => a.active && a.status === 'PENDING').length
+  const acceptedCases = allAssignments.filter((a) => a.status === 'ACCEPTED').length
+  const totalRequests = allAssignments.length
+  const activeCases = allAssignments.filter((a) => a.active && a.status === 'ACCEPTED').length
+  const urgentCases = assignments.filter((a) => summaries.get(a.applicationId)?.urgent).length
+
+  const stats = {
+    totalRequests,
+    pendingRequests,
+    acceptedCases,
+    activeCases,
+    urgentCases,
+  }
+
+  return {
+    stats,
+    records: assignments.map((assignment) => {
+      const record = caseById.get(assignment.caseId)
+      const summary = summaries.get(assignment.applicationId)
+      const accepted = assignment.status === 'ACCEPTED'
+      return { assignmentId: assignment._id, applicationId: assignment.applicationId, caseId: assignment.caseId,
+        applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, priorityDecision: summary?.priorityDecision ?? null,
+        assignmentStatus: assignment.status, caseStatus: accepted ? record?.status ?? 'OPEN' : null,
+        nextHearingAt: accepted ? record?.nextHearingAt ?? null : null, nextAction: accepted ? record?.nextAction ?? null : null,
+        updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt, reminders }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt, ...reminderSummary(reminders) })) : [],
+        payment: accepted ? paymentByAssignment.get(assignment._id.toString()) ?? null : null }
+    }),
+  }
 }
 
 export async function updateCasePlan(applicationId, input, actor) {
@@ -437,3 +457,17 @@ export async function updateLawyerPaymentStatus(assignmentId, input, actor) {
     return { id: event.id, stage: event.stage, status: event.status, version: updated.version, moneyMoved: false }
   })
 }
+
+export async function getLawyerAvailability(userId) {
+  const user = await User.findById(userId).select('acceptingCases displayName username')
+  if (!user) throw new HttpError(404, 'NOT_FOUND', 'User not found.')
+  return { acceptingCases: user.acceptingCases ?? true, displayName: user.displayName, username: user.username }
+}
+
+export async function setLawyerAvailability(userId, acceptingCases) {
+  const isAccepting = Boolean(acceptingCases)
+  const user = await User.findByIdAndUpdate(userId, { $set: { acceptingCases: isAccepting } }, { new: true }).select('acceptingCases displayName username')
+  if (!user) throw new HttpError(404, 'NOT_FOUND', 'User not found.')
+  return { acceptingCases: user.acceptingCases ?? true, displayName: user.displayName, username: user.username }
+}
+

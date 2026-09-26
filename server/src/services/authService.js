@@ -65,6 +65,7 @@ export async function registerCitizen(username, password, nid = '', name = '', p
   const user = await User.create({
     username: cleanUsername,
     displayName: fullName,
+    userType: 'citizen',
     passwordHash,
     nid: nid?.trim() || undefined,
     phone: phone?.trim() || (cleanUsername.startsWith('01') || cleanUsername.startsWith('+') ? cleanUsername : undefined),
@@ -81,12 +82,13 @@ export async function registerCitizen(username, password, nid = '', name = '', p
   const token = randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000)
   await DemoSession.create({ tokenHash: tokenHash(token), userId: user._id, expiresAt })
-  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName, role: 'CITIZEN' } }
+  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName, userType: 'citizen', role: 'CITIZEN' } }
 }
 
 export async function login(username, password, remoteAddress = '') {
   if (!staffLoginEnabled()) throw new HttpError(503, 'DEMO_AUTH_DISABLED', 'Staff sign-in is disabled on this server.')
-  const key = createHash('sha256').update(`${remoteAddress}\0${username.toLowerCase()}`).digest('hex')
+  const cleanId = (username || '').toLowerCase().trim()
+  const key = createHash('sha256').update(`${remoteAddress}\0${cleanId}`).digest('hex')
   const now = Date.now()
   let failures = failedLogins.get(key)
   if (failures?.resetAt <= now) {
@@ -95,7 +97,27 @@ export async function login(username, password, remoteAddress = '') {
   }
   if (failures?.count >= maxLoginFailures) throw new HttpError(429, 'LOGIN_RATE_LIMITED', 'Too many sign-in attempts. Try again later.')
 
-  const user = await User.findOne({ username: username.toLowerCase(), active: true }).select('+passwordHash')
+  const demoRoleUsernames = {
+    citizen: 'demo.citizen',
+    dlao: 'demo.officer',
+    lawyer: 'demo.lawyer',
+    mediator: 'demo.mediator',
+    helpline: 'demo.helpline',
+    udc: 'demo.udc',
+    receiving_dlao: 'demo.receiving',
+    case_support: 'demo.support',
+    clao: 'demo.clao',
+    admin: 'admin.com',
+  }
+  const targetUsername = demoRoleUsernames[cleanId] || cleanId
+  let user = await User.findOne({
+    $or: [{ username: targetUsername }, { username: cleanId }],
+    active: true,
+  }).select('+passwordHash')
+
+  if (!user) {
+    user = await User.findOne({ userType: cleanId, active: true }).select('+passwordHash')
+  }
   const dummyHash = `${'0'.repeat(32)}:${'0'.repeat(128)}`
   if (!await verifyPassword(password, user?.passwordHash ?? dummyHash)) {
     if (!failures) {
@@ -114,7 +136,7 @@ export async function login(username, password, remoteAddress = '') {
   const token = randomBytes(32).toString('hex')
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000)
   await DemoSession.create({ tokenHash: tokenHash(token), userId: user._id, expiresAt })
-  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName } }
+  return { token, expiresAt, user: { id: user.id, username: user.username, displayName: user.displayName, userType: user.userType || 'citizen' } }
 }
 
 export async function getSession(token) {
@@ -125,7 +147,7 @@ export async function getSession(token) {
   const user = await User.findOne({ _id: session.userId, active: true })
   if (!user) return null
   const assignments = await RoleAssignment.find({ userId: user._id, active: true }).lean()
-  return { userId: user._id, username: user.username, displayName: user.displayName, assignments }
+  return { userId: user._id, username: user.username, displayName: user.displayName, userType: user.userType || 'citizen', acceptingCases: user.acceptingCases ?? true, assignments }
 }
 
 export async function ensureAdminUser() {
@@ -136,7 +158,7 @@ export async function ensureAdminUser() {
   const passwordHash = await hashPassword(password)
   const user = await User.findOneAndUpdate(
     { username },
-    { $set: { displayName: 'System Administrator', passwordHash, active: true, fictional: false } },
+    { $set: { displayName: 'System Administrator', userType: 'admin', passwordHash, active: true, fictional: false } },
     { upsert: true, returnDocument: 'after' },
   )
   await RoleAssignment.updateOne(

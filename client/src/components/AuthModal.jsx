@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { bi } from './Bi.jsx'
 
 const OFFICER_ROLES = [
-  { label: 'DLAO', id: 'demo.officer' },
-  { label: 'Mediator', id: 'demo.mediator' },
-  { label: 'Helpline Agent', id: 'demo.helpline' },
-  { label: 'UDC Operator', id: 'demo.udc' },
-  { label: 'Panel Lawyer', id: 'demo.lawyer' },
-  { label: 'Receiving DLAO', id: 'demo.receiving' },
-  { label: 'Case Support', id: 'demo.support' },
-  { label: 'CLAO', id: 'demo.clao' },
+  { label: 'DLAO', userType: 'dlao', defaultPass: '1234' },
+  { label: 'Panel Lawyer', userType: 'lawyer', defaultPass: '123' },
+  { label: 'Mediator', userType: 'mediator', defaultPass: '1234' },
+  { label: 'Helpline Agent', userType: 'helpline', defaultPass: '1234' },
+  { label: 'UDC Operator', userType: 'udc', defaultPass: '1234' },
+  { label: 'Receiving DLAO', userType: 'receiving_dlao', defaultPass: '1234' },
+  { label: 'Case Support', userType: 'case_support', defaultPass: '1234' },
+  { label: 'CLAO', userType: 'clao', defaultPass: '1234' },
 ]
 
 export default function AuthModal({
@@ -24,12 +24,12 @@ export default function AuthModal({
   const [activeTab, setActiveTab] = useState(initialTab)
 
   // Officer tab state
-  const [selectedOfficerId, setSelectedOfficerId] = useState(OFFICER_ROLES[0].id)
-  const [officerUsername, setOfficerUsername] = useState(OFFICER_ROLES[0].id)
-  const [officerPassword, setOfficerPassword] = useState('1234')
+  const [selectedOfficerType, setSelectedOfficerType] = useState(OFFICER_ROLES[0].userType)
+  const [officerUsername, setOfficerUsername] = useState(OFFICER_ROLES[0].userType)
+  const [officerPassword, setOfficerPassword] = useState(OFFICER_ROLES[0].defaultPass)
 
-  // Keep a new registration's sign-in details, defaulting to demo.citizen / 1234
-  const [citizenLoginId, setCitizenLoginId] = useState('demo.citizen')
+  // Keep a new registration's sign-in details, defaulting to citizen / 1234
+  const [citizenLoginId, setCitizenLoginId] = useState('citizen')
   const [citizenLoginPassword, setCitizenLoginPassword] = useState('1234')
 
   // Citizen sign-up state
@@ -38,8 +38,8 @@ export default function AuthModal({
   const [regPassword, setRegPassword] = useState('')
   const [regNid, setRegNid] = useState('')
 
-  // Admin tab state (auto-filled with admin.com / admin123)
-  const [adminUsername, setAdminUsername] = useState('admin.com')
+  // Admin tab state (auto-filled with admin / admin123)
+  const [adminUsername, setAdminUsername] = useState('admin')
   const [adminPassword, setAdminPassword] = useState('admin123')
 
   const [busy, setBusy] = useState(false)
@@ -48,10 +48,11 @@ export default function AuthModal({
   if (!isOpen) return null
 
   function handleOfficerSelect(e) {
-    const roleId = e.target.value
-    setSelectedOfficerId(roleId)
-    setOfficerUsername(roleId)
-    setOfficerPassword('1234')
+    const type = e.target.value
+    setSelectedOfficerType(type)
+    setOfficerUsername(type)
+    const match = OFFICER_ROLES.find((r) => r.userType === type)
+    setOfficerPassword(match?.defaultPass || '1234')
   }
 
   async function handleOfficerSubmit(e) {
@@ -289,13 +290,13 @@ export default function AuthModal({
                   onChange={(e) => setCitizenLoginPassword(e.target.value)}
                 />
                 <p className="auth-hint">
-                  {bi('Auto-filled with demo credentials (demo.citizen / 1234).', 'ডেমো অ্যাক্সেসের তথ্য স্বয়ংক্রিয় পূরণ করা হয়েছে (demo.citizen / 1234)।')}
+                  {bi('Auto-filled with demo credentials (user type: citizen / password: 1234).', 'ডেমো অ্যাক্সেসের তথ্য স্বয়ংক্রিয় পূরণ করা হয়েছে (ইউজার টাইপ: citizen / পাসওয়ার্ড: 1234)।')}
                   {' '}&bull;{' '}
                   <button
                     type="button"
                     className="link-btn"
                     onClick={() => {
-                      setCitizenLoginId('demo.citizen')
+                      setCitizenLoginId('citizen')
                       setCitizenLoginPassword('1234')
                     }}
                   >
@@ -327,23 +328,23 @@ export default function AuthModal({
           {mode === 'signin' && activeTab === 'officer' && (
             <form onSubmit={handleOfficerSubmit} className="auth-form-stack">
               <div>
-                <label htmlFor="officer-role-select">{bi('Choose Officer Role', 'কর্মকর্তার দায়িত্ব ও পদবি নির্বাচন করুন')}</label>
+                <label htmlFor="officer-role-select">{bi('Choose User Type / Role', 'ইউজার টাইপ / কর্মকর্তার ভূমিকা নির্বাচন করুন')}</label>
                 <select
                   id="officer-role-select"
                   className="auth-select"
-                  value={selectedOfficerId}
+                  value={selectedOfficerType}
                   onChange={handleOfficerSelect}
                 >
                   {OFFICER_ROLES.map((role) => (
-                    <option key={role.id} value={role.id}>
-                      {role.label}
+                    <option key={role.userType} value={role.userType}>
+                      {role.label} ({role.userType})
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label htmlFor="officer-id">{bi('Officer ID', 'কর্মকর্তার ইউজার আইডি')}</label>
+                <label htmlFor="officer-id">{bi('User Type', 'ইউজার টাইপ')}</label>
                 <input
                   id="officer-id"
                   type="text"
@@ -363,7 +364,7 @@ export default function AuthModal({
                   onChange={(e) => setOfficerPassword(e.target.value)}
                 />
                 <p className="auth-hint">
-                  {bi('Auto-filled with demo credentials (password: 1234).', 'ডেমো পরীক্ষার তথ্য স্বয়ংক্রিয় পূরণ করা হয়েছে (পাসওয়ার্ড: 1234)।')}
+                  {bi(`Auto-filled with demo credentials (user type: ${officerUsername} / password: ${officerPassword}).`, `ডেমো পরীক্ষার তথ্য স্বয়ংক্রিয় পূরণ করা হয়েছে (ইউজার টাইপ: ${officerUsername} / পাসওয়ার্ড: ${officerPassword})।`)}
                 </p>
               </div>
 

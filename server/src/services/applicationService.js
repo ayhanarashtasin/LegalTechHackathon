@@ -135,7 +135,8 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
   return mongoose.connection.transaction(async (session) => {
     const representative = answers.callerRole === 'REPRESENTATIVE'
     const trusted = answers.contactChannel === 'TRUSTED_PERSON'
-    const phone = advice || trusted || answers.contactChannel === 'PHONE'
+    const safeNumber = answers.contactValue || answers.trustedPhone || answers.phone
+    const phone = advice || trusted || answers.contactChannel === 'PHONE' || Boolean(safeNumber)
     const sourceType = advice ? 'UNKNOWN_OR_UNVERIFIED' : representative ? 'REPRESENTATIVE_REPORTED' : 'APPLICANT_REPORTED'
     const applicantName = representative ? answers.applicantName : answers.callerName
     const recordedByUserId = channelUser._id
@@ -181,10 +182,12 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
     }], { session }) : []
     // [fact field, answer it came from, value]; an answer the live model extracted is flagged aiInferred.
     const factValues = advice
-      ? [['advice.topic', 'adviceTopic', answers.adviceTopic]]
+      ? [['advice.topic', 'adviceTopic', answers.adviceTopic], ...(safeNumber ? [['contact.phone', 'contactValue', safeNumber]] : [])]
       : [['complaint.summary', 'problem', answers.problem], ['location.district', 'district', answers.district],
         ['identity.nid_known', 'nidKnown', answers.nidKnown ? 'YES' : 'NO'], ...(answers.nid ? [['identity.nid', 'nid', answers.nid]] : []),
-        ['safety.urgent', 'urgent', answers.urgent === 'UNKNOWN' ? 'UNKNOWN' : answers.urgent ? 'YES' : 'NO'], ['contact.preference', 'contactChannel', answers.contactChannel]]
+        ['safety.urgent', 'urgent', answers.urgent === 'UNKNOWN' ? 'UNKNOWN' : answers.urgent ? 'YES' : 'NO'],
+        ['contact.preference', 'contactChannel', answers.contactChannel || 'PHONE'],
+        ...(safeNumber ? [['contact.phone', 'contactValue', safeNumber]] : [])]
     // Representative reports are never applicant-confirmed here; only the applicant can confirm them later.
     const applicantConfirmed = !advice && !representative
     const callerFacts = factValues.map(([field, answerField, value]) => {
@@ -210,9 +213,9 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
       applicationId, version: 1,
       allowedChannels: phone ? ['PHONE'] : ['IN_PERSON'],
       prohibitedChannels: phone ? ['SMS'] : ['PHONE', 'SMS'],
-      contactValue: phone ? (trusted ? answers.trustedPhone : answers.contactValue) : undefined,
+      contactValue: safeNumber || (phone ? (trusted ? answers.trustedPhone : answers.contactValue) : undefined),
       contactOwnerPersonId: trusted ? trustedPerson._id : phone && !advice ? caller._id : undefined,
-      safeTimeWindow: answers.safeTime, smsSafe: false, neutralWordingRequired: true, unknownAnswerAction: 'DISCLOSE_NOTHING', recordedByUserId,
+      safeTimeWindow: answers.safeTime || 'Office hours (09:00 AM - 05:00 PM)', smsSafe: false, neutralWordingRequired: true, unknownAnswerAction: 'DISCLOSE_NOTHING', recordedByUserId,
     }], { session })
     const [task] = await Task.create([advice
       ? { applicationId, kind: 'ADVICE_CALLBACK', ownerRole: 'HELPLINE_AGENT', title: 'Call back with legal information',
@@ -314,8 +317,19 @@ export async function storeCallRecording(applicationId, code, audio, mimeType) {
   })
 }
 
+export async function checkApplicationAccess(applicationId, actor) {
+  const application = await Application.findOne({ applicationId }).lean()
+  if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
+  const isOfficer = hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)
+  if (isOfficer) return application
+  const isAssignedLawyer = actor?.assignments?.some(({ role }) => role === 'PANEL_LAWYER') &&
+    await LawyerAssignment.exists({ applicationId, lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } })
+  if (isAssignedLawyer) return application
+  throw new HttpError(403, 'FORBIDDEN', 'Access to application details is not permitted for this role.')
+}
+
 export async function getCallRecording(applicationId, actor) {
-  await officeApplication(applicationId, actor)
+  await checkApplicationAccess(applicationId, actor)
   const recording = await CallRecording.findOne({ applicationId }).select('+audio')
   if (!recording) throw new HttpError(404, 'NOT_FOUND', 'No call recording is stored.')
   return recording
@@ -577,7 +591,7 @@ export async function getApplication(applicationId, actor) {
   if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode) && !mediationAccess) {
     throw new HttpError(403, 'FORBIDDEN', 'This role cannot read the application.')
   }
-  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence, summaryFacts] = await Promise.all([
+  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence, summaryFacts, complaintSummaryFact, safeContactProfile] = await Promise.all([
     Person.findById(application.applicantPersonId).select('displayName identityStatus').lean(),
     Task.findOne({ applicationId, status: 'OPEN' }).sort({ createdAt: 1 }).select('title ownerRole nextAction dueAt').lean(),
     Representation.findOne({ applicationId }).sort({ createdAt: -1 }).populate('representativePersonId', 'displayName').lean(),
@@ -586,7 +600,9 @@ export async function getApplication(applicationId, actor) {
     CaseFact.findOne({ applicationId, field: 'safety.urgent' }).sort({ revision: -1 }).select('value revision sourceType').lean(),
     AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive newState.safetyNeedsReview').lean(),
     Document.countDocuments({ applicationId, sensitivity: 'RESTRICTED' }),
-    CaseFact.find({ applicationId, field: { $in: ['complaint.type', 'complaint.legal_need', 'identity.nid_known'] } }).sort({ revision: -1 }).select('field value').lean(),
+    CaseFact.find({ applicationId, field: { $in: ['complaint.type', 'complaint.legal_need', 'identity.nid_known', 'incident.what', 'incident.when', 'incident.where', 'incident.who', 'contact.phone', 'location.district'] } }).sort({ revision: -1 }).select('field value').lean(),
+    CaseFact.findOne({ applicationId, field: 'complaint.summary' }).sort({ revision: -1 }).lean(),
+    SafeContactProfile.findOne({ applicationId }).sort({ version: -1 }).lean(),
   ])
   const summary = latestValues(summaryFacts)
   return {
@@ -596,6 +612,20 @@ export async function getApplication(applicationId, actor) {
     identityStatus: person?.identityStatus ?? 'INCOMPLETE', nextTask,
     urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview, restrictedEvidence }),
     service: application.service ?? 'COMPLAINT',
+    complaintSummary: complaintSummaryFact?.value ?? null,
+    safeContactPhone: safeContactProfile?.contactValue ?? summary['contact.phone'] ?? null,
+    incident: {
+      what: summary['incident.what'] ?? null,
+      when: summary['incident.when'] ?? null,
+      where: summary['incident.where'] ?? summary['location.district'] ?? null,
+      who: summary['incident.who'] ?? null,
+    },
+    safeContact: safeContactProfile ? {
+      contactValue: safeContactProfile.contactValue || summary['contact.phone'],
+      safeTimeWindow: safeContactProfile.safeTimeWindow,
+      allowedChannels: safeContactProfile.allowedChannels,
+      unknownAnswerAction: safeContactProfile.unknownAnswerAction,
+    } : null,
     // AI suggestions from the caller's own account; the officer confirms or ignores them.
     complaintType: summary['complaint.type'] ?? null, legalNeed: summary['complaint.legal_need'] ?? null,
     vulnerability: vulnerabilities({ urgent: urgentFact?.value === 'YES', representative: Boolean(representation), nidKnown: summary['identity.nid_known'], aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview }),
@@ -859,7 +889,7 @@ export async function getFacts(applicationId, actor) {
 }
 
 export async function getSafeContact(applicationId, actor) {
-  await officeApplication(applicationId, actor)
+  await checkApplicationAccess(applicationId, actor)
   const profile = await SafeContactProfile.findOne({ applicationId }).sort({ version: -1 })
     .select('version allowedChannels prohibitedChannels contactValue safeTimeWindow smsSafe neutralWordingRequired unknownAnswerAction').lean()
   // The officer needs the neutral words during the call, before the attempt is logged.
@@ -867,7 +897,7 @@ export async function getSafeContact(applicationId, actor) {
 }
 
 export async function getTranscript(applicationId, actor) {
-  await officeApplication(applicationId, actor)
+  await checkApplicationAccess(applicationId, actor)
   return VoiceTranscript.findOne({ applicationId }).select('turns transcribedBy createdAt').lean()
 }
 
@@ -951,10 +981,42 @@ export async function getCase(caseId, actor) {
   if (!assignment) throw new HttpError(403, 'FORBIDDEN', 'This case is not assigned to this user.')
   const summary = (await lawyerCaseSummaries([record.applicationId])).get(record.applicationId)
 
+  const [complaintFact, facts, safeContactProfile, transcriptDoc, hasRecording] = await Promise.all([
+    CaseFact.findOne({ applicationId: record.applicationId, field: 'complaint.summary' }).sort({ revision: -1 }).lean(),
+    CaseFact.find({ applicationId: record.applicationId, field: { $in: ['incident.what', 'incident.when', 'incident.where', 'incident.who', 'location.district', 'contact.phone'] } }).sort({ revision: -1 }).lean(),
+    SafeContactProfile.findOne({ applicationId: record.applicationId }).sort({ version: -1 }).lean(),
+    VoiceTranscript.findOne({ applicationId: record.applicationId }).lean(),
+    CallRecording.exists({ applicationId: record.applicationId }),
+  ])
+  const incidentMap = latestValues(facts)
+  const hasIncidentInfo = Boolean(incidentMap['incident.what'] || incidentMap['incident.when'] || incidentMap['incident.where'] || incidentMap['incident.who'])
+  const incident = hasIncidentInfo ? {
+    what: incidentMap['incident.what'] ?? null,
+    when: incidentMap['incident.when'] ?? null,
+    where: incidentMap['incident.where'] ?? null,
+    who: incidentMap['incident.who'] ?? null,
+    phone: incidentMap['contact.phone'] ?? safeContactProfile?.contactValue ?? null,
+  } : null
+  const complaintSummary = complaintFact?.value ?? null
+
+  const caseDetails = {
+    complaintSummary,
+    incident,
+    safeContact: safeContactProfile ? {
+      contactValue: safeContactProfile.contactValue || null,
+      safeTimeWindow: safeContactProfile.safeTimeWindow ?? null,
+      allowedChannels: safeContactProfile.allowedChannels ?? ['PHONE'],
+      unknownAnswerAction: safeContactProfile.unknownAnswerAction ?? 'DISCLOSE_NOTHING',
+    } : null,
+    transcript: transcriptDoc ? { turns: transcriptDoc.turns, transcribedBy: transcriptDoc.transcribedBy } : null,
+    hasRecording: Boolean(hasRecording),
+  }
+
   if (assignment.status === 'PENDING') {
     return {
       caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: 'PENDING',
       ...summary,
+      ...caseDetails,
     }
   }
   const documents = await Document.find({ applicationId: record.applicationId, sensitivity: 'STANDARD' }).sort({ createdAt: 1 }).limit(20).select('label currentVersion').lean()
@@ -967,12 +1029,16 @@ export async function getCase(caseId, actor) {
     LawyerUpdate.find({ assignmentId: assignment._id }).sort({ sequence: 1 }).select('sequence dueAt instruction status missedAt submittedAt report nextAction reminders').lean(),
     LawyerPaymentEvent.findOne({ assignmentId: assignment._id }).sort({ createdAt: -1 }).select('stage status reason createdAt').lean(),
   ])
-  return { caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: assignment.status,
+  return {
+    caseId, applicationId: record.applicationId, status: record.status, assignmentId: assignment._id, assignmentStatus: assignment.status,
     ...summary,
+    ...caseDetails,
     nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null,
     // The lawyer sees how often the office reminded them and when, not which officer did.
     updates: updates.map(({ reminders = [], ...update }) => ({ ...update, reminderCount: reminders.length, lastRemindedAt: reminders.at(-1)?.at ?? null })),
-    payment: payment ?? null, documents: documents.map((document) => ({ id: document._id, label: document.label, currentVersion: document.currentVersion, version: latest.get(document._id.toString()) ?? null })) }
+    payment: payment ?? null,
+    documents: documents.map((document) => ({ id: document._id, label: document.label, currentVersion: document.currentVersion, version: latest.get(document._id.toString()) ?? null })),
+  }
 }
 
 const explicitlyGranted = (document, actor) => document.accessState === 'EXPLICIT_GRANT' && document.allowedUserIds.some((id) => id.equals(actor.userId))
