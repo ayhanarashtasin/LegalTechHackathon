@@ -1,6 +1,6 @@
 import mongoose from 'mongoose'
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
-import { Application, AssistanceRecord, AuditEvent, CallRecording, CancellationRequest, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerPaymentEvent, LawyerUpdate, Mediation, Person, Referral, Representation, RoleAssignment, SafeContactProfile, Task, User, VoiceTranscript } from '../models/index.js'
+import { Application, AssistanceRecord, AuditEvent, CallRecording, CancellationRequest, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerPaymentEvent, LawyerUpdate, Mediation, Person, Referral, Representation, RoleAssignment, SafeContactProfile, Task, TriageAssessment, User, VoiceTranscript } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
 import { daysOverdue } from '../utils/overdue.js'
@@ -31,6 +31,28 @@ export function urgencyReasons({ urgentFact, aiSensitive, safetyNeedsReview, res
     safetyNeedsReview && 'The voice safety answer needs human verification before anyone relies on a no-risk response.',
     restrictedEvidence && `${restrictedEvidence} restricted sensitive-evidence item${restrictedEvidence === 1 ? ' is' : 's are'} on file.`,
   ].filter(Boolean)
+}
+
+// Authoritative urgency determination: an authorised DLAO priority decision (ROUTINE or URGENT) always
+// supersedes AI suggestions. When no human decision has been made, an AI or safety urgency flag stays urgent.
+export function isApplicationUrgent(application, { urgentFact, aiSensitive, safetyNeedsReview, restrictedEvidence, category, harassmentKeywords, triageAssessments = [] } = {}) {
+  if (application?.priorityDecision === 'ROUTINE') return false
+  if (application?.priorityDecision === 'URGENT') return true
+
+  const reasons = urgencyReasons({
+    urgentFact: urgentFact?.value === 'YES' ? urgentFact : null,
+    aiSensitive: Boolean(aiSensitive),
+    safetyNeedsReview: Boolean(safetyNeedsReview),
+    restrictedEvidence: Number(restrictedEvidence) || 0,
+    category,
+    harassmentKeywords: Boolean(harassmentKeywords),
+  })
+
+  const triageUrgent = Array.isArray(triageAssessments) && triageAssessments.some(
+    (t) => t.recommendation === 'URGENT_REVIEW' || t.flags?.some((f) => f.code === 'URGENT_RECOMMENDATION')
+  )
+
+  return reasons.length > 0 || triageUrgent || urgentFact?.value === 'YES'
 }
 
 // What an officer weighs first. Each signal comes from a recorded fact or event; none is a judgement made here.
@@ -198,7 +220,7 @@ export async function submitVoiceIntake({ mode, answers, correctedFields = [], a
       ? [['advice.topic', 'adviceTopic', answers.adviceTopic]]
       : [['complaint.summary', 'problem', answers.problem], ['location.district', 'district', answers.district],
         ['identity.nid_known', 'nidKnown', answers.nidKnown ? 'YES' : 'NO'], ...(answers.nid ? [['identity.nid', 'nid', answers.nid]] : []),
-        ['safety.urgent', 'urgent', answers.urgent === 'UNKNOWN' ? 'UNKNOWN' : answers.urgent ? 'YES' : 'NO'],
+        ['safety.urgent', 'urgent', (answers.urgent === true || aiSensitive) ? 'YES' : (answers.urgent === 'UNKNOWN' ? 'UNKNOWN' : 'NO')],
         ['contact.preference', 'contactChannel', answers.contactChannel || 'PHONE']]
     // Representative reports are never applicant-confirmed here; only the applicant can confirm them later.
     const applicantConfirmed = !advice && !representative
@@ -777,6 +799,7 @@ export async function getApplication(applicationId, actor) {
     identityStatus: person?.identityStatus ?? 'INCOMPLETE', nextTask,
     assignedOfficer: assignedOfficer ? { id: assignedOfficer._id, name: assignedOfficer.displayName } : null,
     urgencyReasons: urgencyReasons({ urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview, restrictedEvidence, category: summary['complaint.category'], harassmentKeywords: submitted?.newState?.harassmentKeywords }),
+    urgent: isApplicationUrgent(application, { urgentFact: urgentFact?.value === 'YES' && urgentFact, aiSensitive: submitted?.newState?.aiSensitive, safetyNeedsReview: submitted?.newState?.safetyNeedsReview, restrictedEvidence, category: summary['complaint.category'], harassmentKeywords: submitted?.newState?.harassmentKeywords }),
     service: application.service ?? 'COMPLAINT',
     complaintSummary: complaintSummaryFact?.value ?? null,
     safeContactPhone: safeContactProfile?.contactValue ?? null,
@@ -881,9 +904,11 @@ export async function listWorkspace(role, actor) {
     const records = applications.map((item) => {
       const problem = dlaoView ? problemSummaries.get(item.applicationId) : null
       const hearing = item.caseId ? hearingByCase.get(item.caseId) ?? null : null
+      const reasons = urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0, category: summaries.get(item.applicationId)?.['complaint.category'], harassmentKeywords: harassmentKeywords.has(item.applicationId) })
+      const itemUrgent = isApplicationUrgent(item, { urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0, category: summaries.get(item.applicationId)?.['complaint.category'], harassmentKeywords: harassmentKeywords.has(item.applicationId) })
       return {
         applicationId: item.applicationId, caseId: item.caseId ?? null, status: item.status,
-        reviewState: item.reviewState, priorityDecision: item.priorityDecision ?? null, channel: item.channel,
+        reviewState: item.reviewState, priorityDecision: item.priorityDecision ?? null, urgent: itemUrgent, channel: item.channel,
         applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
         createdAt: item.createdAt, updatedAt: item.updatedAt,
         nextHearingAt: hearing?.nextHearingAt ?? null, nextAction: hearing?.nextAction ?? null,
@@ -896,7 +921,7 @@ export async function listWorkspace(role, actor) {
         vulnerability: vulnerabilities({ urgent: Boolean(urgency.get(item.applicationId)), representative: represented.has(item.applicationId),
           nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), category: summaries.get(item.applicationId)?.['complaint.category'], harassmentKeywords: harassmentKeywords.has(item.applicationId) }),
         flags: queueFlags(item, identities.get(item.applicantPersonId.toString()), tasksByApplication.get(item.applicationId) ?? [],
-          urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0, category: summaries.get(item.applicationId)?.['complaint.category'], harassmentKeywords: harassmentKeywords.has(item.applicationId) }),
+          reasons,
           waiting.get(item.applicationId), missedUpdates.get(item.applicationId) ?? [], now, hearing?.nextHearingAt ?? null),
       }
     })
@@ -1284,20 +1309,57 @@ export async function lookupHelplineStatus(identifier, code, actor, contactChann
   })
 }
 
-// What an assigned panel lawyer sees about each applicant; a human priority decision outranks an urgent safety fact.
+// What an assigned panel lawyer sees about each applicant; an authorised DLAO priorityDecision outranks AI urgency.
 export async function lawyerCaseSummaries(applicationIds) {
-  const [applications, facts] = await Promise.all([
+  const [applications, facts, aiEvents, restrictedDocs, triageAssessments] = await Promise.all([
     Application.find({ applicationId: { $in: applicationIds } }).select('applicationId priorityDecision applicantPersonId').populate('applicantPersonId', 'displayName').lean(),
-    CaseFact.find({ applicationId: { $in: applicationIds }, field: { $in: ['safety.urgent', 'complaint.type', 'complaint.legal_need'] } })
-      .sort({ revision: -1 }).select('applicationId field value').lean(),
+    CaseFact.find({ applicationId: { $in: applicationIds }, field: { $in: ['safety.urgent', 'complaint.type', 'complaint.legal_need', 'complaint.category'] } })
+      .sort({ revision: -1 }).select('applicationId field value revision sourceType').lean(),
+    AuditEvent.find({ applicationId: { $in: applicationIds }, action: 'APPLICATION_SUBMITTED' })
+      .select('applicationId newState.aiSensitive newState.safetyNeedsReview newState.harassmentKeywords').lean(),
+    Document.find({ applicationId: { $in: applicationIds }, sensitivity: 'RESTRICTED' }).select('applicationId').lean(),
+    TriageAssessment.find({ applicationId: { $in: applicationIds } }).select('applicationId recommendation flags').lean(),
   ])
   const factsByApplication = Map.groupBy(facts, ({ applicationId }) => applicationId)
-  return new Map(applications.map(({ applicationId, priorityDecision, applicantPersonId }) => {
-    const values = latestValues(factsByApplication.get(applicationId) ?? [])
+  const aiEventsByApplication = new Map(aiEvents.map((e) => [e.applicationId, e]))
+  const restrictedCounts = Map.groupBy(restrictedDocs, (d) => d.applicationId)
+  const triageByApplication = Map.groupBy(triageAssessments, (t) => t.applicationId)
+
+  return new Map(applications.map((application) => {
+    const { applicationId, priorityDecision, applicantPersonId } = application
+    const appFacts = factsByApplication.get(applicationId) ?? []
+    const values = latestValues(appFacts)
+    const urgentFact = appFacts.find((f) => f.field === 'safety.urgent')
+    const aiEvent = aiEventsByApplication.get(applicationId)
+    const restrictedEvidence = restrictedCounts.get(applicationId)?.length ?? 0
+    const triage = triageByApplication.get(applicationId) ?? []
+
+    const urgent = isApplicationUrgent(application, {
+      urgentFact,
+      aiSensitive: aiEvent?.newState?.aiSensitive,
+      safetyNeedsReview: aiEvent?.newState?.safetyNeedsReview,
+      restrictedEvidence,
+      category: values['complaint.category'],
+      harassmentKeywords: aiEvent?.newState?.harassmentKeywords,
+      triageAssessments: triage,
+    })
+
+    const reasons = urgencyReasons({
+      urgentFact: urgentFact?.value === 'YES' ? urgentFact : null,
+      aiSensitive: aiEvent?.newState?.aiSensitive,
+      safetyNeedsReview: aiEvent?.newState?.safetyNeedsReview,
+      restrictedEvidence,
+      category: values['complaint.category'],
+      harassmentKeywords: aiEvent?.newState?.harassmentKeywords,
+    })
+
     return [applicationId, {
-      applicantName: applicantPersonId?.displayName ?? null, priorityDecision: priorityDecision ?? null,
-      urgent: priorityDecision === 'URGENT' || (priorityDecision !== 'ROUTINE' && values['safety.urgent'] === 'YES'),
-      legalNeed: values['complaint.legal_need'] ?? null, complaintType: values['complaint.type'] ?? null,
+      applicantName: applicantPersonId?.displayName ?? null,
+      priorityDecision: priorityDecision ?? null,
+      urgent,
+      flags: urgent ? [{ code: 'URGENT_RECOMMENDATION', reason: reasons.join(' ') || 'Flagged urgent by AI / intake safety assessment.' }] : [],
+      legalNeed: values['complaint.legal_need'] ?? null,
+      complaintType: values['complaint.type'] ?? null,
     }]
   }))
 }
@@ -1566,19 +1628,28 @@ export async function trackApplicationStatus(identifier, lookupCode) {
   // The code holder may be reading on a shared screen or listening on a shared phone (Malek's number is a shop's), so
   // the public result carries progress only: never the applicant's name, the legal matter, or the lawyer's name.
   // Signed-in staff see those on the record itself.
-  const [caseRecord, facts, rawAssignment, mediation] = await Promise.all([
+  const [caseRecord, facts, rawAssignment, mediation, aiEvent, triage] = await Promise.all([
     application.caseId
       ? Case.findOne({ caseId: application.caseId }).lean()
       : null,
-    CaseFact.find({ applicationId: application.applicationId, field: 'safety.urgent' }).sort({ revision: -1 }).lean(),
+    CaseFact.find({ applicationId: application.applicationId, field: { $in: ['safety.urgent', 'complaint.category'] } }).sort({ revision: -1 }).lean(),
     application.caseId
       ? LawyerAssignment.findOne({ caseId: application.caseId, active: true }).select('status createdAt acceptedAt').lean()
       : null,
     Mediation.findOne({ applicationId: application.applicationId }).select('status').lean(),
+    AuditEvent.findOne({ applicationId: application.applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive newState.safetyNeedsReview newState.harassmentKeywords').lean(),
+    TriageAssessment.findOne({ applicationId: application.applicationId, recommendation: 'URGENT_REVIEW' }).lean(),
   ])
 
   const factMap = latestValues(facts)
-  const isUrgent = application.priorityDecision === 'URGENT' || factMap['safety.urgent'] === 'YES'
+  const isUrgent = isApplicationUrgent(application, {
+    urgentFact: factMap['safety.urgent'] === 'YES' ? { value: 'YES' } : null,
+    aiSensitive: aiEvent?.newState?.aiSensitive,
+    safetyNeedsReview: aiEvent?.newState?.safetyNeedsReview,
+    harassmentKeywords: aiEvent?.newState?.harassmentKeywords,
+    category: factMap['complaint.category'],
+    triageAssessments: triage ? [triage] : [],
+  })
 
   let lawyer = null
   if (rawAssignment) {

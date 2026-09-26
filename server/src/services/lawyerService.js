@@ -141,7 +141,7 @@ export async function getLawyerWorklist(actor) {
       const summary = summaries.get(assignment.applicationId)
       const accepted = assignment.status === 'ACCEPTED'
       return { assignmentId: assignment._id, applicationId: assignment.applicationId, caseId: assignment.caseId,
-        applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, priorityDecision: summary?.priorityDecision ?? null,
+        applicantName: summary?.applicantName ?? null, urgent: summary?.urgent ?? false, flags: summary?.flags ?? [], priorityDecision: summary?.priorityDecision ?? null,
         assignmentStatus: assignment.status, caseStatus: accepted ? record?.status ?? 'OPEN' : null,
         nextHearingAt: accepted ? record?.nextHearingAt ?? null : null, nextAction: accepted ? record?.nextAction ?? null : null,
         updates: accepted ? (updatesByAssignment.get(assignment._id.toString()) ?? []).map(({ _id, sequence, dueAt, instruction, status, submittedAt, reminders }) => ({ id: _id, sequence, dueAt, instruction, status, submittedAt, ...reminderSummary(reminders) })) : [],

@@ -167,11 +167,9 @@ function LawyerCase({ session, caseId }) {
 
   const pending = record.assignmentStatus === 'PENDING'
   const accepted = record.assignmentStatus === 'ACCEPTED'
-  const isUrgent = Boolean(
-    record.urgent ||
-    record.priorityDecision === 'URGENT' ||
-    (record.priorityDecision !== 'ROUTINE' && record.flags?.some((f) => f.code === 'URGENT_RECOMMENDATION'))
-  )
+  const isUrgent = record.priorityDecision === 'ROUTINE'
+    ? false
+    : Boolean(record.priorityDecision === 'URGENT' || record.urgent || record.flags?.some((f) => f.code === 'URGENT_RECOMMENDATION'))
   const openUpdates = (record.updates || []).filter(({ status }) => status === 'PENDING' || status === 'MISSED')
 
   // Calculate lawyer workflow stage (1 to 5)

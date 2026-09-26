@@ -459,7 +459,7 @@ export default function RecordPage({ session }) {
             <h2 id="summary-title"><Bi en="At a glance" bn="এক নজরে" /></h2>
             <dl className="facts">
               <div><dt><Bi en="Review" bn="প্রাথমিক যাচাই" /></dt><dd><Term code={record.reviewState} /></dd></div>
-              <div><dt><Bi en="Priority" bn="অগ্রাধিকার" /></dt><dd>{record.priorityDecision ? <Term code={record.priorityDecision} /> : bi('Not set', 'নির্ধারিত নয়')}</dd></div>
+              <div><dt><Bi en="Priority" bn="অগ্রাধিকার" /></dt><dd>{record.priorityDecision ? <Term code={record.priorityDecision} /> : (record.urgent || record.urgencyReasons?.length ? <span className="urgent-flag"><Bi en="URGENT (AI / Safety Flagged)" bn="জরুরি (এআই/নিরাপত্তা চিহ্নিত)" /></span> : bi('Not set', 'নির্ধারিত নয়'))}</dd></div>
               <div><dt><Bi en="Case ID" bn="মামলা নম্বর" /></dt><dd>{record.caseId || bi('After acceptance', 'আবেদন গ্রহণের পর')}</dd></div>
               <div><dt><Bi en="Identity" bn="পরিচয় যাচাই" /></dt><dd><Term code={record.identityStatus} /></dd></div>
               <div>

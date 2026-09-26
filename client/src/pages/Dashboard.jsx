@@ -288,7 +288,7 @@ export default function Dashboard({ session }) {
   const officeView = staff || role === 'CLAO'
   const pendingCertifications = workspace?.certifications?.filter(({ stage }) => stage === 'PENDING_CLAO_CERTIFICATION').length ?? 0
   const canSubmit = staff || role === 'HELPLINE_AGENT'
-  const isUrgent = (record) => Boolean(record.urgent || record.priorityDecision === 'URGENT' || (record.priorityDecision !== 'ROUTINE' && record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION')))
+  const isUrgent = (record) => record.priorityDecision === 'ROUTINE' ? false : Boolean(record.priorityDecision === 'URGENT' || record.urgent || record.flags?.some((flag) => flag.code === 'URGENT_RECOMMENDATION'))
   const isHearingToday = (record) => record.flags?.some((flag) => flag.code === 'HEARING_TODAY')
   const isPending = (record) => !isUrgent(record) && record.status !== 'ACCEPTED'
 

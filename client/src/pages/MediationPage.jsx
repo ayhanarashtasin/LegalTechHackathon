@@ -48,7 +48,7 @@ function CaseSummary({ record, role, documents }) {
       <div><dt><Bi en="Status" bn="অবস্থা" /></dt><dd>{say(record.status)}</dd></div>
       <div><dt><Bi en="Review" bn="পর্যালোচনা" /></dt><dd>{say(record.reviewState)}</dd></div>
       <div><dt><Bi en="Channel" bn="মাধ্যম" /></dt><dd>{say(record.channel)}</dd></div>
-      {record.priorityDecision && <div><dt><Bi en="Priority" bn="অগ্রাধিকার" /></dt><dd>{say(record.priorityDecision)}</dd></div>}
+      {record.priorityDecision ? <div><dt><Bi en="Priority" bn="অগ্রাধিকার" /></dt><dd>{say(record.priorityDecision)}</dd></div> : (record.urgent ? <div><dt><Bi en="Priority" bn="অগ্রাধিকার" /></dt><dd><span className="urgent-flag">{say('URGENT')}</span></dd></div> : null)}
       {record.complaintSummary && <div><dt><Bi en="Problem" bn="সমস্যা" /></dt><dd>{record.complaintSummary}</dd></div>}
       {record.petitioner?.name && <div><dt><Bi en="Petitioner" bn="আবেদনকারী পক্ষ" /></dt><dd>{record.petitioner.name}</dd></div>}
       {record.respondent?.name && <div><dt><Bi en="Respondent" bn="প্রতিপক্ষ" /></dt><dd>{record.respondent.name}{record.respondent.relationship ? ` (${record.respondent.relationship})` : ''}</dd></div>}
