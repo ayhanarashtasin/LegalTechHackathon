@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test'
 import { signIn } from './support.js'
 
 test('Step 12: separate parties sign asynchronously, one offline packet syncs, and edited copy fails verification', async ({ page, request, browser, baseURL }) => {
+  test.setTimeout(120000) // three browser sessions, identity checks, and a CLAO certification
   const actors = JSON.parse(process.env.E2E_ACTORS)
   const ids = {}
   const headersFor = async (role) => {
@@ -24,6 +25,10 @@ test('Step 12: separate parties sign asynchronously, one offline packet syncs, a
   expect((await request.post(`/api/applications/${applicationId}/mediation/mediator`, { headers: officer, data: { mediatorUserId: ids.MEDIATOR } })).ok()).toBeTruthy()
   const mediationPath = `/api/applications/${applicationId}/mediation`
   for (const [suffix, data] of [
+    ['/safety-consent', {
+      safeForApplicant: true, applicantAgreed: true, applicantAvailable: true, oppositePartyWilling: true,
+      status: 'CONSENT_CONFIRMED', reason: 'The mediator checked safety privately and both fictional parties agreed to mediation.',
+    }],
     ['/schedule', {
       mode: 'REMOTE', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       inPersonFallback: 'Meet at the fictional district legal-aid office if remote access fails.',
@@ -41,7 +46,7 @@ test('Step 12: separate parties sign asynchronously, one offline packet syncs, a
 
   await signIn(page, 'MEDIATOR')
   await page.getByRole('link', { name: new RegExp(applicationId) }).click()
-  await expect(page.getByRole('heading', { name: /^Signatures/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Step 8 — Signatures/ })).toBeVisible()
   await page.getByRole('button', { name: 'Issue PARTY A code' }).click()
   const partyACode = await page.locator('code.signing-code').first().textContent()
   await page.getByRole('button', { name: 'Issue PARTY B code' }).click()
@@ -140,7 +145,7 @@ test('Step 12: separate parties sign asynchronously, one offline packet syncs, a
   await partyBContext.setOffline(false)
   await expect(partyBPage.getByRole('status').filter({ hasText: 'Your signature was synced and verified' })).toBeVisible()
   await page.getByRole('button', { name: 'Refresh party signatures' }).click()
-  await page.getByLabel('Your local passphrase for an encrypted offline mediator signature').fill('FictionalSignSecret!')
+  await page.getByLabel(/Passphrase for DLAO\/Mediator Signature/).fill('FictionalSignSecret!')
   await page.getByRole('button', { name: 'Create mediator signature and sync' }).click()
   await expect(page.getByRole('status').filter({ hasText: 'MEDIATOR signature was synced and verified' })).toBeVisible()
   await expect(page.getByRole('definition').filter({ hasText: 'PENDING CLAO CERTIFICATION' })).toBeVisible()
@@ -180,12 +185,12 @@ test('Step 12: separate parties sign asynchronously, one offline packet syncs, a
   await page.getByLabel('Verified legal basis').fill('Fictional authorised legal review with the Gazette, date and area reference recorded for this test.')
   await page.getByRole('button', { name: 'Record verified applicability' }).click()
   await page.getByLabel('Certification reason').fill('The CLAO reviewed the fictional signed settlement and certifies it.')
-  const signButton = page.getByRole('button', { name: 'Sign and certify' })
+  const signButton = page.getByRole('button', { name: /Approve \/ Certify/ })
   await expect(signButton).toBeDisabled()
   await page.getByLabel('I read this settlement and I sign this certification myself.').check()
   await signButton.click()
   await expect(page.getByRole('status').filter({ hasText: 'Your signature was verified and the CLAO certification is recorded.' })).toBeVisible()
-  await expect(page.getByText(/CLAO signature ·/)).toBeVisible()
+  await expect(page.getByRole('listitem').filter({ hasText: /^CLAO:/ })).toBeVisible()
   const certified = (await (await request.get(mediationPath, { headers: mediator })).json()).mediation
   expect(certified.stage).toBe('CERTIFIED_FINAL')
   expect(certified.signatures.map(({ signerRole }) => signerRole).sort()).toEqual(['CLAO', 'MEDIATOR', 'PARTY_A', 'PARTY_B'])

@@ -25,7 +25,7 @@ test('helpline intake becomes one reviewed DLAO case and provider shells stay bo
   await page.getByRole('region', { name: /^Decision/ }).getByLabel(/^Reason/).fill('Officer reviewed the fictional helpline intake.')
   await page.getByRole('button', { name: 'Record review' }).click()
   await expect(page.getByRole('button', { name: 'Accept application' })).toBeEnabled()
-  await page.getByLabel('Decision reason').fill('Officer accepted the fictional reviewed application.')
+  // Acceptance takes no reason since commit 2a81f50; the recorded review above carries the officer's reasoning.
   await page.getByRole('button', { name: 'Accept application' }).click()
   const caseText = page.getByText(/^CASE-\d{4}-\d{6}$/).first()
   await expect(caseText).toBeVisible()

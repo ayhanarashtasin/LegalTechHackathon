@@ -58,6 +58,15 @@ async function actor(username, role, officeCode = 'DEMO') {
 
 async function post(path, token, body = {}) { return request(path, { method: 'POST', token, body }) }
 
+const safetyAnswers = { safeForApplicant: true, applicantAgreed: true, applicantAvailable: true, oppositePartyWilling: true }
+async function confirmSafety(applicationId, token) {
+  const result = await post(`/api/applications/${applicationId}/mediation/safety-consent`, token, {
+    ...safetyAnswers, status: 'CONSENT_CONFIRMED', reason: 'A human checked safety and both fictional parties agreed to mediation.',
+  })
+  assert.equal(result.status, 200)
+  return result
+}
+
 async function witnessedCheck(code, applicationId, token, mode = 'IN_PERSON') {
   const started = await post('/api/mediation-signing/verification/begin', null, { code, mode, consent: true })
   assert.equal(started.status, 200)
@@ -108,6 +117,7 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   assert.equal((await post(`/api/applications/${applicationId}/mediation/mediator`, officer.token, { mediatorUserId: String(outsideMediator.user._id) })).status, 400)
   assert.equal((await post(`/api/applications/${applicationId}/mediation/mediator`, officer.token, { mediatorUserId: String(mediator.user._id) })).data.mediatorUserId, String(mediator.user._id))
   assert.equal((await request(`/api/applications/${applicationId}`, { token: mediator.token })).status, 200)
+  await confirmSafety(applicationId, mediator.token)
   let result = await post(`/api/applications/${applicationId}/mediation/schedule`, mediator.token, {
     mode: 'REMOTE', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     inPersonFallback: 'Meet at the fictional district legal-aid office if remote access fails.',
@@ -328,6 +338,7 @@ test('T7: property and labour drafts use their controlled examples, date warning
     const path = `/api/applications/${applicationId}/mediation`
     assert.equal((await post(path, officer.token)).status, 201)
     assert.equal((await post(`${path}/mediator`, officer.token, { mediatorUserId: String(mediator.user._id) })).status, 200)
+    await confirmSafety(applicationId, mediator.token)
     assert.equal((await post(`${path}/schedule`, mediator.token, {
       mode: 'IN_PERSON', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), venue: 'Fictional DLAO room',
       notices: ['PARTY_A', 'PARTY_B'].map((party) => ({ party, deliveryState: 'DELIVERED', reason: 'A human recorded fictional delivery.' })),
@@ -432,6 +443,7 @@ test('with no mediator the DLAO officer runs every step; an appointed mediator t
   assert.ok(choices.includes(String(mediator.user._id)) && choices.includes(String(other.user._id)))
 
   // No mediator appointed: the DLAO officer schedules, and the step is tagged as the DLAO's.
+  await confirmSafety(applicationId, officer.token)
   let result = await post(`${path}/schedule`, officer.token, {
     mode: 'IN_PERSON', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), venue: 'Fictional DLAO room',
     notices: ['PARTY_A', 'PARTY_B'].map((party) => ({ party, deliveryState: 'DELIVERED', reason: 'A human recorded fictional delivery.' })),
@@ -467,4 +479,149 @@ test('with no mediator the DLAO officer runs every step; an appointed mediator t
   assert.equal((await request(path, { token: mediator.token })).status, 403)
   const audit = await models.AuditEvent.find({ applicationId, action: { $in: ['MEDIATOR_APPOINTED', 'MEDIATOR_REMOVED'] } }).lean()
   assert.deepEqual(audit.map(({ action }) => action), ['MEDIATOR_APPOINTED', 'MEDIATOR_REMOVED'])
+})
+
+const notices = ['PARTY_A', 'PARTY_B'].map((party) => ({ party, deliveryState: 'DELIVERED', reason: 'A human recorded fictional delivery.' }))
+const inPersonSchedule = () => ({ mode: 'IN_PERSON', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), venue: 'Fictional DLAO room', notices })
+
+// Approves the current draft and records both party signatures and the mediator's. `afterFirstCode` runs once Party A holds a code.
+async function approveAndSign(applicationId, mediator, afterFirstCode = async () => {}) {
+  const path = `/api/applications/${applicationId}/mediation`
+  let result = await post(`${path}/draft/review`, mediator.token, {
+    partyAUnderstands: true, partyAConsents: true, partyBUnderstands: true, partyBConsents: true, warningsReviewed: true,
+    reason: 'Both fictional parties confirmed understanding and consent with the mediator.',
+  })
+  assert.equal(result.data.stage, 'SIGNATURES')
+  const { draft } = result.data
+  const codes = {}
+  for (const signerRole of ['PARTY_A', 'PARTY_B']) {
+    const invitation = await post(`${path}/signing-invitations`, mediator.token, { signerRole })
+    assert.equal(invitation.status, 201)
+    codes[signerRole] = invitation.data.code
+    await witnessedCheck(invitation.data.code, applicationId, mediator.token)
+    if (signerRole === 'PARTY_A') await afterFirstCode(invitation.data.code)
+    assert.equal((await post('/api/mediation-signing/sign', null, { code: invitation.data.code, ...await signature(draft, signerRole), partyConfirmed: true })).status, 201)
+  }
+  result = await post(`${path}/signatures`, mediator.token, await signature(draft, 'MEDIATOR'))
+  assert.equal(result.data.stage, 'PENDING_CLAO_CERTIFICATION')
+  return { draft, codes }
+}
+
+// One fictional mediation walked to the CLAO with all three signatures; settlement AI is off, so the draft is rules-only.
+async function mediationAtClao(prefix) {
+  const officer = await actor(`${prefix}.officer`, 'DLAO_OFFICER')
+  const mediator = await actor(`${prefix}.mediator`, 'MEDIATOR')
+  const clao = await actor(`${prefix}.clao`, 'CLAO')
+  const applicationId = await acceptedApplication(officer.token)
+  const path = `/api/applications/${applicationId}/mediation`
+  assert.equal((await post(path, officer.token)).status, 201)
+  assert.equal((await post(`${path}/mediator`, officer.token, { mediatorUserId: String(mediator.user._id) })).status, 200)
+  await confirmSafety(applicationId, mediator.token)
+  assert.equal((await post(`${path}/schedule`, mediator.token, inPersonSchedule())).status, 200)
+  assert.equal((await post(`${path}/advance`, mediator.token)).status, 200)
+  assert.equal((await post(`${path}/documents/review`, mediator.token, { reason: 'A human reviewed the fictional documents.' })).status, 200)
+  assert.equal((await post(`${path}/advance`, mediator.token)).status, 200)
+  assert.equal((await post(`${path}/attendance`, mediator.token, { partyA: 'ATTENDED', partyB: 'ATTENDED', reason: 'Both fictional parties attended in person.' })).status, 200)
+  assert.equal((await post(`${path}/advance`, mediator.token)).status, 200)
+  assert.equal((await post(`${path}/outcome`, mediator.token, { outcome: 'AGREEMENT_REACHED', reason: 'The mediator recorded a fictional agreement.' })).status, 200)
+  const previousAi = process.env.SETTLEMENT_AI
+  process.env.SETTLEMENT_AI = 'off'
+  try {
+    assert.equal((await post(`${path}/draft`, mediator.token, { template: 'MAINTENANCE', notes: 'Fictional maintenance notes for a rules-only draft.', identifiersRemoved: true })).status, 201)
+  } finally {
+    if (previousAi === undefined) delete process.env.SETTLEMENT_AI
+    else process.env.SETTLEMENT_AI = previousAi
+  }
+  return { applicationId, path, officer, mediator, clao, first: await approveAndSign(applicationId, mediator) }
+}
+
+test('mediation steps wait for a human safety and consent check, and "not safe" stops them', async () => {
+  const officer = await actor('test12.safety.officer', 'DLAO_OFFICER')
+  const clao = await actor('test12.safety.clao', 'CLAO')
+  const applicationId = await acceptedApplication(officer.token)
+  const path = `/api/applications/${applicationId}/mediation`
+  assert.equal((await post(path, officer.token)).status, 201)
+  assert.equal((await post(`${path}/schedule`, officer.token, inPersonSchedule())).data.error.code, 'SAFETY_CONSENT_REQUIRED')
+
+  // Every answer is given by a person, consent needs all four, and the check carries a note.
+  const note = 'A human asked the fictional applicant privately about safety.'
+  const check = (body, token = officer.token) => post(`${path}/safety-consent`, token, body)
+  assert.equal((await check({ status: 'CONSENT_CONFIRMED', reason: note })).status, 400)
+  assert.equal((await check({ ...safetyAnswers, oppositePartyWilling: false, status: 'CONSENT_CONFIRMED', reason: note })).status, 400)
+  assert.equal((await check({ ...safetyAnswers, status: 'CONSENT_CONFIRMED' })).status, 400)
+  assert.equal((await check({ ...safetyAnswers, status: 'CONSENT_CONFIRMED', reason: note }, clao.token)).status, 403)
+
+  assert.equal((await check({ ...safetyAnswers, safeForApplicant: false, status: 'NOT_SAFE', reason: note })).status, 200)
+  assert.equal((await post(`${path}/schedule`, officer.token, inPersonSchedule())).data.error.code, 'MEDIATION_NOT_SAFE')
+  assert.equal((await post(`${path}/sessions`, officer.token, { summaryNotes: 'Fictional session.', outcome: 'AGREEMENT_REACHED' })).data.error.code, 'MEDIATION_NOT_SAFE')
+  const stopped = (await request(path, { token: officer.token })).data.mediation
+  assert.equal(stopped.safetyConsent.status, 'NOT_SAFE')
+  assert.equal(stopped.outcome, null)
+
+  assert.equal((await check({ ...safetyAnswers, status: 'CONSENT_CONFIRMED', reason: 'A later private check found mediation safe and both parties willing.' })).status, 200)
+  assert.equal((await post(`${path}/schedule`, officer.token, inPersonSchedule())).status, 200)
+  const actions = (await models.AuditEvent.find({ applicationId, action: /^MEDIATION_SAFETY_/ }).sort({ sequence: 1 }).lean()).map(({ action }) => action)
+  assert.deepEqual(actions, ['MEDIATION_SAFETY_UNSAFE_STOPPED', 'MEDIATION_SAFETY_CONSENT_RECORDED'])
+})
+
+test('a CLAO return keeps the signed version on record, retires the used codes, and needs a fresh signing round', async () => {
+  const { applicationId, path, officer, mediator, clao, first } = await mediationAtClao('test12.return')
+  assert.equal((await post(`${path}/return-correction`, mediator.token, { reason: 'A mediator cannot return a settlement.' })).status, 403)
+  const returned = await post(`${path}/return-correction`, clao.token, { reason: 'The CLAO found the payment date unclear; correct it and sign again.' })
+  assert.equal(returned.status, 200)
+  assert.equal(returned.data.stage, 'DRAFT_OUTCOME')
+  assert.equal(returned.data.draft.version, first.draft.version + 1)
+  assert.deepEqual(returned.data.signatures, [])
+  assert.equal(returned.data.earlierSignatureCount, 3)
+  assert.equal(await models.SignatureRecord.countDocuments({ applicationId }), 3)
+  for (const code of Object.values(first.codes)) assert.equal((await post('/api/mediation-signing/open', null, { code })).status, 404)
+  assert.equal((await post(`${path}/verify`, mediator.token)).data.allValid, false)
+
+  // A "not safe" check during the second round stops signing, and the party sees only the neutral "not current" answer.
+  const second = await approveAndSign(applicationId, mediator, async (code) => {
+    assert.equal((await post(`${path}/safety-consent`, mediator.token, { ...safetyAnswers, safeForApplicant: false, status: 'NOT_SAFE', reason: 'Fictional: the applicant reported a new safety concern.' })).status, 200)
+    const blocked = await post('/api/mediation-signing/open', null, { code })
+    assert.equal(blocked.data.error.code, 'DOCUMENT_CHANGED')
+    assert.doesNotMatch(blocked.data.error.message, /safe/i)
+    await confirmSafety(applicationId, mediator.token)
+  })
+  assert.equal(second.draft.version, first.draft.version + 1)
+  for (const role of ['PARTY_A', 'PARTY_B']) assert.notEqual(second.codes[role], first.codes[role])
+  for (const code of Object.values(first.codes)) assert.equal((await post('/api/mediation-signing/open', null, { code })).status, 404)
+  assert.equal(await models.SignatureRecord.countDocuments({ applicationId }), 6)
+  const check = await post(`${path}/verify`, mediator.token)
+  assert.equal(check.data.allValid, true)
+  assert.equal(check.data.signatures.length, 3)
+  const audit = await request(`/api/applications/${applicationId}/audit`, { token: officer.token })
+  assert.equal(audit.data.valid, true)
+  assert.ok(audit.data.events.some(({ action }) => action === 'CLAO_RETURNED_FOR_CORRECTION'))
+})
+
+test('follow-up closes the Case only after certification, by the DLAO officer, with no lawyer still assigned', async () => {
+  const { applicationId, path, officer, mediator, clao, first } = await mediationAtClao('test12.close')
+  const followUp = (action, notes = 'The DLAO officer checked the fictional settlement follow-up.') => ({
+    dueDate: new Date().toISOString(), settlementFollowed: true, paymentStatus: 'PAID', complianceStatus: 'COMPLIED', furtherAssistanceRequired: false, notes, action,
+  })
+  assert.equal((await post(`${path}/follow-up`, officer.token, followUp('CLOSE_CASE'))).data.error.code, 'INVALID_STAGE')
+  assert.equal((await post(`${path}/legal-applicability`, clao.token, { applicability: 'APPLICABLE_VERIFIED', basis: 'Fictional authorised legal review recorded for this test only.' })).status, 200)
+  assert.equal((await post(`${path}/certify`, clao.token, { reason: 'The CLAO reviewed the fictional signed settlement.', signature: await signature(first.draft, 'CLAO') })).data.stage, 'CERTIFIED_FINAL')
+  assert.equal((await post(`${path}/follow-up`, mediator.token, followUp('CLOSE_CASE'))).status, 403)
+  assert.equal((await post(`${path}/follow-up`, officer.token, followUp('CLOSE_CASE', 'short'))).status, 400)
+
+  const { caseId } = await models.Case.findOne({ applicationId }).lean()
+  const lawyer = await models.User.create({ username: 'test12.close.lawyer', displayName: 'Fictional panel lawyer', passwordHash: await hashPassword(randomBytes(24).toString('base64url')) })
+  const assignment = await models.LawyerAssignment.create({ applicationId, caseId, officeCode: 'DEMO', lawyerUserId: lawyer._id, status: 'ACCEPTED' })
+  const update = await models.LawyerUpdate.create({ applicationId, caseId, assignmentId: assignment._id, sequence: 1, dueAt: new Date(Date.now() + 86400000), instruction: 'Fictional required update.' })
+  assert.equal((await post(`${path}/follow-up`, officer.token, followUp('CLOSE_CASE'))).data.error.code, 'LAWYER_STILL_ASSIGNED')
+  assert.equal((await models.Case.findOne({ applicationId }).lean()).status, 'OPEN')
+
+  await models.LawyerAssignment.updateOne({ _id: assignment._id }, { active: false, status: 'REASSIGNED' })
+  const closed = await post(`${path}/follow-up`, officer.token, followUp('CLOSE_CASE'))
+  assert.equal(closed.status, 200)
+  assert.equal(closed.data.followUp.actionTaken, 'CLOSED')
+  const caseRecord = await models.Case.findOne({ applicationId }).lean()
+  assert.equal(caseRecord.status, 'CLOSED')
+  assert.equal(caseRecord.nextAction, 'Case closed after mediation follow-up.')
+  assert.equal((await models.LawyerUpdate.findById(update._id).lean()).status, 'CANCELLED')
+  assert.equal((await models.AuditEvent.findOne({ applicationId, action: 'MEDIATION_FOLLOW_UP_RECORDED' }).lean()).newState.caseClosed, true)
 })

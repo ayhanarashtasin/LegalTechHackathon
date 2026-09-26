@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import mongoose from 'mongoose'
-import { Application, CancellationRequest, Case, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerCaseEntry, LawyerChangeRequest, LawyerFeeClaim, LawyerPaymentEvent, LawyerUpdate, Mediation, Referral, SafeContactProfile, Task, User } from '../models/index.js'
+import { Application, Case, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerCaseEntry, LawyerFeeClaim, LawyerPaymentEvent, SafeContactProfile, Task, User } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { advance } from './applicationService.js'
 import { appendAudit } from './auditService.js'
+import { assertCaseCanClose, closeCase } from './caseClosureService.js'
 import { HttpError } from '../utils/httpError.js'
 
 export async function assignmentScope(assignmentId, actor, session, { write = false, officerOnly = false } = {}) {
@@ -148,17 +149,10 @@ export async function reviewLawyerOutcome(assignmentId, entryId, input, actor) {
     const entry = await LawyerCaseEntry.findOne({ _id: entryId, assignmentId, kind: 'OUTCOME', reviewState: 'PENDING' }).session(session)
     if (!entry) throw new HttpError(409, 'ALREADY_REVIEWED', 'No pending final report exists.')
     if (input.decision === 'APPROVE') {
-      if (scope.caseRecord.status !== 'OPEN' || await LawyerAssignment.exists({ applicationId: entry.applicationId, active: true, status: 'PENDING' }).session(session)) throw new HttpError(409, 'INVALID_TRANSITION', 'Resolve the Case status and outstanding assignment offers before closure.')
-      for (const [Model, statuses] of [[CancellationRequest, ['OPEN']], [LawyerChangeRequest, ['OPEN', 'APPROVED']], [Referral, ['SENT', 'ACKNOWLEDGED']]]) {
-        if (await Model.exists({ applicationId: entry.applicationId, status: { $in: statuses } }).session(session)) throw new HttpError(409, 'REQUEST_IN_PROGRESS', 'Resolve outstanding cancellation, lawyer-change or referral work before closure.')
-      }
-      if (await Mediation.exists({ applicationId: entry.applicationId, stage: { $ne: 'CERTIFIED_FINAL' } }).session(session)) throw new HttpError(409, 'MEDIATION_IN_PROGRESS', 'Complete the separate mediation review and certification workflow first.')
+      await assertCaseCanClose(scope.caseRecord, session, { closedByAssignedLawyer: true })
       const documents = await checkAttachments(entry.applicationId, entry.attachmentIds.map(String), actor, session, { approved: true })
       checkVersions(entry, documents)
-      scope.caseRecord.status = 'CLOSED'; scope.caseRecord.nextHearingAt = null; scope.caseRecord.nextAction = 'Case completed following officer review.'
-      await scope.caseRecord.save({ session })
-      await LawyerUpdate.updateMany({ applicationId: entry.applicationId, status: { $in: ['PENDING', 'MISSED'] } }, { $set: { status: 'CANCELLED' } }, { session })
-      await Task.updateMany({ applicationId: entry.applicationId, kind: 'LAWYER_UPDATE', status: 'OPEN' }, { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } }, { session })
+      await closeCase(scope.caseRecord, actor, session, 'Case completed following officer review.')
     }
     entry.reviewState = input.decision === 'APPROVE' ? 'APPROVED' : 'CHANGES_REQUESTED'; entry.reviewReason = input.reason; entry.reviewedAt = new Date()
     await entry.save({ session })

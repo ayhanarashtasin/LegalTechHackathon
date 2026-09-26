@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import { Application, Case, Document, Mediation, RoleAssignment, SettlementDraft, SignatureRecord, SigningInvitation, PartyVerification, User } from '../models/index.js'
 import { advance, requireOpenCase } from './applicationService.js'
 import { appendAudit } from './auditService.js'
+import { assertCaseCanClose, closeCase } from './caseClosureService.js'
 import { completeStructuredChat, extractionModel } from './ai/groq.js'
 import { canonicalSettlement, settlementHash, verifySettlementSignature } from './settlementCrypto.js'
 import { isMissingSettlementFact, missingSettlementFact, settlementInconsistencies, settlementTemplates } from './settlementTemplates.js'
@@ -36,6 +37,14 @@ export async function context(applicationId, actor, session, { requireClaim = fa
   const reader = assignment(actor, ['DLAO_OFFICER', 'CLAO'], office)?.role ?? (mediator ? 'MEDIATOR' : null)
   if (!reader) fail(403, 'FORBIDDEN', 'This mediation is not appointed to this account.')
   return { application, mediation, role: reader }
+}
+
+// No mediation step runs until a human records that mediation is safe for the applicant and both parties agree.
+// A "not safe" check stops every later step until someone records a new check.
+function requireSafetyConsent(mediation) {
+  const status = mediation.safetyConsent?.status
+  if (status === 'NOT_SAFE') fail(409, 'MEDIATION_NOT_SAFE', 'This mediation was marked not safe for the applicant, so it is stopped. Refer the applicant for other help, or record a new safety and consent check.')
+  if (status !== 'CONSENT_CONFIRMED') fail(409, 'SAFETY_CONSENT_REQUIRED', 'Record the safety and consent check before this mediation step.')
 }
 
 const stamp = (mediation, key, actor, role) => {
@@ -84,6 +93,8 @@ async function publicMediation(mediation, session) {
   const [draft, signatures, invitations, documents, users] = await Promise.all([draftQuery.lean(), signaturesQuery.lean(), invitationsQuery.lean(), documentsQuery.lean(), usersQuery.lean()])
   const names = new Map(users.map((user) => [idOf(user), user.displayName]))
   const nameOf = (id) => (id ? names.get(idOf(id)) ?? 'Unavailable' : null)
+  // Signatures on an earlier draft version stay on record but no longer count toward the current one.
+  const currentSignatures = signatures.filter((record) => draft && idOf(record.draftId) === idOf(draft) && record.draftVersion === draft.version)
   return {
     id: idOf(mediation), applicationId: mediation.applicationId, caseId: mediation.caseId,
     stage: mediation.stage, mediatorUserId: mediation.mediatorUserId ? idOf(mediation.mediatorUserId) : null,
@@ -103,10 +114,11 @@ async function publicMediation(mediation, session) {
     settlementTerms: mediation.settlementTerms ?? [],
     documentsReviewedAt: mediation.documentsReviewedAt ?? null, documentReviewReason: mediation.documentReviewReason ?? null,
     attendance: mediation.attendance ?? null, outcome: mediation.outcome ?? null, outcomeReason: mediation.outcomeReason ?? null,
-    draft: publicDraft(draft), signatures: signatures.map(({ signerRole, draftVersion, documentHash, publicKeyJwk, signature, clientSignedAt, receivedAt, authorizationMethod }) => ({
+    draft: publicDraft(draft), signatures: currentSignatures.map(({ signerRole, draftVersion, documentHash, publicKeyJwk, signature, clientSignedAt, receivedAt, authorizationMethod }) => ({
       signerRole, draftVersion, documentHash, publicKeyJwk, signature, clientSignedAt, receivedAt,
       authorizationMethod: authorizationMethod ?? 'MEDIATOR_WITNESSED_LEGACY',
     })),
+    earlierSignatureCount: signatures.length - currentSignatures.length,
     signingInvitations: invitations.map(({ signerRole, draftVersion, expiresAt, usedAt, updatedAt }) => ({ signerRole, draftVersion, expiresAt, usedAt, updatedAt })),
     legalApplicability: mediation.legalApplicability,
     legalReviewBasis: mediation.legalReviewBasis ?? null,
@@ -188,24 +200,26 @@ export async function setMediator(applicationId, { mediatorUserId = null, reason
 
 export async function recordSafetyConsent(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
+    // The case owner may record a check even while a mediator is appointed, so either of them can stop an unsafe mediation.
     const { application, mediation, role } = await context(applicationId, actor, session)
+    if (role === 'CLAO') fail(403, 'FORBIDDEN', 'The DLAO officer or the appointed mediator records the safety and consent check.')
+    if (mediation.stage === 'CERTIFIED_FINAL') fail(409, 'MEDIATION_FINAL', 'A certified mediation cannot be reassessed here; record follow-up instead.')
+    const previous = { status: mediation.safetyConsent?.status ?? null }
     mediation.safetyConsent = {
-      safeForApplicant: Boolean(input.safeForApplicant),
-      applicantAgreed: Boolean(input.applicantAgreed),
-      applicantAvailable: Boolean(input.applicantAvailable),
-      oppositePartyWilling: Boolean(input.oppositePartyWilling),
+      safeForApplicant: input.safeForApplicant,
+      applicantAgreed: input.applicantAgreed,
+      applicantAvailable: input.applicantAvailable,
+      oppositePartyWilling: input.oppositePartyWilling,
       status: input.status,
-      reason: input.reason?.trim() || '',
+      reason: input.reason,
       confirmedByUserId: actor.userId,
       confirmedAt: new Date(),
     }
-    if (input.status === 'NOT_SAFE') {
-      mediation.outcome = 'NOT_SAFE'
-      mediation.outcomeReason = input.reason || 'Mediation assessed as not safe for applicant. Halting mediation and escalating case.'
-    }
     stamp(mediation, 'SAFETY_CONSENT', actor, role)
     await mediation.save({ session })
-    await recordMutation(application, session, actor, role, input.status === 'NOT_SAFE' ? 'MEDIATION_SAFETY_UNSAFE_STOPPED' : 'MEDIATION_SAFETY_CONSENT_RECORDED', null, { status: input.status, reason: input.reason }, input.status === 'NOT_SAFE' ? 'Mediation determined unsafe; halted for referral/escalation.' : 'Pre-mediation safety and party consent confirmed.')
+    const { safeForApplicant, applicantAgreed, applicantAvailable, oppositePartyWilling } = input
+    await recordMutation(application, session, actor, role, input.status === 'NOT_SAFE' ? 'MEDIATION_SAFETY_UNSAFE_STOPPED' : 'MEDIATION_SAFETY_CONSENT_RECORDED', previous,
+      { status: input.status, stage: mediation.stage, safeForApplicant, applicantAgreed, applicantAvailable, oppositePartyWilling }, input.reason)
     return publicMediation(mediation, session)
   })
 }
@@ -213,6 +227,7 @@ export async function recordSafetyConsent(applicationId, input, actor) {
 export async function recordScheduling(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     if (!['REGISTRATION', 'SCHEDULING_NOTICES'].includes(mediation.stage)) fail(409, 'INVALID_STAGE', 'Scheduling can only be recorded at registration or notice stage.')
     const previous = { stage: mediation.stage, mode: mediation.mode ?? null, scheduledAt: mediation.scheduledAt ?? null }
     mediation.mode = input.mode
@@ -234,6 +249,7 @@ export async function recordScheduling(applicationId, input, actor) {
 export async function recordDocumentReview(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     if (mediation.stage !== 'DOCUMENT_REVIEW') fail(409, 'INVALID_STAGE', 'Document review is not the current mediation stage.')
     mediation.documentsReviewedAt = new Date()
     mediation.documentReviewReason = input.reason
@@ -247,6 +263,7 @@ export async function recordDocumentReview(applicationId, input, actor) {
 export async function recordAttendance(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     if (mediation.stage !== 'ATTENDANCE') fail(409, 'INVALID_STAGE', 'Attendance can only be recorded at the attendance stage.')
     mediation.attendance = { partyA: input.partyA, partyB: input.partyB, reason: input.reason, recordedByUserId: actor.userId, recordedAt: new Date() }
     stamp(mediation, 'ATTENDANCE', actor, role)
@@ -259,6 +276,7 @@ export async function recordAttendance(applicationId, input, actor) {
 export async function advanceMediation(applicationId, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     const index = stages.indexOf(mediation.stage)
     const next = stages[index + 1]
     if (!next || !['DOCUMENT_REVIEW', 'ATTENDANCE', 'MEDIATION'].includes(next)) fail(409, 'INVALID_STAGE', 'This stage advances only after its required human action.')
@@ -276,6 +294,7 @@ export async function advanceMediation(applicationId, actor) {
 export async function recordOutcome(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     if (mediation.stage !== 'MEDIATION') fail(409, 'INVALID_STAGE', 'The mediation outcome can only be recorded during mediation.')
     mediation.outcome = input.outcome
     mediation.outcomeReason = input.reason
@@ -320,12 +339,14 @@ async function proposeSections(template, notes) {
 
 export async function createSettlementDraft(applicationId, input, actor) {
   const { application: initialApplication, mediation: initial } = await context(applicationId, actor)
+  requireSafetyConsent(initial)
   if (initial.stage !== 'MEDIATION' || initial.outcome !== 'AGREEMENT_REACHED') fail(409, 'AGREEMENT_REQUIRED', 'Draft only after a human mediator records that an agreement was reached.')
   if (!Object.hasOwn(settlementTemplates, input.template)) fail(400, 'INVALID_TEMPLATE', 'Choose a supported fictional template.')
   const proposal = await proposeSections(input.template, input.notes)
   const sourceNotesDigest = createHash('sha256').update(input.notes).digest('hex')
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     if (application.version !== initialApplication.version || mediation.stage !== 'MEDIATION' || mediation.outcome !== 'AGREEMENT_REACHED') fail(409, 'STALE_MEDIATION', 'The mediation changed while the draft was prepared.')
     const signatures = mediation.settlementDraftId ? await SignatureRecord.countDocuments({ draftId: mediation.settlementDraftId }).session(session) : 0
     if (signatures) fail(409, 'DRAFT_ALREADY_SIGNED', 'A signed draft cannot be rewritten; request authorised review instead.')
@@ -367,10 +388,11 @@ export async function createSettlementDraft(applicationId, input, actor) {
 export async function amendSettlementDraft(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session)
     if (mediation.stage !== 'DRAFT_OUTCOME' || !draft || draft.status !== 'HUMAN_REVIEW') fail(409, 'DRAFT_LOCKED', 'Only an unapproved draft may be amended.')
     if (input.template !== draft.template || input.sections.length !== settlementTemplates[draft.template].fields.length || input.sections.some(({ key }, index) => key !== settlementTemplates[draft.template].fields[index][0])) fail(400, 'INVALID_SECTIONS', 'Only the current template’s named sections may be amended.')
-    if (await SignatureRecord.exists({ draftId: draft._id }).session(session)) fail(409, 'DRAFT_ALREADY_SIGNED', 'A signed draft cannot be rewritten.')
+    if (await SignatureRecord.exists({ draftId: draft._id, draftVersion: draft.version }).session(session)) fail(409, 'DRAFT_ALREADY_SIGNED', 'A signed draft cannot be rewritten.')
     const before = new Map(draft.sections.map((section) => [section.key, section]))
     const changedKeys = []
     draft.sections = input.sections.map(({ key, text }) => {
@@ -397,9 +419,10 @@ export async function amendSettlementDraft(applicationId, input, actor) {
 export async function reviewSettlementDraft(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     if (mediation.stage !== 'DRAFT_OUTCOME' || !mediation.settlementDraftId) fail(409, 'INVALID_STAGE', 'There is no draft awaiting mediator review.')
     const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session)
-    if (draft.status === 'APPROVED' || await SignatureRecord.exists({ draftId: draft._id }).session(session)) fail(409, 'ALREADY_APPROVED', 'This draft is already approved or signed.')
+    if (draft.status === 'APPROVED' || await SignatureRecord.exists({ draftId: draft._id, draftVersion: draft.version }).session(session)) fail(409, 'ALREADY_APPROVED', 'This draft is already approved or signed.')
     const approved = input.partyAUnderstands && input.partyAConsents && input.partyBUnderstands && input.partyBConsents
     if (approved && draft.inconsistencies.length && input.warningsReviewed !== true) fail(409, 'WARNINGS_NOT_REVIEWED', 'Read the draft warnings and confirm the mediator reviewed them before proceeding.')
     const previous = { status: draft.status }
@@ -445,18 +468,21 @@ function assertSameMutation(existing, draft, input, hash, invitationId) {
 export async function issueSigningInvitation(applicationId, signerRole, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session)
     if (!draft || draft.status !== 'APPROVED' || mediation.stage !== 'SIGNATURES') fail(409, 'SIGNING_NOT_OPEN', 'Approve the current draft before issuing a party signing code.')
     if (await SignatureRecord.exists({ draftId: draft._id, draftVersion: draft.version, signerRole }).session(session)) fail(409, 'SIGNER_ALREADY_RECORDED', 'This party has already signed the current draft.')
     const code = randomBytes(32).toString('base64url')
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     const invitation = await SigningInvitation.findOne({ draftId: draft._id, signerRole }).session(session)
-    if (invitation?.usedAt) fail(409, 'SIGNER_ALREADY_RECORDED', 'This party has already used a signing code.')
+    if (invitation?.usedAt && invitation.draftVersion === draft.version) fail(409, 'SIGNER_ALREADY_RECORDED', 'This party has already used a signing code.')
     if (invitation) {
+      // A new version after a CLAO return needs a fresh code; replacing the hash retires the used one for good.
       invitation.tokenHash = invitationHash(code)
       invitation.draftVersion = draft.version
       invitation.expiresAt = expiresAt
       invitation.issuedByUserId = actor.userId
+      invitation.usedAt = undefined
       await invitation.save({ session })
     } else {
       await SigningInvitation.create([{ applicationId, mediationId: mediation._id, draftId: draft._id, draftVersion: draft.version, signerRole, tokenHash: invitationHash(code), issuedByUserId: actor.userId, expiresAt }], { session })
@@ -470,7 +496,7 @@ export async function openPartySigning(code) {
   const invitation = await SigningInvitation.findOne({ tokenHash: invitationHash(code) }).lean()
   if (!invitation || invitation.usedAt || invitation.expiresAt <= new Date()) fail(404, 'SIGNING_CODE_UNAVAILABLE', 'This signing code is unavailable or has expired.')
   const [draft, mediation] = await Promise.all([SettlementDraft.findById(invitation.draftId).lean(), Mediation.findById(invitation.mediationId).lean()])
-  if (!draft || !mediation || draft.status !== 'APPROVED' || mediation.stage !== 'SIGNATURES' || idOf(mediation.settlementDraftId) !== idOf(draft) || draft.version !== invitation.draftVersion) fail(409, 'DOCUMENT_CHANGED', 'The approved signing document is no longer current.')
+  if (!draft || !mediation || draft.status !== 'APPROVED' || mediation.stage !== 'SIGNATURES' || idOf(mediation.settlementDraftId) !== idOf(draft) || draft.version !== invitation.draftVersion || mediation.safetyConsent?.status !== 'CONSENT_CONFIRMED') fail(409, 'DOCUMENT_CHANGED', 'The approved signing document is no longer current.')
   const verification = await requirePartyVerification(invitation)
   return { signerRole: invitation.signerRole, expiresAt: invitation.expiresAt, identityVerificationId: idOf(verification), draft: partyDraft(draft), documentHash: settlementHash(draft) }
 }
@@ -490,7 +516,8 @@ export async function recordPartySignature(code, input) {
       Mediation.findById(invitation.mediationId).session(session),
       SettlementDraft.findById(invitation.draftId).session(session),
     ])
-    if (!application || !mediation || !draft || idOf(mediation.settlementDraftId) !== idOf(draft) || draft.status !== 'APPROVED') fail(409, 'DOCUMENT_CHANGED', 'The approved signing document is no longer current.')
+    // Parties get the same neutral answer when a safety check has stopped the mediation, so nothing about it is disclosed to them.
+    if (!application || !mediation || !draft || idOf(mediation.settlementDraftId) !== idOf(draft) || draft.status !== 'APPROVED' || mediation.safetyConsent?.status !== 'CONSENT_CONFIRMED') fail(409, 'DOCUMENT_CHANGED', 'The approved signing document is no longer current.')
     const hash = verifySignatureInput(draft, input)
     const existingMutation = await SignatureRecord.findOne({ clientMutationId: input.clientMutationId }).session(session).lean()
     if (existingMutation) {
@@ -518,6 +545,7 @@ export async function recordPartySignature(code, input) {
 export async function recordSignature(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     if (input.signerRole !== 'MEDIATOR') fail(403, 'PARTY_SIGNING_CODE_REQUIRED', 'Parties must use their own signing codes.')
     const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session)
     if (!draft || draft.status !== 'APPROVED') fail(409, 'DRAFT_NOT_APPROVED', 'A human mediator must approve the draft and record both parties understanding and consent first.')
@@ -555,7 +583,7 @@ export async function verifyMediation(applicationId, actor, overrideSections) {
   const draft = await SettlementDraft.findById(mediation.settlementDraftId).lean()
   if (!draft) return { documentHash: null, signatures: [], allValid: false }
   const candidate = overrideSections ? { ...draft, sections: overrideSections } : draft
-  const signatures = await SignatureRecord.find({ mediationId: mediation._id }).sort({ receivedAt: 1 }).lean()
+  const signatures = await SignatureRecord.find({ draftId: draft._id, draftVersion: draft.version }).sort({ receivedAt: 1 }).lean()
   const results = signatures.map((record) => ({ signerRole: record.signerRole, receivedAt: record.receivedAt, ...verifySettlementSignature(candidate, record) }))
   const required = results.filter(({ signerRole }) => requiredSigners.includes(signerRole))
   return { documentHash: settlementHash(candidate), signatures: results, allValid: required.length === 3 && results.every(({ valid }) => valid) }
@@ -564,6 +592,7 @@ export async function verifyMediation(applicationId, actor, overrideSections) {
 export async function recordLegalApplicability(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation } = await context(applicationId, actor, session)
+    requireSafetyConsent(mediation)
     const role = auditRole(actor, application.officeCode, ['CLAO'])
     if (mediation.stage !== 'PENDING_CLAO_CERTIFICATION') fail(409, 'SIGNATURES_REQUIRED', 'Legal applicability review begins after both parties and the mediator sign.')
     mediation.legalApplicability = input.applicability
@@ -580,6 +609,7 @@ export async function recordLegalApplicability(applicationId, input, actor) {
 export async function certifyMediation(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation } = await context(applicationId, actor, session)
+    requireSafetyConsent(mediation)
     const role = auditRole(actor, application.officeCode, ['CLAO'])
     if (mediation.stage !== 'PENDING_CLAO_CERTIFICATION' || mediation.legalApplicability !== 'APPLICABLE_VERIFIED') fail(409, 'LEGAL_REVIEW_REQUIRED', 'Do not certify while legal applicability is unverified.')
     const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session).lean()
@@ -611,6 +641,7 @@ export async function certifyMediation(applicationId, input, actor) {
 export async function recordMediationSession(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session)
+    requireSafetyConsent(mediation)
     if (role === 'CLAO') fail(403, 'FORBIDDEN', 'The CLAO certifies; sessions are recorded by the DLAO officer or the appointed mediator.')
 
     const sessionCount = (mediation.sessions?.length || 0) + 1
@@ -655,6 +686,7 @@ export async function recordMediationSession(applicationId, input, actor) {
 export async function recordSessionDetails(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     mediation.sessionDetails = {
       applicantComplaint: input.applicantComplaint?.trim() || '',
       applicantRequestedSolution: input.applicantRequestedSolution?.trim() || '',
@@ -676,6 +708,7 @@ export async function recordSessionDetails(applicationId, input, actor) {
 export async function recordSettlementTerms(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const { application, mediation, role } = await context(applicationId, actor, session, { requireClaim: true })
+    requireSafetyConsent(mediation)
     mediation.settlementTerms = (input.terms || []).map((item) => ({
       issue: String(item.issue || '').trim(),
       applicantAsks: String(item.applicantAsks || '').trim(),
@@ -696,25 +729,41 @@ export async function returnMediationForCorrection(applicationId, input, actor) 
     const role = auditRole(actor, application.officeCode, ['CLAO'])
     if (mediation.stage !== 'PENDING_CLAO_CERTIFICATION') fail(409, 'INVALID_STAGE', 'Only mediations pending CLAO certification can be returned for correction.')
     const draft = await SettlementDraft.findById(mediation.settlementDraftId).session(session)
-    if (draft) {
-      draft.status = 'HUMAN_REVIEW'
-      await draft.save({ session })
-      await SignatureRecord.deleteMany({ draftId: draft._id, draftVersion: draft.version }).session(session)
-      await SigningInvitation.updateMany({ draftId: draft._id, draftVersion: draft.version }, { $unset: { usedAt: '' } }).session(session)
-    }
+    if (!draft) fail(409, 'SETTLEMENT_DRAFT_REQUIRED', 'The signed settlement draft is missing.')
+    // The signed version and its signatures stay on record. The draft moves to a new version, so the mediator reviews it again,
+    // the parties confirm it again, and everyone signs it with fresh codes; the used codes can never open it.
+    const returnedVersion = draft.version
+    draft.version += 1
+    draft.status = 'HUMAN_REVIEW'
+    draft.warningsReviewed = false
+    draft.partyAcknowledgements = undefined
+    draft.reviewReason = undefined
+    draft.reviewedByUserId = undefined
+    draft.reviewedAt = undefined
+    await draft.save({ session })
     mediation.stage = 'DRAFT_OUTCOME'
     mediation.claoReturnReason = input.reason
     mediation.claoReturnedAt = new Date()
     mediation.legalEffectState = 'LEGAL_EFFECT_REQUIRES_AUTHORISED_REVIEW'
     await mediation.save({ session })
-    await recordMutation(application, session, actor, role, 'CLAO_RETURNED_FOR_CORRECTION', { stage: 'PENDING_CLAO_CERTIFICATION' }, { stage: 'DRAFT_OUTCOME', reason: input.reason }, input.reason)
+    const keptSignatures = await SignatureRecord.countDocuments({ draftId: draft._id, draftVersion: returnedVersion }).session(session)
+    await recordMutation(application, session, actor, role, 'CLAO_RETURNED_FOR_CORRECTION', { stage: 'PENDING_CLAO_CERTIFICATION', draftVersion: returnedVersion },
+      { stage: mediation.stage, draftVersion: draft.version, signaturesKeptOnVersion: returnedVersion, keptSignatureCount: keptSignatures }, input.reason)
     return publicMediation(mediation, session)
   })
 }
 
 export async function recordFollowUp(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
-    const { application, mediation, role } = await context(applicationId, actor, session)
+    const { application, mediation } = await context(applicationId, actor, session)
+    const role = auditRole(actor, application.officeCode, ['DLAO_OFFICER'])
+    if (mediation.stage !== 'CERTIFIED_FINAL') fail(409, 'INVALID_STAGE', 'Record follow-up after the CLAO certifies the settlement.')
+    if (input.actionTaken === 'CLOSED') {
+      const caseRecord = await Case.findOne({ applicationId }).session(session)
+      if (!caseRecord) fail(409, 'CASE_REQUIRED', 'This mediation has no Case to close.')
+      await assertCaseCanClose(caseRecord, session)
+      await closeCase(caseRecord, actor, session, 'Case closed after mediation follow-up.')
+    }
     mediation.followUp = {
       dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
       settlementFollowed: typeof input.settlementFollowed === 'boolean' ? input.settlementFollowed : undefined,
@@ -725,16 +774,11 @@ export async function recordFollowUp(applicationId, input, actor) {
       recordedByUserId: actor.userId,
       recordedAt: new Date(),
     }
-    if (input.actionTaken === 'CLOSED' || input.actionTaken === 'CLOSE_CASE') {
-      const caseDoc = await Case.findOne({ applicationId }).session(session)
-      if (caseDoc) {
-        caseDoc.status = 'CLOSED'
-        await caseDoc.save({ session })
-      }
-    }
     stamp(mediation, 'FOLLOW_UP', actor, role)
     await mediation.save({ session })
-    await recordMutation(application, session, actor, role, 'MEDIATION_FOLLOW_UP_RECORDED', null, mediation.followUp, `Mediation follow-up recorded: ${input.actionTaken}`)
+    const { dueDate, settlementFollowed, paymentStatus, agreementComplied, actionTaken } = mediation.followUp
+    await recordMutation(application, session, actor, role, 'MEDIATION_FOLLOW_UP_RECORDED', null,
+      { dueDate, settlementFollowed, paymentStatus, agreementComplied, actionTaken, caseClosed: actionTaken === 'CLOSED' }, input.notes)
     return publicMediation(mediation, session)
   })
 }

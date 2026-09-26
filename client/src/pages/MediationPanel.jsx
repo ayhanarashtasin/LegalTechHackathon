@@ -71,7 +71,6 @@ const initialLocalDateTime = () => {
 export default function MediationPanel({ applicationId, session, role, application: initialApplication }) {
   const ownerId = String(session.user.id)
   const [mediation, setMediation] = useState(null)
-  const [appData, setAppData] = useState(initialApplication || null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -81,14 +80,11 @@ export default function MediationPanel({ applicationId, session, role, applicati
   const [signingPassphrase, setSigningPassphrase] = useState('')
   const syncInFlight = useRef(false)
 
-  // Step 1: Mediation Mode
-  const [assignMediatorMode, setAssignMediatorMode] = useState(false)
-
-  // Step 2: Safety & Consent state
-  const [isSafe, setIsSafe] = useState(true)
-  const [applicantAgreed, setApplicantAgreed] = useState(true)
-  const [applicantAvailable, setApplicantAvailable] = useState(true)
-  const [oppositePartyWilling, setOppositePartyWilling] = useState(true)
+  // Step 2: Safety & Consent state. Every box starts unticked so a person answers each question.
+  const [isSafe, setIsSafe] = useState(false)
+  const [applicantAgreed, setApplicantAgreed] = useState(false)
+  const [applicantAvailable, setApplicantAvailable] = useState(false)
+  const [oppositePartyWilling, setOppositePartyWilling] = useState(false)
   const [safetyNotes, setSafetyNotes] = useState('')
 
   // Step 3: Schedule state
@@ -109,7 +105,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
   const [attendance, setAttendance] = useState({ partyA: '', partyB: '', reason: '' })
 
   // Step 4: Mediation Session Details
-  const [applicantComplaint, setApplicantComplaint] = useState('')
+  const [applicantComplaint, setApplicantComplaint] = useState(() => initialApplication?.legalMatterDescription ?? '')
   const [applicantRequestedSolution, setApplicantRequestedSolution] = useState('')
   const [applicantStatements, setApplicantStatements] = useState('')
   const [oppositePartyResponse, setOppositePartyResponse] = useState('')
@@ -220,10 +216,10 @@ export default function MediationPanel({ applicationId, session, role, applicati
           if (result.draft.followUpDate) setFollowUpDate(result.draft.followUpDate.slice(0, 10))
         }
         if (result.safetyConsent) {
-          setIsSafe(result.safetyConsent.isSafe ?? true)
-          setApplicantAgreed(result.safetyConsent.applicantAgreed ?? true)
-          setApplicantAvailable(result.safetyConsent.applicantAvailable ?? true)
-          setOppositePartyWilling(result.safetyConsent.oppositePartyWilling ?? true)
+          setIsSafe(result.safetyConsent.isSafe ?? false)
+          setApplicantAgreed(result.safetyConsent.applicantAgreed ?? false)
+          setApplicantAvailable(result.safetyConsent.applicantAvailable ?? false)
+          setOppositePartyWilling(result.safetyConsent.oppositePartyWilling ?? false)
           setSafetyNotes(result.safetyConsent.notes ?? '')
         }
         if (result.sessionType) setSessionType(result.sessionType)
@@ -255,18 +251,11 @@ export default function MediationPanel({ applicationId, session, role, applicati
       setLoaded(true)
     }).catch((failure) => { if (failure.name !== 'AbortError') { setError(failure.message); setLoaded(true) } })
 
-    // Also load application details for pre-filling complaint if needed
+    // Without an application from the parent, load it to pre-fill the complaint; saved session details win.
     if (!initialApplication) {
       api(`/api/applications/${applicationId}`, { token: session.token, signal: controller.signal })
-        .then((app) => {
-          setAppData(app)
-          if (!applicantComplaint && app?.legalMatterDescription) {
-            setApplicantComplaint(app.legalMatterDescription)
-          }
-        })
+        .then((app) => setApplicantComplaint((current) => current || app?.legalMatterDescription || ''))
         .catch(() => {})
-    } else if (!applicantComplaint && initialApplication?.legalMatterDescription) {
-      setApplicantComplaint(initialApplication.legalMatterDescription)
     }
 
     listSignaturePackets(ownerId).then(setQueue).catch(() => setError(bi('Offline signature queue is unavailable on this device.', 'এই ডিভাইসে পরে পাঠানোর জন্য রাখা স্বাক্ষরগুলো এখন দেখা যাচ্ছে না।')))
@@ -494,6 +483,10 @@ export default function MediationPanel({ applicationId, session, role, applicati
   const verifier = <Link to={`/applications/${applicationId}/mediation/verify`}><Bi en="Open independent signature verifier" bn="আলাদাভাবে স্বাক্ষর যাচাই করুন" /></Link>
 
   const isUnsafe = mediation?.safetyConsent?.decision === 'NOT_SAFE'
+  // Scheduling and every later step open only after a person confirms safety and consent; the server enforces the same rule.
+  const safetyConfirmed = mediation?.safetyConsent?.decision === 'CONSENT_CONFIRMED'
+  const canRecordSafety = mediatorCanAct || role === 'DLAO_OFFICER'
+  const allSafetyChecks = isSafe && applicantAgreed && applicantAvailable && oppositePartyWilling
 
   return <Panel id="mediation-title" en="Mediation Workflow" bn="মধ্যস্থতা ও বিকল্প বিরোধ নিষ্পত্তি" hint={loaded ? mediation ? say(mediation.stage) : bi('Not started', 'শুরু হয়নি') : undefined} open={role !== 'DLAO_OFFICER'}>
     {!loaded && <p role="status">{bi('Loading…', 'লোড হচ্ছে…')}</p>}
@@ -554,10 +547,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
               className="secondary-button"
               disabled={busy}
               style={{ marginTop: '1rem', width: '100%' }}
-              onClick={async () => {
-                const res = await send('', {}, bi('Mediation registered. Please choose an accredited mediator.', 'মধ্যস্থতা নিবন্ধিত হয়েছে। অনুগ্রহ করে মধ্যস্থতাকারী নির্বাচন করুন।'))
-                if (res) setAssignMediatorMode(true)
-              }}
+              onClick={() => send('', {}, bi('Mediation registered. Please choose an accredited mediator.', 'মধ্যস্থতা নিবন্ধিত হয়েছে। অনুগ্রহ করে মধ্যস্থতাকারী নির্বাচন করুন।'))}
             >
               <Bi en="Assign to Mediator" bn="মধ্যস্থতাকারীর কাছে অর্পণ করুন" />
             </button>
@@ -621,7 +611,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
           <Bi en="Before scheduling or conducting mediation, confirm the 4 critical safety and willingness criteria:" bn="মধ্যস্থতার পূর্বে ৪টি মৌলিক নিরাপত্তা ও সম্মতিসূচক বিষয় যাচাই করে নিশ্চিত করুন:" />
         </p>
 
-        {isUnsafe ? (
+        {isUnsafe && (
           <div style={{ padding: '0.75rem', backgroundColor: '#FFFFFF', border: '1px solid #F8D7DA', borderRadius: '4px', margin: '0.5rem 0' }}>
             <strong style={{ color: '#9F2F2D' }}>
               🛑 <Bi en="Mediation Halted: Unsafe for Applicant" bn="মধ্যস্থতা স্থগিত: আবেদনকারীর জন্য অনিরাপদ" />
@@ -638,7 +628,9 @@ export default function MediationPanel({ applicationId, session, role, applicati
               </a>
             </div>
           </div>
-        ) : (
+        )}
+        {!isUnsafe && !safetyConfirmed && <p role="status" className="muted"><Bi en="Scheduling and the later steps open after a person confirms safety and consent." bn="নিরাপত্তা ও সম্মতি নিশ্চিত হলে সময়সূচি ও পরের ধাপগুলো খুলবে।" /></p>}
+        {canRecordSafety && (
           <div className="form-stack">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.6rem', padding: '0.75rem', backgroundColor: '#F9F9F8', borderRadius: '4px' }}>
               <label className="checkbox-label" htmlFor="chk-is-safe" style={{ margin: 0 }}>
@@ -670,7 +662,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
                 onChange={(e) => setSafetyNotes(e.target.value)}
                 placeholder={bi('Record how consent was verified, safe contact confirmation, risk checks...', 'কীভাবে সম্মতি ও নিরাপদ যোগাযোগ যাচাই করা হয়েছে তা লিখুন...')}
                 rows={2}
-                maxLength={1000}
+                maxLength={500}
               />
             </div>
 
@@ -678,7 +670,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginTop: '0.5rem' }}>
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || !allSafetyChecks}
                 style={{ backgroundColor: '#2E7D32', borderColor: '#2E7D32', color: '#FFF' }}
                 onClick={() => handleSafetyConsent('CONSENT_CONFIRMED')}
               >
@@ -703,12 +695,13 @@ export default function MediationPanel({ applicationId, session, role, applicati
                 ⏳ <Bi en="Consent Pending" bn="সম্মতি অপেক্ষমাণ" />
               </button>
             </div>
+            {!allSafetyChecks && <p className="muted"><Bi en="Consent can be confirmed only when all four answers are yes." bn="চারটি উত্তরই হ্যাঁ হলে তবেই সম্মতি নিশ্চিত করা যাবে।" /></p>}
           </div>
         )}
       </section>
 
       {/* STEP 3: SCHEDULE MEDIATION */}
-      {mediatorCanAct && !isUnsafe && ['REGISTRATION', 'SCHEDULING_NOTICES'].includes(mediation.stage) && (
+      {mediatorCanAct && safetyConfirmed && ['REGISTRATION', 'SCHEDULING_NOTICES'].includes(mediation.stage) && (
         <form className="form-stack inline-form" style={{ margin: '1.25rem 0', border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FFFFFF' }} onSubmit={(event) => {
           event.preventDefault()
           send('/schedule', {
@@ -826,7 +819,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
       )}
 
       {/* DOCUMENT REVIEW STAGE */}
-      {mediatorCanAct && !isUnsafe && mediation.stage === 'DOCUMENT_REVIEW' && (
+      {mediatorCanAct && safetyConfirmed && mediation.stage === 'DOCUMENT_REVIEW' && (
         <section className="form-stack inline-form" style={{ margin: '1.25rem 0', border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FFFFFF' }} aria-labelledby="med-documents-title">
           <h3 id="med-documents-title"><Bi en="Document Review" bn="নথিপত্র যাচাই" /></h3>
           {mediation.documents.length ? <ul className="plain-list">{mediation.documents.map((document) => <li key={document.id}>{document.label} · <Term code={document.qualityState} /> · v{num(document.currentVersion)}</li>)}</ul> : <p><Bi en="No documents on this case." bn="এই মামলায় কোনো নথি নেই।" /></p>}
@@ -836,7 +829,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
       )}
 
       {/* ATTENDANCE STAGE */}
-      {mediatorCanAct && !isUnsafe && mediation.stage === 'ATTENDANCE' && (
+      {mediatorCanAct && safetyConfirmed && mediation.stage === 'ATTENDANCE' && (
         <form className="form-stack inline-form" style={{ margin: '1.25rem 0', border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FFFFFF' }} onSubmit={(event) => { event.preventDefault(); send('/attendance', attendance, bi('Attendance saved.', 'উপস্থিতি সংক্রান্ত তথ্য সংরক্ষিত হয়েছে।')) }}>
           <h3><Bi en="Attendance" bn="উপস্থিতি" /></h3>
           {['partyA', 'partyB'].map((party) => <div key={party}><label htmlFor={`attendance-${party}`}><Term code={party === 'partyA' ? 'PARTY_A' : 'PARTY_B'} /></label><select id={`attendance-${party}`} value={attendance[party]} onChange={(event) => setAttendance((current) => ({ ...current, [party]: event.target.value }))} required><option value="">{bi('Choose', 'বাছাই করুন')}</option>{['ATTENDED', 'REPRESENTED', 'ABSENT'].map((code) => <option key={code} value={code}>{say(code)}</option>)}</select></div>)}
@@ -846,7 +839,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
       )}
 
       {/* STEP 4 & 5 & 6: FORMAL MEDIATION SESSION */}
-      {mediatorCanAct && !isUnsafe && mediation.stage === 'MEDIATION' && (
+      {mediatorCanAct && safetyConfirmed && mediation.stage === 'MEDIATION' && (
         <div style={{ margin: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
           {/* STEP 4: MEDIATION SESSION DUAL-SIDE VIEW */}
@@ -1250,7 +1243,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
       )}
 
       {/* STEP 7: SETTLEMENT DRAFT */}
-      {mediatorCanAct && !isUnsafe && mediation.stage === 'DRAFT_OUTCOME' && mediation.draft && (
+      {mediatorCanAct && safetyConfirmed && mediation.stage === 'DRAFT_OUTCOME' && mediation.draft && (
         <section className="form-stack inline-form" style={{ margin: '1.25rem 0', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '1.25rem', backgroundColor: '#FFFFFF' }} aria-labelledby="settlement-title">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 id="settlement-title" style={{ margin: 0, fontSize: '1.1rem' }}>
@@ -1455,8 +1448,12 @@ export default function MediationPanel({ applicationId, session, role, applicati
             ))}
           </ol>
 
+          {mediation.earlierSignatureCount > 0 && <p className="muted"><Bi en={`${mediation.earlierSignatureCount} signatures on an earlier version stay on record; this version needs fresh signatures.`} bn={`আগের সংস্করণের ${num(mediation.earlierSignatureCount)}টি স্বাক্ষর রেকর্ডে থাকছে; এই সংস্করণে নতুন করে স্বাক্ষর লাগবে।`} /></p>}
+
           {/* Mediator / DLAO Passphrase Signing */}
           <div style={{ marginTop: '0.75rem', padding: '0.85rem', backgroundColor: '#F9F9F8', borderRadius: '6px', border: '1px solid #EAEAEA' }}>
+            <p role="status">{online ? bi('Connection: online', 'সংযোগ: অনলাইন') : bi('Connection: offline', 'সংযোগ: অফলাইন')} · {bi(`encrypted signatures awaiting sync: ${queue.length}`, `সিঙ্কের অপেক্ষায়: ${num(queue.length)}`)}</p>
+            {queue.length > 0 && <><button type="button" className="secondary-button" disabled={!online || signingPassphrase.length < 8 || busy} onClick={syncPending}><Bi en="Sync now" bn="এখন সিঙ্ক করুন" /></button><ul className="plain-list">{queue.map((item) => <li key={item.id}><Bi en="Encrypted signature" bn="এনক্রিপ্ট করা স্বাক্ষর" /> · {when(item.updatedAt)}</li>)}</ul></>}
             <label htmlFor="signature-passphrase">
               <Bi en="Passphrase for DLAO/Mediator Signature (কমপক্ষে ৮ অক্ষর)" bn="ডিএলএও/মধ্যস্থতাকারীর স্বাক্ষরের স্থানীয় পাসফ্রেজ" />
             </label>
@@ -1763,7 +1760,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
               <Bi en="Multiple joint & separate mediation sessions log (১ম বৈঠক, ২য় বৈঠক...)" bn="বহুস্তরীয় মধ্যস্থতা বৈঠকের ইতিহাস ও ফলাফল (১ম বৈঠক, ২য় বৈঠক...)" />
             </p>
           </div>
-          {(mediatorCanAct || role === 'DLAO_OFFICER') && !isUnsafe && (
+          {(mediatorCanAct || role === 'DLAO_OFFICER') && safetyConfirmed && (
             <button
               type="button"
               className="secondary-button"

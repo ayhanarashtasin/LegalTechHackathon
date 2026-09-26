@@ -133,7 +133,7 @@ test('T1 citizen portal request reaches officer review and stage payment history
   const citizenHeaders = { authorization: `Bearer ${(await citizen.json()).token}` }
   const submitted = await request.post('/api/citizen/applications', { headers: citizenHeaders, data: {
     applicantName: 'Fictional Abdul Malek', problem: 'The panel lawyer has not answered about two hearings.',
-    district: 'Barguna', urgent: false, identityDocument: 'NONE', contactPhone: '',
+    district: 'Barguna', category: 'LAND_PROPERTY', urgent: false, identityDocument: 'NONE', contactPhone: '',
   } })
   expect(submitted.status()).toBe(201)
   const { applicationId } = await submitted.json()

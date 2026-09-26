@@ -6,7 +6,7 @@ import { Application, Case, CaseFact, ContactAttempt, LawyerAssignment, LawyerUp
 import { acceptApplication, addFact, createDocumentMetadata, lookupHash, newVoicePin, overridePriority, recordContactAttempt, reviewApplication, setSafeContact, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
 import { createAssisted } from '../services/assistedService.js'
 import { assignLawyer, respondToAssignment, scheduleLawyerUpdate, updateCasePlan } from '../services/lawyerService.js'
-import { recordScheduling, setMediator, startMediation } from '../services/mediationService.js'
+import { recordSafetyConsent, recordScheduling, setMediator, startMediation } from '../services/mediationService.js'
 import { ensureAdminUser } from '../services/authService.js'
 import { demoAccounts as accounts, demoPassword, ensureDemoAccounts } from '../services/demoAccounts.js'
 
@@ -257,6 +257,10 @@ try {
     const mediatorRole = await RoleAssignment.findOne({ userId: mediatorUser._id, role: 'MEDIATOR', active: true })
     const mediatorActor = { userId: mediatorUser._id, assignments: [mediatorRole] }
     await setMediator(rashida.applicationId, { mediatorUserId: String(mediatorUser._id) }, officerActor)
+    await recordSafetyConsent(rashida.applicationId, {
+      safeForApplicant: true, applicantAgreed: true, applicantAvailable: true, oppositePartyWilling: true,
+      status: 'CONSENT_CONFIRMED', reason: 'Fictional seed: the mediator checked safety and both parties agreed to mediation.',
+    }, mediatorActor)
     await recordScheduling(rashida.applicationId, {
       mode: 'IN_PERSON',
       scheduledAt: new Date(Date.now() + 4 * 86400000).toISOString(),

@@ -106,14 +106,16 @@ export function validateSafetyConsent(request, _response, next) {
   ], [])
   const status = value.status || value.decision
   if (!status || !['CONSENT_CONFIRMED', 'NOT_SAFE', 'CONSENT_PENDING'].includes(status)) fail('Status must be CONSENT_CONFIRMED, NOT_SAFE, or CONSENT_PENDING.')
-  request.body = {
-    safeForApplicant: value.safeForApplicant ?? value.isSafe ?? true,
-    applicantAgreed: value.applicantAgreed ?? true,
-    applicantAvailable: value.applicantAvailable ?? true,
-    oppositePartyWilling: value.oppositePartyWilling ?? true,
-    status,
-    reason: typeof value.reason === 'string' ? value.reason : typeof value.notes === 'string' ? value.notes : '',
+  // A person answers every question; nothing defaults to "safe".
+  const answers = {
+    safeForApplicant: value.safeForApplicant ?? value.isSafe,
+    applicantAgreed: value.applicantAgreed,
+    applicantAvailable: value.applicantAvailable,
+    oppositePartyWilling: value.oppositePartyWilling,
   }
+  if (Object.values(answers).some((answer) => typeof answer !== 'boolean')) fail('Answer each of the four safety and consent questions.')
+  if (status === 'CONSENT_CONFIRMED' && Object.values(answers).some((answer) => !answer)) fail('Confirm consent only when all four safety and consent checks are true.')
+  request.body = { ...answers, status, reason: text(value.reason ?? value.notes, 'Safety and consent note', 10, 500) }
   next()
 }
 
@@ -164,7 +166,7 @@ export function validateFollowUp(request, _response, next) {
     agreementComplied: value.agreementComplied ?? (value.complianceStatus === 'COMPLIED'),
     furtherAssistanceRequired: typeof value.furtherAssistanceRequired === 'boolean' ? (value.furtherAssistanceRequired ? 'Yes' : 'No') : value.furtherAssistanceRequired,
     actionTaken,
-    notes: value.notes || value.reason || '',
+    notes: text(value.notes ?? value.reason ?? '', actionTaken === 'CLOSED' ? 'Case closure reason' : 'Follow-up note', 10, 1000),
   }
   next()
 }

@@ -6,7 +6,7 @@ import * as models from './models/index.js'
 import { User, RoleAssignment, AuditEvent } from './models/index.js'
 import { hashPassword } from './utils/password.js'
 import { acceptApplication, editCaseInformation, listWorkspace, preMediationVerify, recordNoticeSent, reviewApplication, submitApplication } from './services/applicationService.js'
-import { recordMediationSession, setMediator, startMediation } from './services/mediationService.js'
+import { recordMediationSession, recordSafetyConsent, setMediator, startMediation } from './services/mediationService.js'
 import { updatePovertyCertificate } from './services/lawyerService.js'
 
 const databaseName = `dlas_dlao_test_${randomBytes(6).toString('hex')}`
@@ -146,6 +146,10 @@ test('DLAO enhancements: case edit, call verification, notices, multi-session me
   // A mediator records sessions only once the DLAO officer appoints them.
   await assert.rejects(recordMediationSession(appId, { summaryNotes: 'Not appointed yet.' }, mediatorActor), { status: 403 })
   await setMediator(appId, { mediatorUserId: String(mediatorUser._id) }, dlaoActor)
+  await recordSafetyConsent(appId, {
+    safeForApplicant: true, applicantAgreed: true, applicantAvailable: true, oppositePartyWilling: true,
+    status: 'CONSENT_CONFIRMED', reason: 'The mediator checked safety privately and both fictional parties agreed.',
+  }, mediatorActor)
 
   // Add 1st session
   const session1 = await recordMediationSession(appId, {
