@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { applicationNumber, digitsFromWords, spokenStatusRequest, spokenYesNo } from './voiceAgent.js'
-import { runStatusCall } from './voiceStatusCall.js'
+import { callLanguage, runStatusCall } from './voiceStatusCall.js'
 
 // A fake call: each turn hears the next scripted reply, and the log shows what was said and looked up. `wantsStatus`
 // is the model's answer when the opening's words match no status word; `modelRead` records what it was sent.
@@ -145,4 +145,36 @@ test('status requests, application numbers, and words that only sound like digit
   // "চাই" (want) and "দয়া" (please) are not six and two.
   expect(digitsFromWords('অবস্থা জানতে চাই')).toBeUndefined()
   expect(digitsFromWords('দয়া করে দেখুন, শূন্য তিন নয়')).toBe('039')
+})
+
+// English (added 2026-09-26). Transcripts are as Groq's Whisper returned English speech on 2026-09-26.
+test('an English caller asks, confirms the number, gives the PIN, and hears the status', async () => {
+  const { io, log } = fakeCall(['I want to know my case status.', '000007', 'Yes.', 'Yes.', '1-2-3-4-5-6'])
+  await runStatusCall(io)
+  expect(log).toEqual(['welcome', 'askNumber', 'show:000007', 'confirmNumber:000007', 'privateCheck', 'askPin', 'lookup:000007/123456'])
+
+  const inSentence = fakeCall(['My case number is 000007. I want an update.', 'Yeah.', 'Yes.', 'One two three four five six.'])
+  await runStatusCall(inSentence.io)
+  expect(inSentence.log.slice(0, 3)).toEqual(['welcome', 'show:000007', 'confirmNumber:000007'])
+  expect(applicationNumber(digitsFromWords('Zero zero zero zero zero seven.'))).toBe('000007')
+})
+
+test('the first answer sets the call\'s language: Bangla, or English only from two English words', () => {
+  expect(callLanguage({ text: 'আমার কেসের অবস্থা জানতে চাই', language: 'bn' })).toBe('bn')
+  expect(callLanguage({ text: 'I want to know my case status.', language: 'en' })).toBe('en')
+  expect(callLanguage({ text: 'Happy', language: 'en' })).toBeUndefined() // a lone "হ্যাঁ", heard as English
+  expect(callLanguage({ text: 'मेरा केस', language: null })).toBeUndefined()
+})
+
+test('English yes and no, in English or as Whisper writes them in a Bangla call', () => {
+  for (const yes of ['Yes.', 'Yeah.', 'Okay.', 'যেস।', 'যেশ, তাই একটি করতে একটি।']) expect(spokenYesNo(yes), yes).toBe(true)
+  for (const no of ['No.', 'Nope.', 'No, that is wrong.']) expect(spokenYesNo(no), no).toBe(false)
+  // "not" makes an English reply unclear rather than a yes, so it is asked again.
+  expect(spokenYesNo('not okay')).toBeUndefined()
+})
+
+test('English digit words as Whisper wrote them in a Bangla call', () => {
+  expect(digitsFromWords('সিরো সিরো সিরো সিরো সিরো সেমেন')).toBe('000007')
+  expect(digitsFromWords('দোবল জিরো, জিরো, জিরো, এক, তু')).toBe('000012')
+  expect(digitsFromWords('সরি')).toBeUndefined() // "sorry" shares সিরো's outline
 })

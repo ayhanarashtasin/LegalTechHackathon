@@ -1,10 +1,11 @@
 import { Router } from 'express'
-import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, search, submit, trackStatus, updateSafeContact } from '../controllers/applicationController.js'
+import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, reviewCancellation, search, submit, trackStatus, updateSafeContact } from '../controllers/applicationController.js'
 import { addDocument, approveDocumentBriefing, generateBriefing, readBriefing, readDocuments, readEvidenceAccess } from '../controllers/documentController.js'
 import { readForApplication, routingDecision, send } from '../controllers/referralController.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { limitStatusLookup } from '../middleware/rateLimit.js'
 import { applicationIdParam, validateAdviceOutcome, factIdParam, taskIdParam, validateAcceptance, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEmptyBody, validateFact, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask, validateTrackLookup } from '../validators/requests.js'
+import { cancellationRequestParam, validateCancellationReview } from '../validators/cancellation.js'
 
 const router = Router()
 router.post('/track', limitStatusLookup, validateTrackLookup, trackStatus)
@@ -18,6 +19,7 @@ router.post('/:applicationId/review', applicationIdParam, requireRole('DLAO_OFFI
 router.post('/:applicationId/review-override', applicationIdParam, requireRole('DLAO_OFFICER'), validateReviewOverride, overrideReview)
 router.post('/:applicationId/priority-override', applicationIdParam, requireRole('DLAO_OFFICER'), validatePriorityOverride, priorityOverride)
 router.post('/:applicationId/accept', applicationIdParam, requireRole('DLAO_OFFICER'), validateAcceptance, accept)
+router.post('/:applicationId/cancellation-requests/:requestId/review', applicationIdParam, cancellationRequestParam, requireRole('DLAO_OFFICER'), validateCancellationReview, reviewCancellation)
 router.get('/:applicationId/tasks', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), readTasks)
 router.post('/:applicationId/tasks', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), validateTask, addTask)
 router.post('/:applicationId/tasks/:taskId/complete', applicationIdParam, taskIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), finishTask)

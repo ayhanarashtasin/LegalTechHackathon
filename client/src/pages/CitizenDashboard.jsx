@@ -3,11 +3,7 @@ import { Link } from 'react-router'
 import { api } from '../services/api.js'
 import { bi } from '../components/Bi.jsx'
 import PhaseTracker from '../components/PhaseTracker.jsx'
-
-const DISTRICTS = [
-  'Dhaka', 'Chattogram', 'Rajshahi', 'Khulna', 'Barishal', 'Sylhet', 'Rangpur', 'Mymensingh',
-  'Jhenaidah', 'Cumilla', 'Bogura', 'Gazipur', 'Narayanganj', 'Tangail', 'Faridpur', 'Cox\'s Bazar'
-]
+import DigitalApplicationModal from '../components/DigitalApplicationModal.jsx'
 
 export default function CitizenDashboard({ session }) {
   const [cases, setCases] = useState([])
@@ -22,14 +18,13 @@ export default function CitizenDashboard({ session }) {
   const [changeReason, setChangeReason] = useState('')
   const [submittingChange, setSubmittingChange] = useState(false)
 
+  // Cancel case/application state
+  const [selectedCaseForCancel, setSelectedCaseForCancel] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [submittingCancel, setSubmittingCancel] = useState(false)
+
   // Digital application state
   const [showAppModal, setShowAppModal] = useState(false)
-  const [appApplicantName, setAppApplicantName] = useState('')
-  const [appProblem, setAppProblem] = useState('')
-  const [appDistrict, setAppDistrict] = useState(DISTRICTS[0])
-  const [appUrgent, setAppUrgent] = useState(false)
-  const [appIdentityDoc, setAppIdentityDoc] = useState('NID')
-  const [appPhone, setAppPhone] = useState('')
   const [submittingApp, setSubmittingApp] = useState(false)
 
   useEffect(() => {
@@ -55,17 +50,10 @@ export default function CitizenDashboard({ session }) {
   }, [session.token, refresh])
 
   function openAppModal() {
-    setAppApplicantName(profile?.displayName || session?.user?.displayName || '')
-    setAppPhone(profile?.phone || session?.user?.phone || '')
-    setAppDistrict(profile?.district && DISTRICTS.includes(profile.district) ? profile.district : DISTRICTS[0])
-    setAppIdentityDoc(profile?.nid ? 'NID' : 'NONE')
     setShowAppModal(true)
   }
 
-  async function handleDigitalAppSubmit(e) {
-    e.preventDefault()
-    if (!appProblem.trim()) return
-
+  async function handleDigitalAppSubmit(payload) {
     setSubmittingApp(true)
     setError('')
     setFeedbackMsg('')
@@ -73,19 +61,10 @@ export default function CitizenDashboard({ session }) {
       const res = await api('/api/citizen/applications', {
         method: 'POST',
         token: session.token,
-        body: {
-          problem: appProblem.trim(),
-          district: appDistrict,
-          urgent: appUrgent,
-          contactPhone: appPhone.trim(),
-          identityDocument: appIdentityDoc,
-          applicantName: appApplicantName.trim() || session.user.displayName,
-        },
+        body: payload,
       })
       setFeedbackMsg(res.message || bi('Application submitted successfully.', 'আইনি সহায়তার আবেদন সফলভাবে দাখিল হয়েছে।'))
       setShowAppModal(false)
-      setAppProblem('')
-      setAppUrgent(false)
       setRefresh((r) => r + 1)
     } catch (err) {
       setError(err.message)
@@ -114,6 +93,31 @@ export default function CitizenDashboard({ session }) {
       setError(err.message)
     } finally {
       setSubmittingChange(false)
+    }
+  }
+
+  async function handleCancelSubmit(e) {
+    e.preventDefault()
+    if (!selectedCaseForCancel || !cancelReason.trim()) return
+
+    setSubmittingCancel(true)
+    setFeedbackMsg('')
+    try {
+      const res = await api(`/api/citizen/cases/${selectedCaseForCancel.applicationId}/cancel`, {
+        method: 'POST',
+        token: session.token,
+        body: { reason: cancelReason.trim() },
+      })
+      setFeedbackMsg(res.message || (res.status === 'CANCELLED'
+        ? bi('Your application has been cancelled.', 'আপনার আবেদনটি বাতিল করা হয়েছে।')
+        : bi('Your cancellation request has been sent to the DLAO officer for confirmation.', 'বাতিলের অনুরোধ ডিএলএও কর্মকর্তার নিকট প্রেরণ করা হয়েছে।')))
+      setSelectedCaseForCancel(null)
+      setCancelReason('')
+      setRefresh((r) => r + 1)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmittingCancel(false)
     }
   }
 
@@ -194,6 +198,9 @@ export default function CitizenDashboard({ session }) {
               const approvedChangeReq = c.changeRequests?.find(cr => cr.status === 'APPROVED')
               const pastChangeReqs = c.changeRequests?.filter(cr => cr.status !== 'OPEN') || []
               const isAccepted = c.status === 'ACCEPTED'
+              const isCancelled = c.status === 'CANCELLED'
+              const pendingCancellation = c.cancellationRequest?.status === 'OPEN'
+              const canRequestCancel = !isCancelled && !pendingCancellation
 
               return (
                 <article key={c.applicationId} className="citizen-case-card">
@@ -214,6 +221,28 @@ export default function CitizenDashboard({ session }) {
                       </div>
                       <h3 className="applicant-name">{c.applicantName}</h3>
                       <p className="matter-summary">{c.summary}</p>
+                      <div className="citizen-meta-pills-row">
+                        {c.nidNumber && (
+                          <span className="citizen-meta-pill">
+                            {bi('NID: ', 'এনআইডি: ')}{c.nidNumber}
+                          </span>
+                        )}
+                        {c.birthCertificateNumber && (
+                          <span className="citizen-meta-pill">
+                            {bi('BRN: ', 'জন্ম সনদ: ')}{c.birthCertificateNumber}
+                          </span>
+                        )}
+                        {c.prottayonpotroStatus === 'YES' && (
+                          <span className="citizen-meta-pill citizen-meta-pill-accent">
+                            {bi('Prottayonpotro on record', 'প্রত্যয়নপত্র দাখিলকৃত')}
+                          </span>
+                        )}
+                        {c.documents && c.documents.length > 0 && (
+                          <span className="citizen-meta-pill">
+                            {c.documents.length} {c.documents.length === 1 ? bi('attachment', 'টি প্রমাণক') : bi('attachments', 'টি প্রমাণক')}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="case-card-meta">
@@ -221,8 +250,28 @@ export default function CitizenDashboard({ session }) {
                       <span className="meta-value">{c.intakeChannel}</span>
                       <span className="meta-label" style={{ marginTop: '8px' }}>{bi('Date Filed', 'আবেদনের তারিখ')}</span>
                       <span className="meta-value">{new Date(c.createdAt).toLocaleDateString()}</span>
+                      {canRequestCancel && (
+                        <button
+                          type="button"
+                          className="text-action-link"
+                          style={{ marginTop: '10px', color: '#9f2f2d' }}
+                          onClick={() => setSelectedCaseForCancel(c)}
+                        >
+                          {bi('Cancel Application/Case', 'আবেদন/মামলা বাতিল করুন')}
+                        </button>
+                      )}
                     </div>
                   </header>
+
+                  {pendingCancellation && (
+                    <div className="pending-reassignment-notice" role="status">
+                      <span className="warning-dot" />
+                      <div>
+                        <strong>{bi('Cancellation Requested — Pending DLAO Review', 'বাতিলের অনুরোধ — ডিএলএও পর্যালোচনার অপেক্ষায়')}</strong>
+                        <p>{bi('Reason submitted: ', 'আবেদনের কারণ: ')}&ldquo;{c.cancellationRequest.reason}&rdquo;</p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* 6-Phase Lifecycle Tracker */}
                   <div className="phase-tracker-wrapper">
@@ -349,126 +398,14 @@ export default function CitizenDashboard({ session }) {
       </section>
 
       {/* Digital Application Modal */}
-      {showAppModal && (
-        <div className="auth-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
-          <div className="auth-modal-backdrop" onClick={() => setShowAppModal(false)} />
-          <div className="auth-modal-card">
-            <div className="auth-modal-header">
-              <div>
-                <span className="auth-modal-sub">{bi('Direct Legal Aid Request', 'সরাসরি আইনি সহায়তার আবেদন')}</span>
-                <h3 id="app-modal-title" className="auth-modal-heading">
-                  {bi('Submit Legal Aid Application', 'আইনি সহায়তার আবেদনপত্র দাখিল')}
-                </h3>
-              </div>
-              <button
-                type="button"
-                className="auth-modal-close"
-                onClick={() => setShowAppModal(false)}
-              >
-                &times;
-              </button>
-            </div>
-
-            <form onSubmit={handleDigitalAppSubmit} className="auth-form-stack">
-              <div>
-                <label htmlFor="app-name">{bi('Applicant Name', 'আবেদনকারীর নাম')}</label>
-                <input
-                  id="app-name"
-                  type="text"
-                  required
-                  value={appApplicantName}
-                  onChange={(e) => setAppApplicantName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="app-problem">{bi('Describe Your Legal Matter / Incident', 'আপনার আইনি সমস্যা, বিরোধ বা ঘটনার বিবরণ')}</label>
-                <textarea
-                  id="app-problem"
-                  rows="4"
-                  required
-                  placeholder={bi(
-                    'Provide details regarding the dispute, family matter, labor rights, tenancy, or legal challenge.',
-                    'পারিবারিক সমস্যা, জমিজমা বিরোধ, বকেয়া বেতন বা শ্রম অধিকার, দেনা-পাওনা কিংবা আইনি সংকটের বিস্তারিত বিবরণ প্রদান করুন।'
-                  )}
-                  value={appProblem}
-                  onChange={(e) => setAppProblem(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="app-district">{bi('District', 'জেলা')}</label>
-                <select
-                  id="app-district"
-                  className="auth-select"
-                  value={appDistrict}
-                  onChange={(e) => setAppDistrict(e.target.value)}
-                >
-                  {DISTRICTS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="app-phone">{bi('Safe Contact Phone', 'জরুরি যোগাযোগের ফোন নম্বর')}</label>
-                <input
-                  id="app-phone"
-                  type="tel"
-                  placeholder="01700000000"
-                  value={appPhone}
-                  onChange={(e) => setAppPhone(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="app-identity-doc">{bi('Identity Document Available', 'সংযুক্ত পরিচয়পত্র / প্রমাণক')}</label>
-                <select
-                  id="app-identity-doc"
-                  className="auth-select"
-                  value={appIdentityDoc}
-                  onChange={(e) => setAppIdentityDoc(e.target.value)}
-                >
-                  <option value="NID">{bi('National ID (NID)', 'জাতীয় পরিচয়পত্র (এনআইডি)')}</option>
-                  <option value="BIRTH_CERTIFICATE">{bi('Birth Certificate', 'জন্ম নিবন্ধন')}</option>
-                  <option value="NONE">{bi('None or not currently available', 'আপাতত কোনোটি নেই বা সংযুক্ত নেই')}</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '0.5rem 0' }}>
-                <input
-                  id="app-urgent"
-                  type="checkbox"
-                  style={{ width: 'auto', margin: 0 }}
-                  checked={appUrgent}
-                  onChange={(e) => setAppUrgent(e.target.checked)}
-                />
-                <label htmlFor="app-urgent" style={{ margin: 0, fontWeight: 550, cursor: 'pointer' }}>
-                  {bi('Immediate danger or urgent protection requested', 'তাৎক্ষণিক জীবনের ঝুঁকি বা জরুরি আইনি সুরক্ষার আবেদন')}
-                </label>
-              </div>
-
-              <div className="dialog-action-row">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setShowAppModal(false)}
-                  disabled={submittingApp}
-                >
-                  {bi('Cancel', 'বাতিল')}
-                </button>
-                <button
-                  type="submit"
-                  className="primary-action-btn"
-                  disabled={submittingApp || !appProblem.trim()}
-                >
-                  {submittingApp ? bi('Submitting…', 'জমা হচ্ছে…') : bi('Submit Application', 'আবেদন জমা দিন')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <DigitalApplicationModal
+        isOpen={showAppModal}
+        onClose={() => setShowAppModal(false)}
+        onSubmit={handleDigitalAppSubmit}
+        profile={profile}
+        session={session}
+        isSubmitting={submittingApp}
+      />
 
       {/* Lawyer Change Request Modal */}
       {selectedCaseForChange && (
@@ -529,6 +466,84 @@ export default function CitizenDashboard({ session }) {
                   disabled={submittingChange || !changeReason.trim()}
                 >
                   {submittingChange ? bi('Submitting to DLAO…', 'ডিএলএও কার্যালয়ে প্রেরণ করা হচ্ছে…') : bi('Submit Request to DLAO Officer', 'ডিএলএও কর্মকর্তার নিকট আবেদন দাখিল করুন')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Application/Case Confirmation Modal */}
+      {selectedCaseForCancel && (
+        <div className="auth-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cancel-modal-title">
+          <div className="auth-modal-backdrop" onClick={() => setSelectedCaseForCancel(null)} />
+          <div className="auth-modal-card">
+            <div className="auth-modal-header">
+              <div>
+                <span className="auth-modal-sub">{bi('Legal Aid Oversight', 'আইনি সহায়তা তদারকি ও সমন্বয়')}</span>
+                <h3 id="cancel-modal-title" className="auth-modal-heading">
+                  {bi('Cancel This Application/Case', 'আবেদন/মামলা বাতিল করুন')}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="auth-modal-close"
+                onClick={() => setSelectedCaseForCancel(null)}
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleCancelSubmit} className="auth-form-stack">
+              <div className="case-brief-notice">
+                <p><strong>{bi('Case: ', 'মামলা: ')}</strong>{selectedCaseForCancel.caseId || selectedCaseForCancel.applicationId}</p>
+              </div>
+
+              <p className="bento-muted">
+                {selectedCaseForCancel.status === 'ACCEPTED'
+                  ? bi(
+                      'This case has already been accepted by the DLAO. Cancelling it sends a request to the DLAO officer, who must confirm before the case is closed.',
+                      'এই মামলাটি ইতিমধ্যে ডিএলএও কর্তৃক গৃহীত হয়েছে। বাতিল করলে তা ডিএলএও কর্মকর্তার নিকট অনুরোধ হিসেবে যাবে; কর্মকর্তা নিশ্চিত করার পরই মামলাটি বন্ধ হবে।'
+                    )
+                  : bi(
+                      'This application has not yet been accepted, so it will be cancelled immediately.',
+                      'এই আবেদনটি এখনো গৃহীত হয়নি, তাই এটি সাথে সাথেই বাতিল হয়ে যাবে।'
+                    )}
+              </p>
+
+              <div>
+                <label htmlFor="cancel-reason">
+                  {bi('Reason for Cancellation', 'বাতিলের কারণ')}
+                </label>
+                <textarea
+                  id="cancel-reason"
+                  rows="4"
+                  required
+                  minLength="5"
+                  placeholder={bi(
+                    'Describe why you want to cancel this application or case.',
+                    'কেন এই আবেদন বা মামলাটি বাতিল করতে চান তা লিখুন।'
+                  )}
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                />
+              </div>
+
+              <div className="dialog-action-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setSelectedCaseForCancel(null)}
+                  disabled={submittingCancel}
+                >
+                  {bi('Keep My Application', 'আবেদনটি বহাল রাখুন')}
+                </button>
+                <button
+                  type="submit"
+                  className="primary-action-btn"
+                  disabled={submittingCancel || !cancelReason.trim()}
+                >
+                  {submittingCancel ? bi('Submitting…', 'প্রক্রিয়াধীন…') : bi('Yes, Cancel', 'হ্যাঁ, বাতিল করুন')}
                 </button>
               </div>
             </form>

@@ -58,12 +58,16 @@ const errorsBn = {
   ROUTE_RETAINED: 'সিদ্ধান্ত মোতাবেক মামলাটি বর্তমান অফিসেই সংরক্ষিত ও পরিচালিত হবে।',
   ROUTE_MISMATCH: 'অনুমোদিত অধিক্ষেত্র অনুযায়ী নির্ধারিত অফিসেই রেফারেল প্রেরণ করতে হবে।',
   REFERRAL_ACTIVE: 'পূর্ববর্তী রেফারেলের জবাব বা প্রাপ্তি স্বীকার এখনো প্রক্রিয়াধীন।',
+  MEDIATION_IN_PROGRESS: 'সক্রিয় মধ্যস্থতা প্রক্রিয়া সম্পন্ন না করে মামলাটি বাতিল করা যাবে না।',
+  ALREADY_CANCELLED: 'এই আবেদনটি ইতিমধ্যে বাতিল করা হয়েছে।',
   NOT_A_CANDIDATE: 'এটি তুলনার তালিকায় অন্তর্ভুক্ত নয়।',
   NO_PROPOSAL: 'পূর্বে একটি আপস নিষ্পত্তি প্রস্তাব তৈরি করুন।',
   CONFLICT_NOT_OPEN: 'এই বিরোধটি আর সক্রিয় নেই।',
   VOICE_AI_UNAVAILABLE: 'ভয়েস প্রসেসিং সেবা এই মুহূর্তে অনুপলব্ধ। টাইপ করে উত্তর প্রদান করুন।',
+  SERVER_UNAVAILABLE: 'সার্ভারের সাথে সংযোগ করা যাচ্ছে না। কিছুক্ষণ পরে আবার চেষ্টা করুন।',
   INTERNAL_ERROR: 'অনুরোধটি সম্পন্ন করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।',
 }
+const unavailable = { code: 'SERVER_UNAVAILABLE', message: 'The server is not responding. Please try again in a moment.' }
 
 export async function api(path, { token, body, audio, headers, signal, method = 'GET' } = {}) {
   const response = await fetch(apiUrl(path), {
@@ -79,12 +83,19 @@ export async function api(path, { token, body, audio, headers, signal, method = 
     body: audio ?? (body ? JSON.stringify(body) : undefined),
   })
   if (response.status === 204) return null
-  const data = await response.json()
+  let data
+  try {
+    data = await response.json()
+  } catch (failure) {
+    if (signal?.aborted || failure.name === 'AbortError') throw failure
+    data = null
+  }
   if (!response.ok) {
-    const english = data.error?.message || 'The request failed. Please try again.'
-    const error = new Error(getLang() === 'bn' ? errorsBn[data.error?.code] || 'অনুরোধটি সম্পন্ন করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।' : english)
+    const { code, message } = data ? data.error ?? {} : unavailable
+    const english = message || 'The request failed. Please try again.'
+    const error = new Error(getLang() === 'bn' ? errorsBn[code] || 'অনুরোধটি সম্পন্ন করা যায়নি। অনুগ্রহ করে পুনরায় চেষ্টা করুন।' : english)
     error.status = response.status
-    error.code = data.error?.code
+    error.code = code
     error.data = data
     throw error
   }

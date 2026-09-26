@@ -66,6 +66,8 @@ const words = {
   // History events
   APPLICATION_SUBMITTED: ['Application submitted', 'আবেদন জমা'], APPLICATION_REVIEWED: ['Application reviewed', 'আবেদন পর্যালোচনা হয়েছে'],
   APPLICATION_ACCEPTED: ['Application accepted', 'আবেদন গৃহীত'], APPLICANT_CORRECTION_ATTESTED: ['Applicant correction confirmed', 'আবেদনকারীর সংশোধন নিশ্চিত'],
+  APPLICATION_CANCELLED_BY_APPLICANT: ['Application cancelled by applicant', 'আবেদনকারী আবেদন বাতিল করেছেন'], APPLICANT_CASE_CANCELLATION_REQUESTED: ['Applicant requested case cancellation', 'আবেদনকারী মামলা বাতিলের অনুরোধ করেছেন'],
+  CASE_CANCELLATION_DECLINED: ['Cancellation request declined', 'বাতিলের অনুরোধ প্রত্যাখ্যাত'], CASE_CANCELLED: ['Case cancelled', 'মামলা বাতিল'],
   ASSISTANCE_RECORDED: ['Assistance recorded', 'সহায়তার তথ্য নথিভুক্ত হয়েছে'], CALL_RECORDING_STORED: ['Call recording saved', 'কল রেকর্ড সংরক্ষিত'],
   CONSENT_RECORDED: ['Consent recorded', 'সম্মতি নথিভুক্ত হয়েছে'], CONTACT_ATTEMPT_LOGGED: ['Contact attempt logged', 'যোগাযোগের চেষ্টা নথিভুক্ত হয়েছে'],
   DOCUMENT_BRIEFING_APPROVED: ['Document briefing approved', 'নথির সারসংক্ষেপ অনুমোদিত'], DOCUMENT_BRIEFING_PROPOSED: ['Document briefing drafted', 'নথির সারসংক্ষেপের খসড়া তৈরি হয়েছে'],
@@ -100,6 +102,7 @@ const words = {
   // Queue flags and local drafts
   NEW: ['New', 'নতুন'], URGENT_RECOMMENDATION: ['Urgent recommendation', 'জরুরি সুপারিশ'], OVERDUE: ['Overdue', 'সময় পেরিয়েছে'],
   REFERRAL_WAITING: ['Referral waiting', 'রেফারেলের জবাবের অপেক্ষায়'], LAWYER_UPDATE_OVERDUE: ['Lawyer update overdue', 'আইনজীবীর আপডেট বাকি'],
+  CASE_CANCELLATION_REQUESTED: ['Cancellation requested', 'বাতিলের অনুরোধ'],
   DRAFT: ['Draft', 'খসড়া'], QUEUED: ['Queued', 'পাঠানোর অপেক্ষায়'], CONFLICT: ['Conflict', 'দুই সংস্করণে অমিল'], SERVER: ['Server', 'সার্ভারে থাকা'], LOCAL: ['Local', 'এই ডিভাইসে থাকা'],
   // Fact values
   YES: ['Yes', 'হ্যাঁ'], NO: ['No', 'না'], AVAILABLE: ['Available', 'আছে'], UNAVAILABLE: ['Not available', 'নেই'],
@@ -200,6 +203,7 @@ const phrases = {
   'Submitted; first human review has not been recorded.': 'জমা হয়েছে; প্রথম পর্যালোচনা এখনো হয়নি।',
   'Officer requested more information.': 'কর্মকর্তা আরও তথ্য চেয়েছেন।',
   'Identity is still recorded as incomplete.': 'পরিচয় এখনো অসম্পূর্ণ।',
+  'The applicant requested cancellation of this case; approve or decline.': 'আবেদনকারী এই মামলা বাতিলের অনুরোধ করেছেন; অনুমোদন বা প্রত্যাখ্যান করুন।',
   'Repeated referral returns were escalated; an authorised routing decision is required.': 'রেফারেল বারবার ফেরত এসেছে। বিষয়টি ঊর্ধ্বতন কর্মকর্তার কাছে গেছে; কোন অফিসে পাঠানো হবে, অনুমোদিত কর্মকর্তাকে তা ঠিক করতে হবে।',
   'An open task passed its explicit due date.': 'একটি চলমান কাজের নির্ধারিত সময় পেরিয়ে গেছে।',
   'The application is awaiting an officer decision. No decision has been made here.': 'আবেদনটি কর্মকর্তার সিদ্ধান্তের অপেক্ষায়। এখানে কোনো সিদ্ধান্ত হয়নি।',

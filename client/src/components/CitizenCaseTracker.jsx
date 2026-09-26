@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../services/api.js'
-import { bi } from './Bi.jsx'
+import { bi, getLang } from './Bi.jsx'
 
 const MicIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -27,9 +27,10 @@ export default function CitizenCaseTracker() {
   const [voiceActive, setVoiceActive] = useState(false)
   const [turn, setTurn] = useState(null) // the caller's current turn: { kind, listening }
   const [voiceLine, setVoiceLine] = useState(null)
+  const [voiceLang, setVoiceLang] = useState('bn') // the call's language: the page's, until the caller's first answer
   const [heard, setHeard] = useState(null) // what Whisper heard in the last turn; never the PIN
   const [keyed, setKeyed] = useState('') // digits typed instead of said, on a number or PIN turn
-  const [spoken, setSpoken] = useState(null) // { sentence, audioUrl } of the last spoken status, kept to hear again
+  const [spoken, setSpoken] = useState(null) // { sentence, audioUrl, lang } of the last spoken status, kept to hear again
   const callRef = useRef(null)
   const typable = turn?.kind === 'number' || turn?.kind === 'pin'
 
@@ -40,6 +41,14 @@ export default function CitizenCaseTracker() {
     event.preventDefault()
     callRef.current?.type(keyed)
     setKeyed('')
+  }
+
+  // A Bangla status replays the BanglaTTS audio kept from the call; an English one is spoken again by the browser.
+  const canHearAgain = spoken?.audioUrl || (spoken?.lang === 'en' && typeof speechSynthesis !== 'undefined')
+  function hearAgain() {
+    if (spoken.audioUrl) return new Audio(spoken.audioUrl).play().catch(() => {})
+    speechSynthesis.cancel()
+    speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(spoken.sentence), { lang: 'en-US' }))
   }
 
   async function toggleVoice() {
@@ -54,15 +63,18 @@ export default function CitizenCaseTracker() {
     setSpoken(null)
     try {
       const { startStatusCall } = await import('../utils/voiceStatusCall.js')
+      const lang = getLang()
+      setVoiceLang(lang)
       callRef.current = await startStatusCall({
-        onLine: setVoiceLine,
+        lang,
+        onLine: (line, lineLang) => { setVoiceLine(line); setVoiceLang(lineLang) },
         onTurn: setTurn,
-        onHeard: setHeard,
+        onHeard: (text, heardLang) => { setHeard(text); setVoiceLang(heardLang) },
         onNumber: setTrackingId,
-        onResult: (data, sentence, audioUrl) => {
+        onResult: (data, sentence, audioUrl, sentenceLang) => {
           setResult(data)
           setTrackingId(data.applicationId)
-          setSpoken({ sentence, audioUrl })
+          setSpoken({ sentence, audioUrl, lang: sentenceLang })
         },
       })
       await callRef.current.done
@@ -184,12 +196,12 @@ export default function CitizenCaseTracker() {
                   <span>{bi('Listening…', 'শুনছি…')}</span>
                 </>
               ) : (
-                <span lang="bn">{voiceLine}</span>
+                <span lang={voiceLang}>{voiceLine}</span>
               )}
             </p>
             {heard ? (
               <p className="case-tracker-voice-heard">
-                {bi('You said:', 'আপনি বললেন:')} <span lang="bn">{heard}</span>
+                {bi('You said:', 'আপনি বললেন:')} <span lang={voiceLang}>{heard}</span>
               </p>
             ) : null}
             {typable ? (
@@ -222,13 +234,13 @@ export default function CitizenCaseTracker() {
         <div className="case-tracker-result" aria-live="polite">
           {spoken ? (
             <div className="tracker-spoken">
-              {spoken.audioUrl ? (
-                <button type="button" className="case-tracker-voice-btn" onClick={() => new Audio(spoken.audioUrl).play().catch(() => {})}>
+              {canHearAgain ? (
+                <button type="button" className="case-tracker-voice-btn" onClick={hearAgain}>
                   <SpeakerIcon />
                   <span>{bi('Hear Again', 'আবার শুনুন')}</span>
                 </button>
               ) : null}
-              <p lang="bn">{spoken.sentence}</p>
+              <p lang={spoken.lang}>{spoken.sentence}</p>
             </div>
           ) : null}
           {/* Top Parcel Summary Card */}

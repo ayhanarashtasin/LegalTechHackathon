@@ -83,6 +83,7 @@ export default function RecordPage({ session }) {
   const [reviewReason, setReviewReason] = useState('')
   const [priorityDecision, setPriorityDecision] = useState('URGENT')
   const [priorityReason, setPriorityReason] = useState('')
+  const [cancellationReviewReason, setCancellationReviewReason] = useState('')
   const [acceptReason, setAcceptReason] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskAction, setTaskAction] = useState('')
@@ -130,6 +131,7 @@ export default function RecordPage({ session }) {
   })
 
   useEffect(() => {
+    let active = true
     const controller = new AbortController()
     const options = { token: session.token, signal: controller.signal }
     Promise.all([
@@ -145,10 +147,19 @@ export default function RecordPage({ session }) {
       officer ? api(`/api/applications/${applicationId}/referrals`, options) : Promise.resolve(null),
       officer ? api(`/api/applications/${applicationId}/evidence-access`, options) : Promise.resolve([]),
     ]).then(([record, tasks, documents, contacts, facts, audit, safeContact, transcript, history, referrals, evidenceAccess]) => {
+      if (!active) return
+      setError('')
       setData({ record, tasks, documents, contacts, facts, audit, safeContact, transcript, history, referrals, evidenceAccess })
       setLoading(false)
-    }).catch((failure) => { if (failure.name !== 'AbortError') { setError(failure.message); setLoading(false) } })
-    return () => controller.abort()
+    }).catch((failure) => {
+      if (!active || controller.signal.aborted || failure.name === 'AbortError') return
+      setError(failure.message)
+      setLoading(false)
+    })
+    return () => {
+      active = false
+      controller.abort()
+    }
   }, [applicationId, officer, refresh, session.token])
 
   async function change(path, body, success) {
@@ -179,6 +190,19 @@ export default function RecordPage({ session }) {
     event.preventDefault()
     const result = await change(`/api/applications/${applicationId}/priority-override`, { priorityDecision, reason: priorityReason }, bi('Priority saved.', 'অগ্রাধিকারের সিদ্ধান্ত সংরক্ষিত হয়েছে।'))
     if (result) setPriorityReason('')
+  }
+
+  async function submitCancellationReview(event, decision) {
+    event.preventDefault()
+    const requestId = data.record.cancellationRequest.id
+    const result = await change(
+      `/api/applications/${applicationId}/cancellation-requests/${requestId}/review`,
+      { decision, reason: cancellationReviewReason },
+      decision === 'APPROVE'
+        ? bi('Case cancelled. Dependent tasks and lawyer work were closed out.', 'মামলাটি বাতিল করা হয়েছে। সংশ্লিষ্ট কার্যতালিকা ও আইনজীবীর দায়িত্ব বন্ধ করা হয়েছে।')
+        : bi('Cancellation request declined.', 'বাতিলের অনুরোধ প্রত্যাখ্যান করা হয়েছে।'),
+    )
+    if (result) setCancellationReviewReason('')
   }
 
   async function submitTask(event) {
@@ -396,6 +420,23 @@ export default function RecordPage({ session }) {
               <label htmlFor="priority-reason"><Bi en="Reason" bn="সিদ্ধান্তের যৌক্তিক কারণ" /></label>
               <textarea id="priority-reason" value={priorityReason} onChange={(event) => setPriorityReason(event.target.value)} minLength="10" maxLength="1000" required />
               <button type="submit"><Bi en="Save priority" bn="অগ্রাধিকার সংরক্ষণ করুন" /></button>
+            </form>
+          </Panel>}
+
+          {officer && record.cancellationRequest && <Panel id="cancellation-title" en="Case Cancellation Request" bn="মামলা বাতিলের অনুরোধ" hint={bi('Awaiting decision', 'সিদ্ধান্তের অপেক্ষায়')} open>
+            <p className="muted"><Bi en="The applicant requested cancellation of this accepted case. Approving closes out open tasks, the active lawyer assignment, and any pending lawyer update. This is blocked while a referral or mediation is actively in progress." bn="আবেদনকারী এই গৃহীত মামলাটি বাতিলের অনুরোধ করেছেন। অনুমোদন করলে অনিষ্পন্ন কার্যতালিকা, সক্রিয় আইনজীবী নিয়োগ, এবং অনিষ্পন্ন আইনজীবী আপডেট বন্ধ হয়ে যাবে। সক্রিয় রেফারেল বা মধ্যস্থতা চলমান থাকলে এটি অনুমোদন করা যাবে না।" /></p>
+            <p><strong><Bi en="Applicant's reason:" bn="আবেদনকারীর কারণ:" /></strong> {tr(record.cancellationRequest.reason)}</p>
+            <form className="form-stack">
+              <label htmlFor="cancellation-review-reason"><Bi en="Officer decision reason" bn="কর্মকর্তার সিদ্ধান্তের কারণ" /></label>
+              <textarea id="cancellation-review-reason" value={cancellationReviewReason} onChange={(event) => setCancellationReviewReason(event.target.value)} minLength="10" maxLength="1000" required />
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button type="button" onClick={(event) => submitCancellationReview(event, 'APPROVE')} disabled={!cancellationReviewReason.trim()} style={{ background: '#c9302c', borderColor: '#ac2925', color: '#fff' }}>
+                  <Bi en="Approve cancellation" bn="বাতিল অনুমোদন করুন" />
+                </button>
+                <button type="button" className="secondary-button" onClick={(event) => submitCancellationReview(event, 'DECLINE')} disabled={!cancellationReviewReason.trim()}>
+                  <Bi en="Decline" bn="প্রত্যাখ্যান করুন" />
+                </button>
+              </div>
             </form>
           </Panel>}
 

@@ -5,14 +5,16 @@ import { applicationNumber, closeMicrophone, digitsFromWords, openMicrophone, pl
 // Case number (read back and confirmed), and their 6-digit PIN (never read back: the phone may be shared), then hear
 // the status. Every sentence is one of the server's fixed prompts or its status sentence; this file only decides
 // which comes next. Loaded only when the caller presses the voice button.
+// The call greets in the page's language, then carries on in the language of the caller's first answer, Bangla or
+// English (see callLanguage): the page may be in English only because the browser is, while the caller speaks Bangla.
 const MAX_TURN_MS = 12000 // a turn ends here even if the room never goes quiet, like the 16699 call's time limit
 const MAX_TRIES = 3
 
 const numberFrom = (text) => applicationNumber(digitsFromWords(text))
-// A number inside the opening sentence: only the run of digit words right after "নম্বর" or "আইডি", so a word
-// elsewhere in the sentence that sounds like a digit is never taken as part of it.
+// A number inside the opening sentence: only the run of digit words right after "নম্বর", "আইডি", or "number", so a
+// word elsewhere in the sentence that sounds like a digit is never taken as part of it.
 function numberInSentence(text) {
-  const after = (text ?? '').split(/নম্বর|নাম্বার|আইডি|\bid\b/i)[1]
+  const after = (text ?? '').split(/নম্বর|নাম্বার|আইডি|\bid\b|\bnumber\b/i)[1]
   const run = []
   for (const token of (after ?? '').split(/[\s,।.;:!?'"()-]+/).filter(Boolean)) {
     const digits = digitsFromWords(token)
@@ -34,6 +36,14 @@ const OPENING = { kind: 'opening', pauseMs: 2000 }
 const YES_NO = { kind: 'yesNo', pauseMs: 1500, parse: spokenYesNo, hint: 'yesNo' }
 const NUMBER = { kind: 'number', pauseMs: 3000, parse: numberFrom, hint: 'number', typable: true }
 const PIN = { kind: 'pin', pauseMs: 3000, parse: pinFrom, hint: 'number', typable: true, retry: 'pinAgain' }
+
+// The language the caller's first answer sets, from the one Whisper heard: Bangla, or English only when it heard at
+// least two English words (a lone "হ্যাঁ" came back as "Happy", Groq, 2026-09-26). Undefined keeps the page's language.
+export function callLanguage({ text, language }) {
+  if (language === 'bn') return 'bn'
+  if (language === 'en' && (text ?? '').split(/[^A-Za-z]+/).filter(Boolean).length >= 2) return 'en'
+  return undefined
+}
 
 // Asks until a reply parses: `lead` plays only the first time; a retry plays the turn's own retry prompt, or "not
 // heard" and the question again. Undefined after three tries.
@@ -90,21 +100,24 @@ const audioUrl = (base64) => (base64
   ? URL.createObjectURL(new Blob([Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))], { type: 'audio/mpeg' }))
   : null)
 
-// Runs one call in the browser. `onLine` shows each sentence as it is said; `onTurn` gives the caller's current turn
-// ({ kind, listening }, or null between turns); `onHeard` shows what was heard, for every turn but the PIN; `onNumber`
-// fills the ID box with the number heard; and `onResult` receives the tracked record, its spoken sentence, and the
-// sentence's audio (an object URL the caller of this function owns and revokes).
+// Runs one call in the browser, greeting in `lang` ('bn' or 'en'). `onLine` shows each sentence as it is said, with its
+// language; `onTurn` gives the caller's current turn ({ kind, listening }, or null between turns); `onHeard` shows what
+// was heard, with its language, for every turn but the PIN; `onNumber` fills the ID box with the number heard; and
+// `onResult` receives the tracked record, its spoken sentence, the sentence's audio (an object URL the caller of this
+// function owns and revokes; null in English), and the call's language.
 // Returns { stop, done, typing, type }: `typing()` stops listening on a number or PIN turn so the keypad can answer
 // it, and `type(value)` gives that answer.
-export async function startStatusCall({ onLine, onTurn, onHeard, onNumber, onResult }) {
+export async function startStatusCall({ lang = 'bn', onLine, onTurn, onHeard, onNumber, onResult }) {
   const controller = new AbortController()
   const { signal } = controller
   const stream = await openMicrophone()
   const context = new AudioContext()
   const player = new Audio()
+  let language = lang // set again by the caller's first answer (see hear)
   let recording = null
   let stopListening = null
   let keypad = null // { started, resolve } while a typable turn is open
+  let utterance = null // the English line being spoken, held so the browser keeps it until its end event
   const halt = () => { if (signal.aborted) throw new DOMException('The call ended.', 'AbortError') }
   const aborted = new Promise((_, reject) => signal.addEventListener('abort', () => reject(new DOMException('The call ended.', 'AbortError')), { once: true }))
   aborted.catch(() => {})
@@ -119,14 +132,35 @@ export async function startStatusCall({ onLine, onTurn, onHeard, onNumber, onRes
     player.play().catch(done)
   })
 
+  // English is spoken by the browser's own voice, since BanglaTTS speaks only Bangla. A browser without an English
+  // voice may never start, and some never report the end, so a line not started within 2 s, or running far past its
+  // length, is left to the screen and the call goes on.
+  const speak = (text) => new Promise((resolve) => {
+    if (typeof speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') return resolve()
+    utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'en-US'
+    utterance.voice = speechSynthesis.getVoices().find((voice) => voice.lang?.toLowerCase().startsWith('en')) ?? null
+    let timer = null
+    const done = () => { clearTimeout(timer); signal.removeEventListener('abort', stop); resolve() }
+    const stop = () => { speechSynthesis.cancel(); done() }
+    utterance.onstart = () => { clearTimeout(timer); timer = setTimeout(stop, 3000 + text.length * 150) }
+    utterance.onend = done
+    utterance.onerror = done
+    timer = setTimeout(stop, 2000)
+    signal.addEventListener('abort', stop)
+    speechSynthesis.speak(utterance)
+  })
+  const sound = (text, url) => (url ? play(url) : language === 'en' ? speak(text) : undefined)
+  const voicePath = (path, query = {}) => `${path}?${new URLSearchParams({ ...query, lang: language })}`
+
   async function say(prompts) {
     // Fetched together, spoken in order.
-    const spoken = await Promise.all(prompts.map((prompt) => api('/api/voice/prompts', { method: 'POST', body: prompt, signal })))
+    const spoken = await Promise.all(prompts.map((prompt) => api(voicePath('/api/voice/prompts'), { method: 'POST', body: prompt, signal })))
     for (const { text, audio } of spoken) {
       halt()
-      onLine(text)
+      onLine(text, language)
       const url = audioUrl(audio)
-      await play(url)
+      await sound(text, url)
       if (url) URL.revokeObjectURL(url)
     }
   }
@@ -170,9 +204,13 @@ export async function startStatusCall({ onLine, onTurn, onHeard, onNumber, onRes
       }
       keypad = null
       onTurn(null)
-      const { text } = await api(`/api/voice/transcripts${turn.hint ? `?hint=${turn.hint}` : ''}`, { method: 'POST', audio: clip, signal })
-      if (turn.kind !== 'pin') onHeard(text) // a PIN is never shown, even as heard
-      return text
+      // The first answer is heard in whichever language it was said, and the call goes on in that language.
+      const opening = turn.kind === OPENING.kind
+      const heard = await api(opening ? '/api/voice/transcripts?lang=auto' : voicePath('/api/voice/transcripts', turn.hint ? { hint: turn.hint } : {}),
+        { method: 'POST', audio: clip, signal })
+      if (opening) language = callLanguage(heard) ?? language
+      if (turn.kind !== 'pin') onHeard(heard.text, language) // a PIN is never shown, even as heard
+      return heard.text
     },
     async understand(text) {
       if (!text?.trim()) return undefined
@@ -187,15 +225,15 @@ export async function startStatusCall({ onLine, onTurn, onHeard, onNumber, onRes
     async tellStatus(identifier, lookupCode) {
       let found
       try {
-        found = await api('/api/voice/status', { method: 'POST', body: { identifier, lookupCode }, signal })
+        found = await api(voicePath('/api/voice/status'), { method: 'POST', body: { identifier, lookupCode }, signal })
       } catch (failure) {
         if (failure.name === 'AbortError') throw failure
         return failure.status === 404 ? 'NOT_FOUND' : failure.status === 429 ? 'LOCKED' : 'UNAVAILABLE'
       }
       const url = audioUrl(found.audio)
-      onResult(found.result, found.sentence, url)
-      onLine(found.sentence)
-      await play(url)
+      onResult(found.result, found.sentence, url, language)
+      onLine(found.sentence, language)
+      await sound(found.sentence, url)
       return 'FOUND'
     },
     finish: (prompt) => say([prompt]),
@@ -206,6 +244,7 @@ export async function startStatusCall({ onLine, onTurn, onHeard, onNumber, onRes
     .finally(() => {
       recording?.cancel()
       player.pause()
+      if (utterance) speechSynthesis.cancel()
       closeMicrophone(stream)
       context.close()
     })

@@ -1,12 +1,23 @@
 import { expect, test } from '@playwright/test'
 
+// The browser's English voice, replaced by a recorder that finishes each line at once: headless Chromium has no voices.
+const recordSpeech = (page) => page.addInitScript(() => {
+  globalThis.spokenLines = []
+  globalThis.speechSynthesis.speak = (utterance) => {
+    globalThis.spokenLines.push({ text: utterance.text, lang: utterance.lang })
+    globalThis.setTimeout(() => { utterance.onstart?.(); utterance.onend?.() }, 50)
+  }
+})
+const langOf = (route) => route.request().url().match(/[?&]lang=(\w+)/)?.[1] ?? null
+
 // The Track card's spoken status (A5), with the voice routes answered in the page: the conversation logic is covered
 // by Vitest and the routes by the server tests, so this checks the card's wiring with a real (fake-device) microphone.
 test('the Track card asks by voice, listens after the first prompt, and stops cleanly', async ({ page }) => {
   const prompts = []
-  await page.route('**/api/voice/prompts', async (route) => {
-    prompts.push(route.request().postDataJSON())
-    await route.fulfill({ json: { text: 'বলুন, আপনি কী জানতে চান?', audio: null } })
+  await recordSpeech(page)
+  await page.route('**/api/voice/prompts**', async (route) => {
+    prompts.push({ ...route.request().postDataJSON(), lang: langOf(route) })
+    await route.fulfill({ json: { text: 'Hello. What would you like to know?', audio: null } })
   })
   await page.route('**/api/voice/transcripts', (route) => route.fulfill({ json: { text: '' } }))
 
@@ -16,7 +27,9 @@ test('the Track card asks by voice, listens after the first prompt, and stops cl
   await card.getByRole('button', { name: 'Ask by Voice' }).click()
 
   await expect(card.getByText('Listening…')).toBeVisible()
-  expect(prompts).toEqual([{ key: 'welcome' }])
+  // The page is in English, so the call greets in English, spoken by the browser.
+  expect(prompts).toEqual([{ key: 'welcome', lang: 'en' }])
+  expect(await page.evaluate(() => globalThis.spokenLines)).toEqual([{ text: 'Hello. What would you like to know?', lang: 'en-US' }])
   await card.getByRole('button', { name: 'Stop' }).click()
   await expect(card.getByRole('button', { name: 'Ask by Voice' })).toBeVisible()
   await expect(card.getByText('Listening…')).toHaveCount(0)
@@ -25,17 +38,26 @@ test('the Track card asks by voice, listens after the first prompt, and stops cl
 
 test('a caller asks in their own words, types the number and PIN, sees what was heard, and hears the status', async ({ page }) => {
   test.setTimeout(120000) // the opening and yes/no turns wait for the fake microphone's pause or 12-second limit
-  const texts = { welcome: 'বলুন, আপনি কী জানতে চান?', askNumber: 'আপনার আবেদন নম্বরটি বলুন।', confirmNumber: 'আপনি বলেছেন ছয়। ঠিক থাকলে হ্যাঁ বলুন।', privateCheck: 'অন্য কেউ শুনতে পাবে না তো?', askPin: 'এবার পিন বলুন।' }
+  // The page is in English, but the caller answers in Bangla, so the call goes on in Bangla after the greeting.
+  const texts = { welcome: 'Hello. What would you like to know?', askNumber: 'আপনার আবেদন নম্বরটি বলুন।', confirmNumber: 'আপনি বলেছেন ছয়। ঠিক থাকলে হ্যাঁ বলুন।', privateCheck: 'অন্য কেউ শুনতে পাবে না তো?', askPin: 'এবার পিন বলুন।' }
   const lookups = []
   const promptKeys = []
-  await page.route('**/api/voice/prompts', (route) => {
+  const langs = []
+  await recordSpeech(page)
+  await page.route('**/api/voice/prompts**', (route) => {
     const { key } = route.request().postDataJSON()
     promptKeys.push(key)
+    langs.push(`${key}:${langOf(route)}`)
     return route.fulfill({ json: { text: texts[key] ?? '…', audio: null } })
   })
-  await page.route('**/api/voice/transcripts**', (route) => route.fulfill({ json: { text: route.request().url().includes('hint=yesNo') ? 'হ্যাঁ।' : 'আমার কেসটার কী হলো একটু বলেন' } }))
+  await page.route('**/api/voice/transcripts**', (route) => {
+    const url = route.request().url()
+    langs.push(`heard:${langOf(route)}`)
+    return route.fulfill({ json: url.includes('lang=auto') ? { text: 'আমার কেসটার কী হলো একটু বলেন', language: 'bn' } : { text: url.includes('hint=yesNo') ? 'হ্যাঁ।' : '' } })
+  })
   await page.route('**/api/voice/requests', (route) => route.fulfill({ json: { wantsStatus: true } }))
-  await page.route('**/api/voice/status', async (route) => {
+  await page.route('**/api/voice/status**', async (route) => {
+    langs.push(`status:${langOf(route)}`)
     lookups.push(route.request().postDataJSON())
     await route.fulfill({ json: {
       sentence: 'আপনার মামলায় একজন প্যানেল আইনজীবী দায়িত্ব নিয়েছেন।', audio: null,
@@ -66,4 +88,53 @@ test('a caller asks in their own words, types the number and PIN, sees what was 
   await expect(card.getByLabel('Application ID or Case ID')).toHaveValue('APP-2026-000006')
   await expect(card.getByText('482915')).toHaveCount(0)
   await expect(card.getByRole('button', { name: 'Ask by Voice' })).toBeVisible()
+  expect(langs).toEqual(['welcome:en', 'heard:auto', 'askNumber:bn', 'confirmNumber:bn', 'heard:bn', 'privateCheck:bn', 'heard:bn', 'askPin:bn', 'status:bn'])
+  // Only the English greeting went to the browser's voice; the Bangla lines are BanglaTTS's (off here, so shown only).
+  expect(await page.evaluate(() => globalThis.spokenLines.map(({ text }) => text))).toEqual(['Hello. What would you like to know?'])
+  await expect(card.getByRole('button', { name: 'Hear Again' })).toHaveCount(0)
+})
+
+test('an English caller hears every line in English, including the status, and can hear it again', async ({ page }) => {
+  test.setTimeout(120000)
+  const texts = { welcome: 'Hello. What would you like to know?', askNumber: 'Please say your application number.', confirmNumber: 'You said six. Say yes if that is right.', privateCheck: 'Are you in a private place?', askPin: 'Now please say your PIN.' }
+  const sentence = 'A panel lawyer has taken on your case.'
+  const langs = []
+  await recordSpeech(page)
+  await page.route('**/api/voice/prompts**', (route) => {
+    const { key } = route.request().postDataJSON()
+    langs.push(`${key}:${langOf(route)}`)
+    return route.fulfill({ json: { text: texts[key] ?? '…', audio: null } })
+  })
+  await page.route('**/api/voice/transcripts**', (route) => {
+    const url = route.request().url()
+    return route.fulfill({ json: url.includes('lang=auto') ? { text: 'I want to know my case status.', language: 'en' } : { text: url.includes('hint=yesNo') ? 'Yes.' : '' } })
+  })
+  await page.route('**/api/voice/status**', async (route) => {
+    langs.push(`status:${langOf(route)}`)
+    await route.fulfill({ json: {
+      sentence, audio: null,
+      result: { applicationId: 'APP-2026-000006', caseId: null, status: 'ACCEPTED', isUrgent: false, channel: 'HELPLINE_SIM', nextHearingAt: null, nextAction: null,
+        applicantName: 'Fictional caller', legalNeed: 'Legal Assistance', officeCode: 'DEMO', lawyer: null, updates: [],
+        stages: [{ phase: 1, title: 'Intake Registered', titleBn: 'আবেদন গ্রহণ', description: 'Registered.', descriptionBn: 'নিবন্ধিত।', status: 'COMPLETED', date: null }] },
+    } })
+  })
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'English', exact: true }).click()
+  const card = page.getByRole('region', { name: 'Track Application & Case Progress' })
+  await card.getByRole('button', { name: 'Ask by Voice' }).click()
+
+  await card.getByLabel('Or type the number').fill('6', { timeout: 20000 })
+  await expect(card.getByText('You said: I want to know my case status.')).toBeVisible()
+  await card.getByRole('button', { name: 'OK' }).click()
+  await card.getByLabel('Or type the PIN').fill('482915', { timeout: 40000 })
+  await card.getByRole('button', { name: 'OK' }).click()
+  await expect(card.getByText(sentence).first()).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Ask by Voice' })).toBeVisible()
+
+  expect(langs).toEqual(['welcome:en', 'askNumber:en', 'confirmNumber:en', 'privateCheck:en', 'askPin:en', 'status:en'])
+  const spokenTexts = () => page.evaluate(() => globalThis.spokenLines.map(({ text }) => text))
+  expect(await spokenTexts()).toEqual([...Object.values(texts), sentence])
+  await card.getByRole('button', { name: 'Hear Again' }).click()
+  expect((await spokenTexts()).at(-1)).toBe(sentence)
 })

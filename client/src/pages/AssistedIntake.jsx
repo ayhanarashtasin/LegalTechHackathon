@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../services/api.js'
 import { listDrafts, loadDraft, removeDraft, saveDraft } from '../utils/offlineDrafts.js'
+import { closeMicrophone, openMicrophone, startRecording } from '../utils/voiceAgent.js'
 import { bi, num, say } from '../components/Bi.jsx'
 
 const blank = () => ({ applicantName: '', translatorName: '', typistName: '', helperPhone: '', originalLanguage: 'Marma', originalStatement: '', translatedStatement: '', caseType: 'LAND', consentAttestation: '', originalConfirmed: false, translationConfirmed: false, contactChannel: 'IN_PERSON', contactValue: '', safeTime: '' })
@@ -19,6 +20,15 @@ const itemsBn = {
   'Incident chronology': 'ঘটনার ক্রম', 'Problem chronology': 'সমস্যার ক্রম', 'Available supporting record': 'প্রাপ্ত সহায়ক রেকর্ড',
 }
 const emptyDraft = () => crypto.randomUUID()
+
+// Marma voice fill stays a translator-verified draft: AI text is appended, never auto-confirmed.
+export function applyMarmaTranscript(form, text) {
+  const clean = String(text ?? '').trim().slice(0, 4000)
+  if (!clean) return form
+  const current = String(form.originalStatement ?? '').trim()
+  const originalStatement = current ? `${String(form.originalStatement).trimEnd()}\n${clean}` : clean
+  return { ...form, originalStatement, originalConfirmed: false }
+}
 
 export default function AssistedIntake({ session }) {
   const ownerId = String(session.user.id)
@@ -39,6 +49,66 @@ export default function AssistedIntake({ session }) {
   const [resolutionReason, setResolutionReason] = useState('')
   const [saving, setSaving] = useState(false)
   const saveInFlight = useRef(Promise.resolve())
+  const [micState, setMicState] = useState('idle')
+  const [micError, setMicError] = useState('')
+  const [micMeta, setMicMeta] = useState(null)
+  const streamRef = useRef(null)
+  const recorderRef = useRef(null)
+  const stopTimerRef = useRef(null)
+
+  const stopMicTracks = useCallback(() => {
+    if (stopTimerRef.current) { clearTimeout(stopTimerRef.current); stopTimerRef.current = null }
+    closeMicrophone(streamRef.current)
+    streamRef.current = null
+    recorderRef.current = null
+  }, [])
+
+  useEffect(() => () => stopMicTracks(), [stopMicTracks])
+
+  async function startMarmaVoice() {
+    setMicError('')
+    setMicMeta(null)
+    if (!navigator.onLine) { setMicError(bi('Voice fill needs internet. Type the original words while offline.', 'মূল বক্তব্য লিখতে ভয়েসের জন্য ইন্টারনেট দরকার। অফলাইনে টাইপ করুন।')); return }
+    try {
+      const stream = await openMicrophone()
+      streamRef.current = stream
+      recorderRef.current = startRecording(stream)
+      setMicState('recording')
+      stopTimerRef.current = setTimeout(() => { stopAndSendMarmaVoice() }, 60000)
+    } catch {
+      stopMicTracks()
+      setMicState('idle')
+      setMicError(bi('Microphone was not opened. Check permission and try again, or type instead.', 'মাইক্রোফোন খোলা যায়নি। অনুমতি দেখে আবার চেষ্টা করুন, অথবা টাইপ করুন।'))
+    }
+  }
+
+  async function stopAndSendMarmaVoice() {
+    const recorder = recorderRef.current
+    if (!recorder) { setMicState('idle'); return }
+    setMicState('transcribing')
+    let clip
+    try {
+      clip = await recorder.stop()
+    } catch {
+      clip = null
+    } finally {
+      stopMicTracks()
+    }
+    if (!clip || clip.size < 500) {
+      setMicState('idle')
+      setMicError(bi('No speech was recorded. Try again or type the original words.', 'কোনো কথা রেকর্ড হয়নি। আবার চেষ্টা করুন বা মূল বক্তব্য টাইপ করুন।'))
+      return
+    }
+    try {
+      const result = await api('/api/assisted/transcribe', { token: session.token, method: 'POST', audio: clip })
+      setForm((current) => applyMarmaTranscript(current, result.text))
+      setMicMeta({ detectedLanguage: result.detectedLanguage ?? null })
+      setMicState('idle')
+    } catch (failure) {
+      setMicState('idle')
+      setMicError(failure.message || bi('Voice fill failed. Type the original words instead.', 'ভয়েসে লেখা যায়নি। মূল বক্তব্য টাইপ করুন।'))
+    }
+  }
 
   const refreshDrafts = useCallback(async () => { setDrafts(await listDrafts(ownerId)) }, [ownerId])
   useEffect(() => { listDrafts(ownerId).then(setDrafts).catch(() => setError(bi('Local draft storage is unavailable.', 'এই ডিভাইসে খসড়া রাখার জায়গা নেই।'))) }, [ownerId])
@@ -57,6 +127,10 @@ export default function AssistedIntake({ session }) {
   function change(field, value) { setForm((current) => ({ ...current, [field]: value })) }
 
   function reset() {
+    stopMicTracks()
+    setMicState('idle')
+    setMicError('')
+    setMicMeta(null)
     setForm(blank())
     setDraftId(emptyDraft())
     setMode('CREATE')
@@ -290,7 +364,25 @@ export default function AssistedIntake({ session }) {
             </fieldset>}
             <fieldset className="intake-step form-stack">
               <legend>{mode === 'CREATE' ? bi('2. Original words and Bangla translation', '২. মূল বক্তব্য ও বাংলা অনুবাদ') : bi('1. Original words and Bangla translation', '১. মূল বক্তব্য ও বাংলা অনুবাদ')}</legend>
-              <label htmlFor="original-statement">{bi('Original words, as spoken (do not translate here)', 'মূল বক্তব্য (যেভাবে বলা হয়েছে; এখানে অনুবাদ করবেন না)')} <span>({form.originalLanguage})</span></label><textarea id="original-statement" name="originalStatement" autoComplete="off" value={form.originalStatement} onChange={(event) => change('originalStatement', event.target.value)} minLength="5" maxLength="4000" required />
+              <label htmlFor="original-statement">{bi('Original words, as spoken (do not translate here)', 'মূল বক্তব্য (যেভাবে বলা হয়েছে; এখানে অনুবাদ করবেন না)')} <span>({form.originalLanguage})</span></label>
+              <div className="choice-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={micState === 'recording' ? stopAndSendMarmaVoice : startMarmaVoice}
+                  disabled={micState === 'transcribing' || !online}
+                  aria-pressed={micState === 'recording'}
+                  aria-describedby="marma-voice-help"
+                  aria-label={bi('Record Marma original words and fill the box', 'মারমা মূল বক্তব্য রেকর্ড করে ঘরে বসান')}
+                >
+                  {micState === 'recording' ? bi('Stop and fill original words', 'থামান ও মূল বক্তব্য বসান') : micState === 'transcribing' ? bi('Understanding speech…', 'কথা বোঝা হচ্ছে…') : bi('Speak Marma instead of typing', 'টাইপ না করে মারমা ভাষায় বলুন')}
+                </button>
+              </div>
+              <p id="marma-voice-help" className="muted">{bi('Optional voice fill: the applicant speaks Marma, the system drafts the Original-words box, and the translator must read back and verify. Audio is transcribed and discarded; nothing is auto-confirmed.', 'ঐচ্ছিক ভয়েস সহায়তা: আবেদনকারী মারমা ভাষায় বলবেন, সিস্টেম মূল বক্তব্যের ঘরে খসড়া বসাবে, অনুবাদককে পড়ে শুনিয়ে যাচাই করতে হবে। অডিও বুঝে মুছে ফেলা হয়; কিছুই স্বয়ংক্রিয়ভাবে নিশ্চিত হয় না।')}</p>
+              {micState === 'recording' && <p role="status" aria-live="polite" className="muted">{bi('Recording Marma speech… press stop when finished (up to 60 seconds).', 'মারমা কথা রেকর্ড হচ্ছে… শেষ হলে থামান (সর্বোচ্চ ৬০ সেকেন্ড)।')}</p>}
+              {micMeta && <p role="status" aria-live="polite" className="muted">{bi('Voice draft added below. Ask the translator to read it back; Marma transcription is best-effort and unverified.', 'ভয়েস খসড়া নিচে যোগ হয়েছে। অনুবাদককে পড়ে শোনাতে বলুন; মারমা প্রতিলিপি আনুমানিক ও অযাচাইকৃত।')}</p>}
+              {micError && <p role="alert" className="error">{micError}</p>}
+              <textarea id="original-statement" name="originalStatement" autoComplete="off" value={form.originalStatement} onChange={(event) => change('originalStatement', event.target.value)} minLength="5" maxLength="4000" required />
               <label htmlFor="translated-statement">{bi('Bangla translation typed by the operator', 'অপারেটরের টাইপ করা বাংলা অনুবাদ')}</label><textarea id="translated-statement" name="translatedStatement" autoComplete="off" value={form.translatedStatement} onChange={(event) => change('translatedStatement', event.target.value)} minLength="5" maxLength="4000" required />
               <label className="checkbox-label" htmlFor="original-confirmed"><input id="original-confirmed" name="originalConfirmed" type="checkbox" checked={form.originalConfirmed} onChange={(event) => change('originalConfirmed', event.target.checked)} />{bi('Applicant confirmed the original words after they were read back', 'পড়ে শোনানোর পর আবেদনকারী মূল বক্তব্য নিশ্চিত করেছেন')}</label>
               <label className="checkbox-label" htmlFor="translation-confirmed"><input id="translation-confirmed" name="translationConfirmed" type="checkbox" checked={form.translationConfirmed} onChange={(event) => change('translationConfirmed', event.target.checked)} />{bi('Applicant confirmed the Bangla translation after it was read back', 'পড়ে শোনানোর পর আবেদনকারী বাংলা অনুবাদ নিশ্চিত করেছেন')}</label>

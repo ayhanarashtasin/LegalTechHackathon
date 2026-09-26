@@ -72,3 +72,14 @@ export function validateConflictResolution(request, _response, next) {
   value.reason = words(value.reason, 'Resolution reason', 10, 500)
   next()
 }
+
+// One Marma/original-language turn for the assisted intake: audio only, transcribed and discarded.
+// No DB write happens here; the browser fills the Original-words draft and the translator must verify it.
+const assistedAudioTypes = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'video/webm']
+
+export function validateAssistedAudio(request, _response, next) {
+  if (Object.keys(request.query).length) fail('Unexpected parameter.')
+  if (!assistedAudioTypes.includes((request.get('content-type') || '').split(';')[0].trim())) fail('Unsupported audio type.')
+  if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
+  next()
+}

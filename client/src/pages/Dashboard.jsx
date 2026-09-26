@@ -64,6 +64,83 @@ function AdviceCallback({ request, token, onDone }) {
   </article>
 }
 
+function getPhaseTag(record) {
+  if (!record || !record.applicationId) return null
+  const status = record.status
+  const reviewState = record.reviewState
+  const isAccepted = status === 'ACCEPTED'
+  const isTerminated = status === 'TERMINATED' || status === 'REJECTED'
+  const hasLawyer = Boolean(record.hasLawyer || record.lawyerAssigned)
+  const hasMediation = Boolean(record.mediationStage)
+
+  if (isTerminated || record.settled) return bi('Phase 6 · Outcome', 'ধাপ ৬ · নিষ্পত্তি')
+  if (isAccepted && hasLawyer) return bi('Phase 5 · Lawyer', 'ধাপ ৫ · আইনজীবী')
+  if (isAccepted && hasMediation) return bi('Phase 4 · ADR / Mediation', 'ধাপ ৪ · মধ্যস্থতা')
+  if (isAccepted) return bi('Phase 3 · Accepted', 'ধাপ ৩ · গৃহীত')
+  if (status === 'SUBMITTED' || reviewState === 'READY_FOR_DECISION' || reviewState === 'NEEDS_INFORMATION' || reviewState === 'PENDING_REVIEW') {
+    return bi('Phase 2 · Verification', 'ধাপ ২ · যাচাইকরণ')
+  }
+  return bi('Phase 1 · Intake', 'ধাপ ১ · আবেদন')
+}
+
+const problemSourceLabels = {
+  APPLICANT_REPORTED: ['Applicant', 'আবেদনকারী'],
+  APPLICANT_CONFIRMED: ['Applicant', 'আবেদনকারী'],
+  REPRESENTATIVE_REPORTED: ['Representative', 'প্রতিনিধি'],
+  INTERMEDIARY_TRANSLATED: ['Intermediary translation', 'সহায়কের অনুবাদ'],
+  INTERMEDIARY_TYPED: ['Intermediary entry', 'সহায়কের টাইপ করা তথ্য'],
+  STAFF_ENTERED: ['Staff entry', 'কর্মকর্তার নথিভুক্তি'],
+  DOCUMENT_EXTRACTED: ['Document extraction', 'নথি থেকে সংগৃহীত'],
+  AI_INFERRED: ['AI-inferred', 'এআই-এর অনুমান'],
+  UNKNOWN_OR_UNVERIFIED: ['Unverified source', 'উৎস যাচাই হয়নি'],
+}
+
+function ProblemProvenance({ problem }) {
+  const [sourceEnglish, sourceBangla] = problemSourceLabels[problem.sourceType] ?? problemSourceLabels.UNKNOWN_OR_UNVERIFIED
+  return <small className="record-problem-meta">
+    {bi(`Source: ${sourceEnglish}`, `তথ্যের উৎস: ${sourceBangla}`)}
+    {' · '}
+    {problem.applicantConfirmed
+      ? bi('Applicant confirmed', 'আবেদনকারী নিশ্চিত করেছেন')
+      : bi('Applicant confirmation pending', 'আবেদনকারীর নিশ্চিতকরণ বাকি')}
+    {problem.aiInferred && problem.sourceType !== 'AI_INFERRED' && <> · {bi('AI-assisted extraction', 'এআই-সহায়তায় তথ্য সংগৃহীত')}</>}
+  </small>
+}
+
+// One queue record: identity and stage first, then short tags, the problem, and each flag with its reason.
+function QueueCard({ record, role, urgent, pending }) {
+  return <Link to={`/applications/${record.applicationId}`} className={`queue-card${urgent ? ' is-urgent' : pending ? ' is-pending' : ''}`}>
+    <span className="queue-card-top">
+      <strong className="queue-card-id">{record.applicationId}</strong>
+      {record.caseId && <span className="queue-card-case">{record.caseId}</span>}
+      <span className="record-phase-tag">{getPhaseTag(record)}</span>
+    </span>
+    <span className="queue-card-name">{tr(record.applicantName)}</span>
+    <span className="queue-card-tags">
+      {urgent && <span className="queue-tag is-urgent">{say('URGENT')}</span>}
+      {record.priorityDecision === 'ROUTINE' && <span className="queue-tag is-routine">{say('ROUTINE')}</span>}
+      {record.status && <span className="queue-tag">{say(record.status)}</span>}
+      {record.reviewState && <span className="queue-tag">{say(record.reviewState)}</span>}
+      {record.vulnerability?.map((item) => <span key={item} className="queue-tag is-warn">{say(item)}</span>)}
+      {record.complaintType && <span className="queue-tag">{bi('Complaint type (AI suggestion):', 'অভিযোগের ধরন (এআই প্রস্তাবিত):')} {say(record.complaintType)}</span>}
+      {record.mediationStage && <span className="queue-tag">{bi('Mediation stage:', 'মধ্যস্থতার ধাপ:')} {say(record.mediationStage)}</span>}
+      {record.legalEffectState && <span className="queue-tag">{bi('Legal effect:', 'আইনি কার্যকারিতা:')} {say(record.legalEffectState)}</span>}
+    </span>
+    {role === 'DLAO_OFFICER' && record.problemSummary?.value && <span className="record-problem-preview">
+      <strong>{bi('Problem', 'সমস্যা')}</strong>
+      <span className="record-problem-text">{record.problemSummary.value}</span>
+      <ProblemProvenance problem={record.problemSummary} />
+    </span>}
+    {record.flags?.length > 0 && <span className="queue-card-flags">
+      {record.flags.map((flag) => <span key={flag.code} className="queue-flag">
+        <span className={`queue-flag-label flag-${flag.code.toLowerCase()}`}>{say(flag.code)}</span>
+        <span className="visually-hidden">: </span>
+        <span className="queue-flag-reason">{tr(flag.reason)}</span>
+      </span>)}
+    </span>}
+  </Link>
+}
+
 export default function Dashboard({ session }) {
   const navigate = useNavigate()
   const [role, setRole] = useState(session.user.assignments[0]?.role || '')
@@ -179,27 +256,68 @@ export default function Dashboard({ session }) {
   const visible = sorted
   const report = workspace?.report
 
-  return <section aria-labelledby="dashboard-title">
-    <p className="eyebrow">{workspace?.officeCode || bi('Demo office', 'ডেমো কার্যালয়')} · {bi('Shared record', 'একীভূত প্রাতিষ্ঠানিক রেকর্ড')}</p>
-    <h1 id="dashboard-title">{bi(`${roles[role]?.[0][0] || 'Provider'} workspace`, `${roles[role]?.[0][1] || 'সেবাদাতা'}-এর কর্মক্ষেত্র`)}</h1>
-    <p className="lede">{roles[role] && bi(...roles[role][1])}</p>
-    {session.user.assignments.length > 1 && <div className="role-switch"><label htmlFor="active-role">{bi('Active role', 'সক্রিয় ভূমিকা')}</label><select id="active-role" value={role} onChange={(event) => { setWorkspace(null); setLoading(true); setLookup(null); setVerifiedLookup(null); setRole(event.target.value) }}>{session.user.assignments.map((assignment) => <option key={`${assignment.role}-${assignment.officeCode}`} value={assignment.role}>{roleName(assignment.role)}</option>)}</select></div>}
+  return <section aria-labelledby="dashboard-title" className="workspace">
+    <header className="workspace-head">
+      <div className="workspace-head-text">
+        <p className="eyebrow">{workspace?.officeCode || bi('Demo office', 'ডেমো কার্যালয়')} · {bi('Shared record', 'একীভূত প্রাতিষ্ঠানিক রেকর্ড')}</p>
+        <h1 id="dashboard-title" className="workspace-title">{bi(`${roles[role]?.[0][0] || 'Provider'} workspace`, `${roles[role]?.[0][1] || 'সেবাদাতা'}-এর কর্মক্ষেত্র`)}</h1>
+        <p className="workspace-lede">{roles[role] && bi(...roles[role][1])}</p>
+      </div>
+      {session.user.assignments.length > 1 && <div className="workspace-role"><label htmlFor="active-role">{bi('Active role', 'সক্রিয় ভূমিকা')}</label><select id="active-role" value={role} onChange={(event) => { setWorkspace(null); setLoading(true); setLookup(null); setVerifiedLookup(null); setRole(event.target.value) }}>{session.user.assignments.map((assignment) => <option key={`${assignment.role}-${assignment.officeCode}`} value={assignment.role}>{roleName(assignment.role)}</option>)}</select></div>}
+    </header>
     {error && <p role="alert" className="error">{error}</p>}
     {notice && <p role="status" className="success">{notice}</p>}
     {role === 'UDC_OPERATOR' && <p><Link to="/assisted">{bi('Open assisted intake and offline drafts', 'সহায়তাকৃত আবেদন ও অফলাইন খসড়া দেখুন')}</Link></p>}
     {submitted && <p role="status" className="success">{bi(`Application ${submitted.applicationId} submitted to the DLAO queue. No Case ID exists yet. Give this lookup code to the caller once, through the agreed safe route:`, `আবেদন ${submitted.applicationId} ডিএলএও কর্মকর্তাদের পর্যালোচনার তালিকায় জমা হয়েছে। এখনো মামলা নম্বর বরাদ্দ হয়নি। নির্ধারিত নিরাপদ মাধ্যমে আবেদনকারীকে এই অনুসন্ধান কোডটি একবার দিন:`)} <code>{submitted.lookupCode}</code>. {bi('It will not be shown again.', 'কোডটি পরবর্তীতে আর দেখানো হবে না।')}</p>}
 
-    {canSubmit && <div className="dashboard-actions">
+    {staff && report && <section className="stat-strip" aria-labelledby="report-title">
+      <h2 id="report-title" className="section-label">{bi('Routine report', 'নিয়মিত কার্যক্রমের প্রতিবেদন')}</h2>
+      <dl className="stat-grid">
+        <div className="stat-tile"><dt>{bi('Applications', 'মোট আবেদন')}</dt><dd>{num(report.total)}</dd></div>
+        <div className="stat-tile"><dt>{bi('Accepted', 'গৃহীত')}</dt><dd>{num(report.accepted)}</dd></div>
+        <div className={`stat-tile${report.counts.OVERDUE ? ' is-alert' : ''}`}><dt>{bi('Overdue tasks', 'বকেয়া কাজ')}</dt><dd>{num(report.counts.OVERDUE)}</dd></div>
+        <div className={`stat-tile${report.counts.LAWYER_UPDATE_OVERDUE ? ' is-alert' : ''}`}><dt>{bi('Lawyer updates overdue', 'আইনজীবীর আপডেট বাকি')}</dt><dd>{num(report.counts.LAWYER_UPDATE_OVERDUE)}</dd></div>
+      </dl>
+      <p className="stat-channels">{bi('Channels:', 'মাধ্যম:')} {Object.entries(report.byChannel).map(([channel, count]) => `${say(channel)} ${num(count)}`).join(' · ') || bi('none', 'নেই')}</p>
+    </section>}
+
+    {staff ? <div className="workspace-tools">
+      <form className="card quick-find" role="search" aria-labelledby="search-title" onSubmit={search}>
+        <h2 id="search-title">{bi('Find a record', 'রেকর্ড অনুসন্ধান')}</h2>
+        <label htmlFor="record-id">{bi('Application or Case ID', 'আবেদন বা মামলা নম্বর')}</label>
+        <div className="quick-find-row">
+          <input id="record-id" value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="APP-2026-000001" aria-describedby="record-id-hint" required />
+          <button type="submit" className="secondary-button">{bi('Find record', 'রেকর্ড খুঁজুন')}</button>
+        </div>
+        <p id="record-id-hint" className="field-hint">{bi('Use an exact Application ID or Case ID.', 'সঠিক আবেদন নম্বর বা মামলা নম্বর ব্যবহার করুন।')}</p>
+      </form>
+      <details className="card new-application">
+        <summary>{bi('New application', 'নতুন আবেদন দাখিল')}</summary>
+        <p className="muted">{bi('Fictional demo records only. Identity stays incomplete until reviewed.', 'শুধুমাত্র ডেমো বা পরীক্ষামূলক রেকর্ড। পর্যালোচনার পূর্বে পরিচয় যাচাই সম্পন্ন হয় না।')}</p>
+        <form onSubmit={submitApplication} className="form-stack"><label htmlFor="applicant-name">{bi('Fictional applicant name', 'আবেদনকারীর নাম')}</label><input id="applicant-name" value={applicantName} onChange={(event) => setApplicantName(event.target.value)} minLength="2" maxLength="120" required /><button type="submit">{bi('Submit application', 'আবেদন জমা দিন')}</button></form>
+      </details>
+    </div> : canSubmit && <div className="dashboard-actions">
       <section className="card" aria-labelledby="intake-title"><h2 id="intake-title">{bi('New application', 'নতুন আবেদন দাখিল')}</h2><p className="muted">{bi('Fictional demo records only. Identity stays incomplete until reviewed.', 'শুধুমাত্র ডেমো বা পরীক্ষামূলক রেকর্ড। পর্যালোচনার পূর্বে পরিচয় যাচাই সম্পন্ন হয় না।')}</p><form onSubmit={submitApplication} className="form-stack"><label htmlFor="applicant-name">{bi('Fictional applicant name', 'আবেদনকারীর নাম')}</label><input id="applicant-name" value={applicantName} onChange={(event) => setApplicantName(event.target.value)} minLength="2" maxLength="120" required /><button type="submit">{bi('Submit application', 'আবেদন জমা দিন')}</button></form></section>
-      {staff && <section className="card" aria-labelledby="search-title"><h2 id="search-title">{bi('Find a record', 'রেকর্ড অনুসন্ধান')}</h2><p className="muted">{bi('Use an exact Application ID or Case ID.', 'সঠিক আবেদন নম্বর বা মামলা নম্বর ব্যবহার করুন।')}</p><form onSubmit={search} className="form-stack"><label htmlFor="record-id">{bi('Application or Case ID', 'আবেদন বা মামলা নম্বর')}</label><input id="record-id" value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="APP-2026-000001" required /><button type="submit" className="secondary-button">{bi('Find record', 'রেকর্ড খুঁজুন')}</button></form></section>}
     </div>}
 
     {role === 'HELPLINE_AGENT' && <section className="card" aria-labelledby="lookup-title"><h2 id="lookup-title">{bi('Status lookup', 'আবেদনের বর্তমান স্থিতি অনুসন্ধান')}</h2><p className="muted">{bi('Ask for the ID and one-time code, then do the approved caller check. The code alone is not proof of identity. Nothing is sent to the number on file.', 'আবেদন নম্বর ও এককালীন অনুসন্ধান কোড জেনে নিয়ে অনুমোদিত নিয়মে কলারের পরিচয় যাচাই করুন। শুধুমাত্র কোড পরিচয়ের চূড়ান্ত প্রমাণ নয়। নথিতে থাকা নম্বরে কোনো তথ্য স্বয়ংক্রিয়ভাবে পাঠানো হয় না।')}</p><form onSubmit={statusLookup} className="form-stack inline-form"><label htmlFor="lookup-id">{bi('Application or Case ID', 'আবেদন বা মামলা নম্বর')}</label><input id="lookup-id" value={identifier} onChange={(event) => setIdentifier(event.target.value)} required /><label htmlFor="lookup-code">{bi('One-time lookup code or 16699 PIN', 'এককালীন অনুসন্ধান কোড বা ১৬৬৯৯ পিন')}</label><input id="lookup-code" value={lookupCode} onChange={(event) => setLookupCode(event.target.value)} minLength="6" maxLength="24" autoComplete="off" required /><label htmlFor="status-channel">{bi('Permitted lookup route', 'যোগাযোগের অনুমোদিত মাধ্যম')}</label><select id="status-channel" value={contactChannel} onChange={(event) => setContactChannel(event.target.value)}><option value="PHONE">{say('PHONE')}</option><option value="IN_PERSON">{say('IN_PERSON')}</option></select><label className="checkbox-label" htmlFor="caller-verified"><input id="caller-verified" type="checkbox" checked={callerVerified} onChange={(event) => setCallerVerified(event.target.checked)} required />{bi('I performed the approved human caller-verification procedure.', 'আমি সরকারি নির্দেশনা অনুযায়ী কলারের পরিচয় যাচাই প্রক্রিয়া সম্পন্ন করেছি।')}</label><button type="submit">{bi('Check permitted status', 'স্থিতি অনুসন্ধান করুন')}</button></form>{lookup && <div role="status" className="success"><p>{lookup.applicationId} · {say(lookup.status)}{lookup.caseId ? ` · ${lookup.caseId}` : ''}</p><p>{bi('Next hearing:', 'পরবর্তী শুনানি:')} {lookup.nextHearingAt ? <time dateTime={lookup.nextHearingAt}>{when(lookup.nextHearingAt)}</time> : bi('Not recorded', 'ধার্য নেই')}</p><p>{bi('Next step:', 'পরবর্তী করণীয়:')} {tr(lookup.nextAction || lookup.nextStep)}</p><p className="muted">{bi('Read this status to the caller. Nothing was sent.', 'কলারকে মৌখিকভাবে এই স্থিতি জানিয়ে দিন। কোনো এসএমএস বা তথ্য প্রেরণ করা হয়নি।')}</p></div>}{verifiedLookup && lookup?.status === 'ACCEPTED' && <form onSubmit={requestLawyerChange} className="form-stack inline-form"><h3>{bi('Record a lawyer-change request', 'আইনজীবী পরিবর্তনের আবেদন লিপিবদ্ধ করুন')}</h3><p className="muted">{bi('For DLAO review only. The lawyer does not change here.', 'কেবল ডিএলএও কর্মকর্তার পর্যালোচনার জন্য। এখান থেকে সরাসরি আইনজীবী পরিবর্তন হয় না।')}</p><label htmlFor="lawyer-change-reason">{bi('Applicant’s stated reason', 'আবেদনকারীর উল্লেখিত কারণ')}</label><textarea id="lawyer-change-reason" value={lawyerChangeReason} onChange={(event) => setLawyerChangeReason(event.target.value)} minLength="5" maxLength="1000" required /><button type="submit">{bi('Send request to DLAO review', 'ডিএলএও কর্মকর্তার পর্যালোচনার জন্য প্রেরণ করুন')}</button></form>}{lawyerChangeNotice && <p role="status" className="success">{tr(lawyerChangeNotice)}</p>}</section>}
 
-    {staff && report && <section aria-labelledby="report-title"><h2 id="report-title">{bi('Routine report', 'নিয়মিত কার্যক্রমের প্রতিবেদন')}</h2><p>{bi(`${report.total} applications · ${report.accepted} accepted · ${report.counts.OVERDUE} overdue tasks · ${report.counts.LAWYER_UPDATE_OVERDUE} lawyer-update cases`, `${num(report.total)}টি আবেদন · ${num(report.accepted)}টি গৃহীত · ${num(report.counts.OVERDUE)}টি বকেয়া কাজ · ${num(report.counts.LAWYER_UPDATE_OVERDUE)}টি আইনজীবী প্রতিবেদন বিলম্বিত`)}</p><p className="muted">{bi('Channels:', 'মাধ্যম:')} {Object.entries(report.byChannel).map(([channel, count]) => `${say(channel)} ${num(count)}`).join(' · ') || bi('none', 'নেই')}</p></section>}
-
-    <section className="worklist" aria-labelledby="worklist-title"><div className="section-heading"><h2 id="worklist-title">{staff ? bi('Daily queue and history', 'দৈনিক কার্যতালিকা ও পূর্ববর্তী রেকর্ড') : role === 'PANEL_LAWYER' ? bi('Assigned cases', 'বরাদ্দকৃত মামলাসমূহ') : role === 'RECEIVING_DLAO' ? bi('Referrals to your office', 'অন্য কার্যালয় থেকে প্রাপ্ত রেফারেল') : role === 'HELPLINE_AGENT' ? bi('16699 advice callbacks', '১৬৬৯৯ আইনি পরামর্শের কলসমূহ') : role === 'MEDIATOR' ? bi('Mediation cases', 'মধ্যস্থতার আওতাধীন বিরোধ ও মামলা') : role === 'CLAO' ? bi('Certifications pending CLAO review', 'সিএলএও প্রত্যয়ন অপেক্ষমাণ মামলা') : role === 'UDC_OPERATOR' ? bi('Assisted applications submitted', 'ইউডিসি থেকে দাখিলকৃত আবেদন') : bi('Role worklist', 'কার্যতালিকা')}</h2><span className="muted">{bi(`${workspace?.records.length || 0} records`, `${num(workspace?.records.length || 0)}টি রেকর্ড`)}</span></div>
-      {staff && <div className="dashboard-actions"><div><label htmlFor="history-filter">{bi('Search shown history', 'রেকর্ড ফিল্টার করুন')}</label><input id="history-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={bi('Name, Application ID, or Case ID', 'নাম, আবেদন বা মামলা নম্বর')} /></div><div><label htmlFor="queue-filter">{bi('Queue flag', 'কাজের ক্যাটাগরি')}</label><select id="queue-filter" value={queue} onChange={(event) => setQueue(event.target.value)}><option value="ALL">{bi('All records', 'সকল রেকর্ড')}</option>{Object.entries(report?.counts || {}).map(([code, count]) => <option key={code} value={code}>{say(code)} ({num(count)})</option>)}</select></div></div>}
+    <section className="worklist" aria-labelledby="worklist-title"><div className="section-heading"><h2 id="worklist-title">{staff ? bi('Daily queue and history', 'দৈনিক কার্যতালিকা ও পূর্ববর্তী রেকর্ড') : role === 'PANEL_LAWYER' ? bi('Assigned cases', 'বরাদ্দকৃত মামলাসমূহ') : role === 'RECEIVING_DLAO' ? bi('Referrals to your office', 'অন্য কার্যালয় থেকে প্রাপ্ত রেফারেল') : role === 'HELPLINE_AGENT' ? bi('16699 advice callbacks', '১৬৬৯৯ আইনি পরামর্শের কলসমূহ') : role === 'MEDIATOR' ? bi('Mediation cases', 'মধ্যস্থতার আওতাধীন বিরোধ ও মামলা') : role === 'CLAO' ? bi('Certifications pending CLAO review', 'সিএলএও প্রত্যয়ন অপেক্ষমাণ মামলা') : role === 'UDC_OPERATOR' ? bi('Assisted applications submitted', 'ইউডিসি থেকে দাখিলকৃত আবেদন') : bi('Role worklist', 'কার্যতালিকা')}</h2><span className="muted" role="status">{visible.length === deduplicated.length
+        ? bi(`${deduplicated.length} records`, `${num(deduplicated.length)}টি রেকর্ড`)
+        : bi(`Showing ${visible.length} of ${deduplicated.length} records`, `${num(deduplicated.length)}টির মধ্যে ${num(visible.length)}টি রেকর্ড`)}</span></div>
+      {staff && report && <div className="queue-controls">
+        <div className="queue-chip-row" role="group" aria-label={bi('Filter the queue by flag', 'কাজের ক্যাটাগরি অনুযায়ী ফিল্টার করুন')}>
+          <button type="button" className={`queue-chip${queue === 'ALL' ? ' is-active' : ''}`} aria-pressed={queue === 'ALL'} onClick={() => setQueue('ALL')}>
+            {bi('All', 'সকল')} <span className="queue-chip-count">{num(report.total)}</span>
+          </button>
+          {Object.entries(report.counts).map(([code, count]) => (
+            <button key={code} type="button" className={`queue-chip${queue === code ? ' is-active' : ''}${count ? '' : ' is-empty'}`} aria-pressed={queue === code} onClick={() => setQueue(code)}>
+              {say(code)} <span className="queue-chip-count">{num(count)}</span>
+            </button>
+          ))}
+        </div>
+        <div className="queue-search"><label htmlFor="history-filter">{bi('Search shown history', 'রেকর্ড ফিল্টার করুন')}</label><input id="history-filter" type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={bi('Name, Application ID, or Case ID', 'নাম, আবেদন বা মামলা নম্বর')} /></div>
+      </div>}
       {loading && <p role="status">{bi('Loading workspace…', 'লোড হচ্ছে…')}</p>}
       {!loading && workspace?.records.length === 0 && <p className="empty-state">
         {role === 'PANEL_LAWYER' ? bi('No current or pending panel-lawyer assignments.', 'বর্তমানে কোনো সক্রিয় বা অপেক্ষমাণ মামলা বরাদ্দ নেই।') :
@@ -210,7 +328,10 @@ export default function Dashboard({ session }) {
          role === 'UDC_OPERATOR' ? bi('No assisted applications submitted yet.', 'ইউডিসি থেকে এখনো কোনো আবেদন দাখিল করা হয়নি।') :
          bi('No records are available to this role yet.', 'এই ভূমিকায় দেখার মতো কোনো রেকর্ড নেই।')}
       </p>}
-      {!loading && workspace?.records.length > 0 && visible.length === 0 && <p className="empty-state">{bi('No records match these filters.', 'নির্বাচিত শর্তে কোনো রেকর্ড পাওয়া যায়নি।')}</p>}
+      {!loading && workspace?.records.length > 0 && visible.length === 0 && <div className="empty-state queue-empty">
+        <p>{bi('No records match these filters.', 'নির্বাচিত শর্তে কোনো রেকর্ড পাওয়া যায়নি।')}</p>
+        {staff && <button type="button" className="secondary-button" onClick={() => { setQueue('ALL'); setFilter('') }}>{bi('Show all records', 'সকল রেকর্ড দেখুন')}</button>}
+      </div>}
       {!loading && role === 'HELPLINE_AGENT' && visible.map((record) => <AdviceCallback key={record.applicationId} request={record} token={session.token} onDone={(message) => { setNotice(message); setRefresh((value) => value + 1) }} />)}
       {!loading && role !== 'HELPLINE_AGENT' && visible.length > 0 && <ul className="record-list">{visible.map((record) => <li key={record.referralId ?? record.assignmentId ?? record.applicationId}>{role === 'PANEL_LAWYER'
         ? <Link to={`/cases/${record.caseId}`} className={isUrgent(record) ? 'urgent-record' : ''}><strong>{record.caseId} · {say(record.assignmentStatus)}</strong><span>{record.applicantName ? <>{tr(record.applicantName)} · </> : ''}{bi('Application', 'আবেদন')} {record.applicationId}{record.nextAction ? ` · ${bi('Next:', 'পরবর্তী:')} ${record.nextAction}` : ''}</span>{isUrgent(record) && <small className="urgent-flag">{say('URGENT')}</small>}{record.nextHearingAt && <small>{bi('Hearing:', 'শুনানি:')} {when(record.nextHearingAt)}</small>}{record.updates?.map((update) => <small key={update.id}>{bi('Update', 'আপডেট')} {num(update.sequence)}: {say(update.status)} · {bi('due', 'শেষ সময়')} {when(update.dueAt)}{update.status === 'MISSED' ? ` · ${overdueText(update.dueAt)}` : ''}{update.reminderCount ? ` · ${bi(`the DLAO asked ${update.reminderCount}×`, `ডিএলএও কার্যালয় থেকে ${num(update.reminderCount)} বার তাগিদ দেওয়া হয়েছে`)}` : ''}</small>)}</Link>
@@ -225,18 +346,7 @@ export default function Dashboard({ session }) {
                 </div>
                 <Link to="/assisted" className="secondary-button" style={{ textDecoration: 'none', padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}>{bi('Open UDC console', 'ইউডিসি কনসোল')}</Link>
               </div>
-            : <Link to={`/applications/${record.applicationId}`} className={isUrgent(record) ? 'urgent-record' : isPending(record) ? 'pending-record' : ''}>
-                <strong>{record.applicationId}</strong>
-                <span>{tr(record.applicantName)} · {say(record.status)} · {say(record.reviewState)}</span>
-                {record.caseId && <small>{record.caseId}</small>}
-                {record.mediationStage && <small>{bi('Mediation stage:', 'মধ্যস্থতার ধাপ:')} {say(record.mediationStage)}</small>}
-                {record.legalEffectState && <small>{bi('Legal effect:', 'আইনি কার্যকারিতা:')} {say(record.legalEffectState)}</small>}
-                {isUrgent(record) && <small className="urgent-flag">{say('URGENT')}</small>}
-                {record.priorityDecision === 'ROUTINE' && <small style={{ background: '#edf3ec', color: '#28562d', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>{say('ROUTINE')}</small>}
-                {record.vulnerability?.length > 0 && <small>{record.vulnerability.map(say).join(' · ')}</small>}
-                {record.complaintType && <small>{bi('Complaint type (AI suggestion):', 'অভিযোগের ধরন (এআই প্রস্তাবিত):')} {say(record.complaintType)}</small>}
-                {record.flags?.map((flag) => <small key={flag.code}>{say(flag.code)}: {tr(flag.reason)}</small>)}
-              </Link>}</li>)}</ul>}
+            : <QueueCard record={record} role={role} urgent={isUrgent(record)} pending={isPending(record)} />}</li>)}</ul>}
     </section>
   </section>
 }

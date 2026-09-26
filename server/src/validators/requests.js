@@ -311,9 +311,23 @@ export function validateAnswerAudio(request, _response, next) {
 }
 
 // One turn of the spoken status call: audio only, transcribed and discarded, optionally primed with a named hint.
+// A spoken status turn runs in Bangla or English (`lang`, Bangla when absent). A transcript may also leave the
+// language to Whisper ('auto'), and then takes no hint, since a hint is written in one language.
+function voiceLanguage(query, allowed = ['bn', 'en']) {
+  if ('lang' in query && !allowed.includes(query.lang)) fail('Unknown language.')
+}
+
+export function validateVoiceLanguage(request, _response, next) {
+  if (Object.keys(request.query).some((key) => key !== 'lang')) fail('Unexpected parameter.')
+  voiceLanguage(request.query)
+  next()
+}
+
 export function validateSpeechAudio(request, _response, next) {
-  const keys = Object.keys(request.query)
-  if (keys.some((key) => key !== 'hint') || (keys.length && !Object.hasOwn(TRANSCRIPT_HINTS, request.query.hint))) fail('Unexpected parameter.')
+  const { hint, lang } = request.query
+  if (Object.keys(request.query).some((key) => key !== 'hint' && key !== 'lang')) fail('Unexpected parameter.')
+  if (hint !== undefined && (!Object.hasOwn(TRANSCRIPT_HINTS, hint) || lang === 'auto')) fail('Unexpected parameter.')
+  voiceLanguage(request.query, ['bn', 'en', 'auto'])
   if (!audioTypes.includes((request.get('content-type') || '').split(';')[0].trim())) fail('Unsupported audio type.')
   if (!Buffer.isBuffer(request.body) || request.body.length < 500) fail('No audio was received.')
   next()

@@ -59,6 +59,7 @@ app.use((request, response, next) => {
   next()
 })
 app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next() })
+app.use('/api/citizen/applications', express.json({ limit: '10mb' }))
 app.use(express.json({ limit: '128kb' }))
 app.use('/health', healthRoutes)
 app.use('/api/auth', authRoutes)

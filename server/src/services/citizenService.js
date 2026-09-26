@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import mongoose from 'mongoose'
-import { Application, Case, CaseFact, LawyerAssignment, LawyerChangeRequest, Mediation, Person, SafeContactProfile, Task, User } from '../models/index.js'
+import { Application, CancellationRequest, Case, CaseFact, Document, DocumentVersion, LawyerAssignment, LawyerChangeRequest, Mediation, Person, SafeContactProfile, Task, User } from '../models/index.js'
 import { advance } from './applicationService.js'
 import { appendAudit } from './auditService.js'
 import { HttpError } from '../utils/httpError.js'
@@ -31,13 +32,15 @@ export async function getCitizenCases(actor) {
   const applications = await Application.find(query).sort({ createdAt: -1 }).lean()
 
   const enrichedCases = await Promise.all(applications.map(async (app) => {
-    const [applicant, caseRecord, activeAssignment, changeRequests, mediation, facts] = await Promise.all([
+    const [applicant, caseRecord, activeAssignment, changeRequests, mediation, facts, docs, cancellationRequest] = await Promise.all([
       Person.findById(app.applicantPersonId).select('displayName').lean(),
       Case.findOne({ applicationId: app.applicationId }).lean(),
       LawyerAssignment.findOne({ applicationId: app.applicationId, active: true, status: 'ACCEPTED' }).populate('lawyerUserId', 'displayName').lean(),
       LawyerChangeRequest.find({ applicationId: app.applicationId }).sort({ createdAt: -1 }).lean(),
       Mediation.findOne({ applicationId: app.applicationId }).sort({ createdAt: -1 }).lean(),
       CaseFact.find({ applicationId: app.applicationId }).lean(),
+      Document.find({ applicationId: app.applicationId }).select('label currentVersion checklistItem createdAt').lean(),
+      CancellationRequest.findOne({ applicationId: app.applicationId }).sort({ createdAt: -1 }).lean(),
     ])
 
     return {
@@ -70,12 +73,30 @@ export async function getCitizenCases(actor) {
         reviewReason: cr.reviewReason,
         reviewedAt: cr.reviewedAt,
       })),
+      cancellationRequest: cancellationRequest ? {
+        id: cancellationRequest._id,
+        reason: cancellationRequest.reason,
+        status: cancellationRequest.status,
+        createdAt: cancellationRequest.createdAt,
+        reviewReason: cancellationRequest.reviewReason,
+        reviewedAt: cancellationRequest.reviewedAt,
+      } : null,
       mediation: mediation ? {
         stage: mediation.stage,
         scheduledAt: mediation.scheduledAt,
         outcome: mediation.outcome,
       } : null,
       summary: facts.find(f => f.field === 'complaint.summary')?.value || 'No summary provided',
+      identityDocument: facts.find(f => f.field === 'identity.document_access')?.value || 'NONE',
+      nidNumber: facts.find(f => f.field === 'identity.nid_number')?.value || null,
+      birthCertificateNumber: facts.find(f => f.field === 'identity.birth_certificate_number')?.value || null,
+      prottayonpotroStatus: facts.find(f => f.field === 'prottayonpotro.status')?.value || null,
+      documents: docs.map(d => ({
+        id: d._id,
+        label: d.label,
+        checklistItem: d.checklistItem,
+        currentVersion: d.currentVersion,
+      })),
     }
   }))
 
@@ -152,8 +173,104 @@ export async function requestCitizenLawyerChange(applicationId, { reason }, acto
   })
 }
 
+// If the DLAO has not yet accepted the application, the applicant's own withdrawal takes effect immediately.
+// Once a Case ID exists, cancellation can affect other people's tracked work (a lawyer, a referral, a mediation),
+// so it becomes a DLAO officer decision instead, following the same request/review shape as a lawyer-change request.
+export async function cancelOrRequestCancellation(applicationId, { reason }, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const owner = await User.findById(actor.userId).select('personId').session(session).lean()
+    const ownership = owner?.personId
+      ? { $or: [{ citizenUserId: actor.userId }, { applicantPersonId: owner.personId }] }
+      : { citizenUserId: actor.userId }
+    const application = await Application.findOne({ applicationId, ...ownership }).session(session)
+    if (!application) {
+      throw new HttpError(404, 'NOT_FOUND', 'Application record not found.')
+    }
+    if (application.status === 'CANCELLED') {
+      throw new HttpError(409, 'ALREADY_CANCELLED', 'This application has already been cancelled.')
+    }
+    if (await CancellationRequest.exists({ applicationId, status: 'OPEN' }).session(session)) {
+      throw new HttpError(409, 'REQUEST_IN_PROGRESS', 'A cancellation request is already under review.')
+    }
+
+    if (application.status === 'SUBMITTED') {
+      const updated = await advance(application, session, { status: 'CANCELLED' })
+      await Task.updateMany(
+        { applicationId, status: 'OPEN' },
+        { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } },
+        { session },
+      )
+      await appendAudit({
+        applicationId: updated.applicationId,
+        caseId: updated.caseId,
+        sequence: updated.auditSequence,
+        action: 'APPLICATION_CANCELLED_BY_APPLICANT',
+        actorUserId: actor.userId,
+        actorRole: 'CITIZEN',
+        channel: 'PORTAL',
+        previousState: { status: 'SUBMITTED' },
+        newState: { status: 'CANCELLED' },
+        reason: reason.trim(),
+      }, session)
+      return {
+        status: 'CANCELLED',
+        message: 'Your application has been cancelled.',
+      }
+    }
+
+    // ACCEPTED: a Case ID exists, so cancellation needs a DLAO officer's confirmation.
+    const [cancellationRequest] = await CancellationRequest.create([{
+      applicationId,
+      caseId: application.caseId,
+      channel: 'PORTAL',
+      reason: reason.trim(),
+      status: 'OPEN',
+      recordedByUserId: actor.userId,
+    }], { session })
+
+    await Task.create([{
+      applicationId,
+      caseId: application.caseId,
+      kind: 'CASE_CANCELLATION_REVIEW',
+      title: 'Review citizen case cancellation request',
+      ownerRole: 'DLAO_OFFICER',
+      nextAction: 'Approve or decline; on approval the case and all dependent workflow records are closed out.',
+    }], { session })
+
+    await auditApplication(
+      application,
+      session,
+      'APPLICANT_CASE_CANCELLATION_REQUESTED',
+      { cancellationRequestId: cancellationRequest.id, status: 'OPEN' },
+      reason.trim(),
+      actor.userId,
+      'CITIZEN',
+    )
+
+    return {
+      status: 'PENDING_REVIEW',
+      requestId: cancellationRequest.id,
+      message: 'Your case has already been accepted, so this cancellation request has been sent to the DLAO officer for confirmation.',
+    }
+  })
+}
+
 export async function submitDigitalApplication(input, actor) {
-  const { problem, district, urgent, contactPhone, identityDocument, applicantName } = input || {}
+  const {
+    problem,
+    district,
+    urgent,
+    contactPhone,
+    identityDocument,
+    applicantName,
+    nidNumber,
+    nidPhoto,
+    birthCertificateNumber,
+    birthCertificatePhoto,
+    prottayonpotro,
+    extraDocuments,
+  } = input || {}
+
   if (!problem || !problem.trim()) {
     throw new HttpError(400, 'PROBLEM_REQUIRED', 'Please describe your legal issue / problem.')
   }
@@ -181,6 +298,38 @@ export async function submitDigitalApplication(input, actor) {
       ['identity.document_access', identityDocument || 'NOT_COLLECTED'],
     ]
 
+    if (identityDocument === 'NID' && nidNumber && nidNumber.trim()) {
+      factValues.push(['identity.nid_number', nidNumber.trim()])
+    }
+
+    if (identityDocument === 'BIRTH_CERTIFICATE' && birthCertificateNumber && birthCertificateNumber.trim()) {
+      factValues.push(['identity.birth_certificate_number', birthCertificateNumber.trim()])
+    }
+
+    if (prottayonpotro) {
+      if (prottayonpotro.status) {
+        factValues.push(['prottayonpotro.status', prottayonpotro.status])
+      }
+      if (prottayonpotro.status === 'YES') {
+        if (prottayonpotro.issuerType) {
+          factValues.push(['prottayonpotro.issuer_type', prottayonpotro.issuerType])
+        }
+        if (prottayonpotro.issuerName && prottayonpotro.issuerName.trim()) {
+          factValues.push(['prottayonpotro.issuer_name', prottayonpotro.issuerName.trim()])
+        }
+        if (prottayonpotro.memoNumber && prottayonpotro.memoNumber.trim()) {
+          factValues.push(['prottayonpotro.memo_number', prottayonpotro.memoNumber.trim()])
+        }
+        if (prottayonpotro.issueDate && prottayonpotro.issueDate.trim()) {
+          factValues.push(['prottayonpotro.issue_date', prottayonpotro.issueDate.trim()])
+        }
+      }
+    }
+
+    if (Array.isArray(extraDocuments) && extraDocuments.length > 0) {
+      factValues.push(['documents.extra_count', String(extraDocuments.length)])
+    }
+
     await CaseFact.create(factValues.map(([field, value]) => ({
       applicationId,
       field,
@@ -195,6 +344,120 @@ export async function submitDigitalApplication(input, actor) {
       revision: 1,
       recordedByUserId: actor.userId,
     })), { session, ordered: true })
+
+    // Process attached pictures and documents
+    const createdDocuments = []
+
+    // 1. NID Card photo if provided
+    if (identityDocument === 'NID' && nidPhoto?.dataUrl) {
+      const [doc] = await Document.create([{
+        applicationId,
+        label: 'National ID (NID) Card',
+        checklistItem: 'Applicant identity evidence',
+        sensitivity: 'STANDARD',
+        currentVersion: 1,
+      }], { session })
+
+      const hash = createHash('sha256').update(nidPhoto.dataUrl).digest('hex')
+      await DocumentVersion.create([{
+        applicationId,
+        documentId: doc._id,
+        version: 1,
+        label: 'National ID (NID) Card',
+        filename: nidPhoto.filename || 'nid-card.jpg',
+        qualityState: 'READABLE',
+        note: nidNumber ? `NID Number: ${nidNumber.trim()}` : 'Uploaded by citizen via portal',
+        fileData: nidPhoto.dataUrl,
+        contentHash: hash,
+        recordedByUserId: actor.userId,
+      }], { session })
+      createdDocuments.push(doc)
+    }
+
+    // 2. Birth Certificate photo if provided
+    if (identityDocument === 'BIRTH_CERTIFICATE' && birthCertificatePhoto?.dataUrl) {
+      const [doc] = await Document.create([{
+        applicationId,
+        label: 'Birth Registration Certificate',
+        checklistItem: 'Applicant identity evidence',
+        sensitivity: 'STANDARD',
+        currentVersion: 1,
+      }], { session })
+
+      const hash = createHash('sha256').update(birthCertificatePhoto.dataUrl).digest('hex')
+      await DocumentVersion.create([{
+        applicationId,
+        documentId: doc._id,
+        version: 1,
+        label: 'Birth Registration Certificate',
+        filename: birthCertificatePhoto.filename || 'birth-certificate.jpg',
+        qualityState: 'READABLE',
+        note: birthCertificateNumber ? `BRN: ${birthCertificateNumber.trim()}` : 'Uploaded by citizen via portal',
+        fileData: birthCertificatePhoto.dataUrl,
+        contentHash: hash,
+        recordedByUserId: actor.userId,
+      }], { session })
+      createdDocuments.push(doc)
+    }
+
+    // 3. Prottayonpotro document/photo if provided
+    if (prottayonpotro?.status === 'YES' && prottayonpotro.photo?.dataUrl) {
+      const [doc] = await Document.create([{
+        applicationId,
+        label: 'Prottayonpotro (Chairman/Councilor Certificate)',
+        checklistItem: 'Income/Insolvency Certificate (প্রত্যয়নপত্র)',
+        sensitivity: 'STANDARD',
+        currentVersion: 1,
+      }], { session })
+
+      const hash = createHash('sha256').update(prottayonpotro.photo.dataUrl).digest('hex')
+      const noteParts = []
+      if (prottayonpotro.issuerName?.trim()) noteParts.push(`Office: ${prottayonpotro.issuerName.trim()}`)
+      if (prottayonpotro.memoNumber?.trim()) noteParts.push(`Memo: ${prottayonpotro.memoNumber.trim()}`)
+
+      await DocumentVersion.create([{
+        applicationId,
+        documentId: doc._id,
+        version: 1,
+        label: 'Prottayonpotro (প্রত্যয়নপত্র)',
+        filename: prottayonpotro.photo.filename || 'prottayonpotro.jpg',
+        qualityState: 'READABLE',
+        note: noteParts.length ? noteParts.join(' · ') : 'Attestation certificate uploaded by citizen',
+        fileData: prottayonpotro.photo.dataUrl,
+        contentHash: hash,
+        recordedByUserId: actor.userId,
+      }], { session })
+      createdDocuments.push(doc)
+    }
+
+    // 4. Extra supporting document pictures
+    if (Array.isArray(extraDocuments)) {
+      for (const extra of extraDocuments) {
+        if (!extra?.dataUrl) continue
+        const [doc] = await Document.create([{
+          applicationId,
+          label: extra.label?.trim() || extra.filename || 'Extra Supporting Evidence',
+          checklistItem: 'Available supporting record',
+          sensitivity: 'STANDARD',
+          currentVersion: 1,
+        }], { session })
+
+        const hash = createHash('sha256').update(extra.dataUrl).digest('hex')
+        await DocumentVersion.create([{
+          applicationId,
+          documentId: doc._id,
+          version: 1,
+          label: extra.label?.trim() || extra.filename || 'Extra Supporting Evidence',
+          filename: extra.filename || 'document.jpg',
+          qualityState: 'READABLE',
+          note: extra.note || 'Uploaded by citizen as supporting evidence',
+          fileData: extra.dataUrl,
+          contentHash: hash,
+          recordedByUserId: actor.userId,
+        }], { session })
+        createdDocuments.push(doc)
+      }
+    }
 
     await SafeContactProfile.create([{
       applicationId,
@@ -232,21 +495,34 @@ export async function submitDigitalApplication(input, actor) {
       createdApp,
       session,
       'APPLICATION_SUBMITTED',
-      { status: 'SUBMITTED', mode: 'DIGITAL_PORTAL', applicantPersonId: person.id },
-      'Citizen submitted application digitally via citizen portal.',
+      {
+        status: 'SUBMITTED',
+        mode: 'DIGITAL_PORTAL',
+        applicantPersonId: person.id,
+        documentsAttached: createdDocuments.length,
+        identityDocument: identityDocument || 'NONE',
+      },
+      'Citizen submitted application digitally via citizen portal with supporting documents.',
       actor.userId,
       'CITIZEN'
     )
 
-    // Update user profile with latest details
+    // Update user profile with latest details if not already set
     if (phone && !user.phone) {
       user.phone = phone
-      await user.save({ session })
     }
+    if (nidNumber && nidNumber.trim() && !user.nid) {
+      user.nid = nidNumber.trim()
+    }
+    if (district && district.trim() && !user.district) {
+      user.district = district.trim()
+    }
+    await user.save({ session })
 
     return {
       applicationId,
       status: 'SUBMITTED',
+      documentsCount: createdDocuments.length,
       message: 'Your application has been successfully submitted and forwarded to the DLAO officer for review.',
     }
   })

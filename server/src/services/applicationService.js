@@ -1,6 +1,6 @@
 import mongoose from 'mongoose'
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
-import { Application, AssistanceRecord, AuditEvent, CallRecording, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerPaymentEvent, LawyerUpdate, Mediation, Person, Referral, Representation, RoleAssignment, SafeContactProfile, Task, User, VoiceTranscript } from '../models/index.js'
+import { Application, AssistanceRecord, AuditEvent, CallRecording, CancellationRequest, Case, CaseFact, ConsentRecord, ContactAttempt, Document, DocumentVersion, EvidenceAccessLog, LawyerAssignment, LawyerPaymentEvent, LawyerUpdate, Mediation, Person, Referral, Representation, RoleAssignment, SafeContactProfile, Task, User, VoiceTranscript } from '../models/index.js'
 import { hasOfficeRole } from '../middleware/auth.js'
 import { HttpError } from '../utils/httpError.js'
 import { daysOverdue } from '../utils/overdue.js'
@@ -407,6 +407,70 @@ export async function overridePriority(applicationId, { priorityDecision, reason
   })
 }
 
+// A citizen's cancellation request against an accepted Case: approving it closes out every dependent workflow
+// record (open tasks, the active lawyer assignment, any pending mandatory update) so nothing stale keeps surfacing
+// in another role's queue. It is blocked while a referral or mediation is actively in motion, since those involve
+// another office/role's own tracked responsibility and must be wound down through their own workflow first.
+export async function reviewCaseCancellationRequest(applicationId, requestId, { decision, reason }, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const application = await officeApplication(applicationId, actor, session)
+    const cancellationRequest = await CancellationRequest.findOne({ _id: requestId, applicationId, status: 'OPEN' }).session(session)
+    if (!cancellationRequest) throw new HttpError(404, 'NOT_FOUND', 'An open cancellation request was not found.')
+
+    if (decision === 'DECLINE') {
+      const updated = await advance(application, session)
+      cancellationRequest.status = 'DECLINED'
+      cancellationRequest.reviewedByUserId = actor.userId
+      cancellationRequest.reviewedAt = new Date()
+      cancellationRequest.reviewReason = reason
+      await cancellationRequest.save({ session })
+      await Task.updateMany(
+        { applicationId, kind: 'CASE_CANCELLATION_REVIEW', status: 'OPEN' },
+        { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } },
+        { session },
+      )
+      await appendAudit({
+        applicationId, caseId: updated.caseId, sequence: updated.auditSequence,
+        action: 'CASE_CANCELLATION_DECLINED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
+        previousState: { status: 'OPEN' }, newState: { status: 'DECLINED' }, reason,
+      }, session)
+      return { requestId: cancellationRequest.id, status: cancellationRequest.status, version: updated.version }
+    }
+
+    if (await Referral.exists({ applicationId, status: { $in: ['SENT', 'ACKNOWLEDGED'] } }).session(session)) {
+      throw new HttpError(409, 'REFERRAL_ACTIVE', 'Resolve the pending referral before cancelling this case.')
+    }
+    if (await Mediation.exists({ applicationId, stage: { $ne: 'REGISTRATION' } }).session(session)) {
+      throw new HttpError(409, 'MEDIATION_IN_PROGRESS', 'Wind down the active mediation before cancelling this case.')
+    }
+
+    const updated = await advance(application, session, { status: 'CANCELLED' })
+    await Case.updateOne({ caseId: application.caseId }, { $set: { status: 'CANCELLED' } }, { session })
+    // Closes every open task, including the CASE_CANCELLATION_REVIEW task itself.
+    await Task.updateMany(
+      { applicationId, status: 'OPEN' },
+      { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } },
+      { session },
+    )
+    await LawyerAssignment.updateMany({ applicationId, active: true }, { $set: { active: false } }, { session })
+    await LawyerUpdate.updateMany({ applicationId, status: 'PENDING' }, { $set: { status: 'CANCELLED' } }, { session })
+
+    cancellationRequest.status = 'APPROVED'
+    cancellationRequest.reviewedByUserId = actor.userId
+    cancellationRequest.reviewedAt = new Date()
+    cancellationRequest.reviewReason = reason
+    await cancellationRequest.save({ session })
+
+    await appendAudit({
+      applicationId, caseId: updated.caseId, sequence: updated.auditSequence,
+      action: 'CASE_CANCELLED', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
+      previousState: { status: 'ACCEPTED' }, newState: { status: 'CANCELLED' }, reason,
+    }, session)
+
+    return { requestId: cancellationRequest.id, status: cancellationRequest.status, version: updated.version }
+  })
+}
+
 export async function addRepresentation(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const application = await officeApplication(applicationId, actor, session)
@@ -577,7 +641,7 @@ export async function getApplication(applicationId, actor) {
   if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode) && !mediationAccess) {
     throw new HttpError(403, 'FORBIDDEN', 'This role cannot read the application.')
   }
-  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence, summaryFacts] = await Promise.all([
+  const [person, nextTask, representation, assistance, assistedConsent, urgentFact, submitted, restrictedEvidence, summaryFacts, cancellationRequest] = await Promise.all([
     Person.findById(application.applicantPersonId).select('displayName identityStatus').lean(),
     Task.findOne({ applicationId, status: 'OPEN' }).sort({ createdAt: 1 }).select('title ownerRole nextAction dueAt').lean(),
     Representation.findOne({ applicationId }).sort({ createdAt: -1 }).populate('representativePersonId', 'displayName').lean(),
@@ -587,6 +651,7 @@ export async function getApplication(applicationId, actor) {
     AuditEvent.findOne({ applicationId, action: 'APPLICATION_SUBMITTED' }).select('newState.aiSensitive newState.safetyNeedsReview').lean(),
     Document.countDocuments({ applicationId, sensitivity: 'RESTRICTED' }),
     CaseFact.find({ applicationId, field: { $in: ['complaint.type', 'complaint.legal_need', 'identity.nid_known'] } }).sort({ revision: -1 }).select('field value').lean(),
+    CancellationRequest.findOne({ applicationId, status: 'OPEN' }).select('reason createdAt').lean(),
   ])
   const summary = latestValues(summaryFacts)
   return {
@@ -611,6 +676,9 @@ export async function getApplication(applicationId, actor) {
       originalConfirmed: assistance.originalConfirmed, translationConfirmed: assistance.translationConfirmed,
       consentState: assistedConsent?.state ?? 'PENDING',
     } : null,
+    cancellationRequest: cancellationRequest ? {
+      id: cancellationRequest._id, reason: cancellationRequest.reason, createdAt: cancellationRequest.createdAt,
+    } : null,
   }
 }
 
@@ -629,6 +697,9 @@ export async function listWorkspace(role, actor) {
     const applications = await Application.find({ officeCode: assignment.officeCode, service: { $ne: 'ADVICE' } })
       .sort({ updatedAt: -1 }).select('applicationId caseId status reviewState priorityDecision channel applicantPersonId createdAt updatedAt').lean()
     const ids = applications.map(({ applicationId }) => applicationId)
+    const summaryFields = role === 'DLAO_OFFICER'
+      ? ['complaint.type', 'identity.nid_known', 'complaint.summary']
+      : ['complaint.type', 'identity.nid_known']
     const [people, tasks, urgentFacts, aiEvents, restricted, referrals, lawyerUpdates, summaryFacts, representations] = await Promise.all([
       Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName identityStatus').lean(),
       Task.find({ applicationId: { $in: ids }, status: 'OPEN' }).select('applicationId kind dueAt createdAt nextAction').lean(),
@@ -637,7 +708,8 @@ export async function listWorkspace(role, actor) {
       Document.find({ applicationId: { $in: ids }, sensitivity: 'RESTRICTED' }).select('applicationId').lean(),
       Referral.find({ applicationId: { $in: ids }, status: { $in: ['SENT', 'ACKNOWLEDGED'] } }).select('applicationId status dueAt receivingOfficeCode').lean(),
       LawyerUpdate.find({ applicationId: { $in: ids }, $or: [{ status: 'MISSED' }, { status: 'PENDING', dueAt: { $lte: new Date() } }] }).select('applicationId sequence status dueAt').lean(),
-      CaseFact.find({ applicationId: { $in: ids }, field: { $in: ['complaint.type', 'identity.nid_known'] } }).sort({ revision: -1 }).select('applicationId field value').lean(),
+      CaseFact.find({ applicationId: { $in: ids }, field: { $in: summaryFields } }).sort({ revision: -1 })
+        .select('applicationId field value sourceType applicantConfirmed aiInferred').lean(),
       Representation.find({ applicationId: { $in: ids } }).select('applicationId').lean(),
     ])
     const names = new Map(people.map((person) => [person._id.toString(), person.displayName]))
@@ -651,22 +723,35 @@ export async function listWorkspace(role, actor) {
     const waiting = new Map(referrals.map((referral) => [referral.applicationId, referral]))
     const missedUpdates = Map.groupBy(lawyerUpdates, (item) => item.applicationId)
     const summaries = new Map([...Map.groupBy(summaryFacts, (fact) => fact.applicationId)].map(([id, facts]) => [id, latestValues(facts)]))
+    const problemSummaries = new Map()
+    if (role === 'DLAO_OFFICER') {
+      for (const fact of summaryFacts) {
+        if (fact.field === 'complaint.summary' && !problemSummaries.has(fact.applicationId)) problemSummaries.set(fact.applicationId, fact)
+      }
+    }
     const represented = new Set(representations.map((item) => item.applicationId))
     const now = Date.now()
     // ponytail: full-office scan suits fictional demo data; add indexed pagination when real volume warrants it.
-    const records = applications.map((item) => ({
-      applicationId: item.applicationId, caseId: item.caseId ?? null, status: item.status,
-      reviewState: item.reviewState, priorityDecision: item.priorityDecision ?? null, channel: item.channel,
-      applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
-      createdAt: item.createdAt, updatedAt: item.updatedAt,
-      complaintType: summaries.get(item.applicationId)?.['complaint.type'] ?? null,
-      vulnerability: vulnerabilities({ urgent: Boolean(urgency.get(item.applicationId)), representative: represented.has(item.applicationId),
-        nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId) }),
-      flags: queueFlags(item, identities.get(item.applicantPersonId.toString()), tasksByApplication.get(item.applicationId) ?? [],
-        urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0 }),
-        waiting.get(item.applicationId), missedUpdates.get(item.applicationId) ?? [], now),
-    }))
-    const counts = Object.fromEntries(['NEW', 'INCOMPLETE', 'URGENT_RECOMMENDATION', 'PENDING', 'OVERDUE', 'REFERRAL_WAITING', 'LAWYER_UPDATE_OVERDUE'].map((flag) => [flag, records.filter((record) => record.flags.some((item) => item.code === flag)).length]))
+    const records = applications.map((item) => {
+      const problem = role === 'DLAO_OFFICER' ? problemSummaries.get(item.applicationId) : null
+      return {
+        applicationId: item.applicationId, caseId: item.caseId ?? null, status: item.status,
+        reviewState: item.reviewState, priorityDecision: item.priorityDecision ?? null, channel: item.channel,
+        applicantName: names.get(item.applicantPersonId.toString()) ?? 'Unavailable',
+        createdAt: item.createdAt, updatedAt: item.updatedAt,
+        complaintType: summaries.get(item.applicationId)?.['complaint.type'] ?? null,
+        ...(role === 'DLAO_OFFICER' ? { problemSummary: problem ? {
+          value: problem.value, sourceType: problem.sourceType,
+          applicantConfirmed: problem.applicantConfirmed, aiInferred: problem.aiInferred,
+        } : null } : {}),
+        vulnerability: vulnerabilities({ urgent: Boolean(urgency.get(item.applicationId)), representative: represented.has(item.applicationId),
+          nidKnown: summaries.get(item.applicationId)?.['identity.nid_known'], aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId) }),
+        flags: queueFlags(item, identities.get(item.applicantPersonId.toString()), tasksByApplication.get(item.applicationId) ?? [],
+          urgencyReasons({ urgentFact: urgency.get(item.applicationId), aiSensitive: aiSensitive.has(item.applicationId), safetyNeedsReview: safetyNeedsReview.has(item.applicationId), restrictedEvidence: restrictedCounts.get(item.applicationId)?.length ?? 0 }),
+          waiting.get(item.applicationId), missedUpdates.get(item.applicationId) ?? [], now),
+      }
+    })
+    const counts = Object.fromEntries(['NEW', 'INCOMPLETE', 'URGENT_RECOMMENDATION', 'PENDING', 'OVERDUE', 'REFERRAL_WAITING', 'LAWYER_UPDATE_OVERDUE', 'CASE_CANCELLATION_REQUESTED'].map((flag) => [flag, records.filter((record) => record.flags.some((item) => item.code === flag)).length]))
     return { role, officeCode: assignment.officeCode, records, report: { total: records.length, accepted: records.filter((item) => item.status === 'ACCEPTED').length, byChannel: Object.fromEntries([...new Set(records.map((item) => item.channel))].map((channel) => [channel, records.filter((item) => item.channel === channel).length])), counts }, unavailableQueues: [] }
   }
   if (role === 'HELPLINE_AGENT') {
@@ -739,6 +824,7 @@ function queueFlags(application, identityStatus, tasks, urgentReasons, referral,
   if (application.reviewState === 'NEEDS_INFORMATION' || identityStatus === 'INCOMPLETE') flags.push({ code: 'INCOMPLETE', reason: application.reviewState === 'NEEDS_INFORMATION' ? 'Officer requested more information.' : 'Identity is still recorded as incomplete.' })
   if (urgentReasons.length) flags.push({ code: 'URGENT_RECOMMENDATION', reason: `${urgentReasons.join(' ')} Human decision: ${application.priorityDecision ?? 'not recorded'}.` })
   if (tasks.length) flags.push({ code: 'PENDING', reason: `${tasks.length} open task${tasks.length === 1 ? '' : 's'} need a human next action.` })
+  if (tasks.some((task) => task.kind === 'CASE_CANCELLATION_REVIEW')) flags.push({ code: 'CASE_CANCELLATION_REQUESTED', reason: 'The applicant requested cancellation of this case; approve or decline.' })
   const overdue = tasks.find((task) => task.dueAt && new Date(task.dueAt).getTime() < now)
   // ponytail: demo ageing threshold only; office-approved service targets must replace it before real operations.
   const escalated = tasks.some((task) => task.kind === 'ROUTING_DECISION')
@@ -1348,4 +1434,3 @@ export async function trackApplicationStatus(identifier, lookupCode) {
     updates,
   }
 }
-

@@ -1,4 +1,4 @@
-import { getCitizenCases, getCitizenProfile, requestCitizenLawyerChange, submitDigitalApplication, updateCitizenProfile } from '../services/citizenService.js'
+import { cancelOrRequestCancellation, getCitizenCases, getCitizenProfile, requestCitizenLawyerChange, submitDigitalApplication, updateCitizenProfile } from '../services/citizenService.js'
 
 export async function listCases(request, response) {
   const cases = await getCitizenCases(request.auth)
@@ -12,6 +12,15 @@ export async function createApplication(request, response) {
 
 export async function submitLawyerChange(request, response) {
   const result = await requestCitizenLawyerChange(
+    request.params.applicationId,
+    request.body,
+    request.auth
+  )
+  response.status(201).json(result)
+}
+
+export async function cancelCase(request, response) {
+  const result = await cancelOrRequestCancellation(
     request.params.applicationId,
     request.body,
     request.auth

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { after, before, test } from 'node:test'
 import app from './app.js'
-import { transcribeAnswer } from './services/ai/groq.js'
+import { transcribeAnswer, transcribeClip } from './services/ai/groq.js'
 import { promptText, TRANSCRIPT_HINTS } from './services/spokenStatus.js'
 
 // Spoken status routes without MongoDB or Groq: a fake speech service stands in for tts-service/app.py.
@@ -68,10 +68,24 @@ test('when speech fails or is switched off, the words still come back', async ()
   delete process.env.VOICE_TTS
 })
 
+test('an English prompt comes back as English words for the browser to speak, never sent to BanglaTTS', async () => {
+  const before = spoken.length
+  for (const [key, digits] of [['askPin'], ['confirmNumber', '0039']]) {
+    const response = await post(`/voice/prompts?lang=en`, digits ? { key, digits } : { key })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { text: promptText(key, digits, 'en'), audio: null })
+  }
+  assert.equal((await (await post('/voice/prompts?lang=bn', { key: 'askPin' })).json()).text, promptText('askPin'))
+  assert.equal(spoken.length, before)
+  for (const query of ['lang=fr', 'lang=auto', 'lang=en&lang=bn', 'lang=en&x=1']) {
+    assert.equal((await post(`/voice/prompts?${query}`, { key: 'askPin' })).status, 400, query)
+  }
+})
+
 test('a transcript turn accepts audio only, primed by a named hint at most', async () => {
   assert.equal((await post('/voice/transcripts', 'hello', 'text/plain')).status, 400)
   assert.equal((await post('/voice/transcripts', Buffer.alloc(100), 'audio/webm')).status, 400)
-  for (const query of ['fields=confirm', 'hint=anything', 'hint=yesNo&hint=number', 'hint=yesNo&prompt=x']) {
+  for (const query of ['fields=confirm', 'hint=anything', 'hint=yesNo&hint=number', 'hint=yesNo&prompt=x', 'lang=fr', 'lang=en&lang=bn', 'hint=yesNo&lang=auto']) {
     const response = await fetch(`${base}/voice/transcripts?${query}`, { method: 'POST', headers: { 'content-type': 'audio/webm' }, body: Buffer.alloc(600) })
     assert.equal(response.status, 400, query)
   }
@@ -87,7 +101,7 @@ test('a named hint reaches Whisper as its fixed prompt text', async (t) => {
   process.env.GROQ_API_KEY = 'test-key'
   delete process.env.VOICE_AI
   try {
-    assert.equal(await transcribeAnswer(Buffer.alloc(600), 'audio/webm', TRANSCRIPT_HINTS.yesNo), 'হ্যাঁ।')
+    assert.equal(await transcribeAnswer(Buffer.alloc(600), 'audio/webm', TRANSCRIPT_HINTS.yesNo.bn), 'হ্যাঁ।')
     await transcribeAnswer(Buffer.alloc(600), 'audio/webm')
   } finally {
     for (const [name, value] of [['GROQ_API_KEY', saved.key], ['VOICE_AI', saved.voice]]) {
@@ -96,7 +110,37 @@ test('a named hint reaches Whisper as its fixed prompt text', async (t) => {
     }
   }
   assert.equal(sent[0].get('prompt'), 'হ্যাঁ। না। জি। ঠিক আছে।')
+  assert.equal(sent[0].get('language'), 'bn')
   assert.equal(sent[1].get('prompt'), null)
+})
+
+test('an English turn is heard as English, and a first answer in any language reports which one it was', async (t) => {
+  const sent = []
+  const heard = [undefined, 'English', 'Bengali', 'Assamese', 'Hindi']
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    sent.push(init.body)
+    return new Response(JSON.stringify({ text: ' I want to know my case status. ', language: heard.shift() }), { headers: { 'content-type': 'application/json' } })
+  })
+  const saved = { key: process.env.GROQ_API_KEY, voice: process.env.VOICE_AI }
+  process.env.GROQ_API_KEY = 'test-key'
+  delete process.env.VOICE_AI
+  const results = []
+  try {
+    results.push(await transcribeClip(Buffer.alloc(600), 'audio/webm', { language: 'en', prompt: TRANSCRIPT_HINTS.number.en }))
+    for (let turn = 0; turn < 4; turn += 1) results.push(await transcribeClip(Buffer.alloc(600), 'audio/webm', { language: null }))
+  } finally {
+    for (const [name, value] of [['GROQ_API_KEY', saved.key], ['VOICE_AI', saved.voice]]) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+  assert.equal(sent[0].get('language'), 'en')
+  assert.equal(sent[0].get('prompt'), TRANSCRIPT_HINTS.number.en)
+  assert.deepEqual(results[0], { text: 'I want to know my case status.' })
+  assert.equal(sent[1].get('language'), null)
+  assert.equal(sent[1].get('response_format'), 'verbose_json')
+  // Bengali and Assamese (one script) are Bangla; anything else is left to the page's language.
+  assert.deepEqual(results.slice(1).map(({ language }) => language), ['en', 'bn', 'bn', null])
 })
 
 test('the opening\'s own words are read for a status request only, and fail safe when voice AI is off', async (t) => {

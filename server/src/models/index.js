@@ -45,7 +45,7 @@ const applicationSchema = new Schema({
   // A 16699 advice request waits for a helpline callback, outside the DLAO queue, until it becomes a complaint.
   service: { type: String, enum: ['COMPLAINT', 'ADVICE'], default: 'COMPLAINT' },
   adviceOutcome: { type: String, enum: ['INFORMATION_PROVIDED', 'FORMAL_ASSISTANCE'] },
-  status: { type: String, enum: ['SUBMITTED', 'ACCEPTED'], default: 'SUBMITTED' },
+  status: { type: String, enum: ['SUBMITTED', 'ACCEPTED', 'CANCELLED'], default: 'SUBMITTED' },
   reviewState: { type: String, enum: ['PENDING_REVIEW', 'NEEDS_INFORMATION', 'READY_FOR_DECISION'], default: 'PENDING_REVIEW' },
   priorityDecision: { type: String, enum: ['URGENT', 'ROUTINE'] },
   lookupCodeHash: { type: String, select: false },
@@ -74,7 +74,7 @@ const caseSchema = new Schema({
   caseId: { type: String, required: true, unique: true },
   applicationId: { type: String, required: true, unique: true },
   officeCode: { type: String, required: true },
-  status: { type: String, enum: ['OPEN'], default: 'OPEN' },
+  status: { type: String, enum: ['OPEN', 'CANCELLED'], default: 'OPEN' },
   acceptedByUserId: ref('User'),
   nextHearingAt: Date,
   nextAction: String,
@@ -188,7 +188,7 @@ export const SafeContactProfile = model('SafeContactProfile', safeContactSchema)
 export const Task = model('Task', new Schema({
   applicationId: recordId,
   caseId: String,
-  kind: { type: String, required: true, enum: ['INTAKE_REVIEW', 'DECISION', 'FOLLOW_UP', 'MANUAL', 'REFERRAL', 'ROUTING_DECISION', 'LAWYER_UPDATE', 'LAWYER_PATTERN_REVIEW', 'LAWYER_CHANGE_REVIEW', 'ADVICE_CALLBACK'] },
+  kind: { type: String, required: true, enum: ['INTAKE_REVIEW', 'DECISION', 'FOLLOW_UP', 'MANUAL', 'REFERRAL', 'ROUTING_DECISION', 'LAWYER_UPDATE', 'LAWYER_PATTERN_REVIEW', 'LAWYER_CHANGE_REVIEW', 'ADVICE_CALLBACK', 'CASE_CANCELLATION_REVIEW'] },
   title: { type: String, required: true },
   status: { type: String, enum: ['OPEN', 'DONE'], default: 'OPEN' },
   ownerRole: { type: String, required: true, enum: roles },
@@ -271,6 +271,7 @@ const documentVersionSchema = new Schema({
   qualityState: { type: String, enum: ['PENDING_REVIEW', 'READABLE', 'UNREADABLE'], default: 'PENDING_REVIEW' },
   note: String,
   textContent: { type: String, maxlength: 50000, select: false },
+  fileData: { type: String, select: false },
   contentHash: String,
   recordedByUserId: ref('User'),
 }, { timestamps: { createdAt: true, updatedAt: false } })
@@ -554,6 +555,20 @@ const lawyerChangeRequestSchema = new Schema({
 }, { timestamps: true })
 lawyerChangeRequestSchema.index({ applicationId: 1, status: 1 })
 export const LawyerChangeRequest = model('LawyerChangeRequest', lawyerChangeRequestSchema)
+
+const cancellationRequestSchema = new Schema({
+  applicationId: recordId,
+  caseId: { type: String, required: true },
+  channel: { type: String, required: true, enum: ['PORTAL'] },
+  reason: { type: String, required: true },
+  status: { type: String, enum: ['OPEN', 'APPROVED', 'DECLINED'], default: 'OPEN' },
+  recordedByUserId: ref('User'),
+  reviewedByUserId: ref('User', false),
+  reviewedAt: Date,
+  reviewReason: String,
+}, { timestamps: true })
+cancellationRequestSchema.index({ applicationId: 1, status: 1 })
+export const CancellationRequest = model('CancellationRequest', cancellationRequestSchema)
 
 const panelLawyerHoldSchema = new Schema({
   lawyerUserId: { ...ref('User'), unique: true },

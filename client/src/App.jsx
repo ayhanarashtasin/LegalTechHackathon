@@ -209,7 +209,7 @@ export default function App() {
             <button type="button" lang="bn" aria-pressed={lang === 'bn'} onClick={() => setLang('bn')}>বাংলা</button>
             <button type="button" lang="en" aria-pressed={lang === 'en'} onClick={() => setLang('en')}>English</button>
           </div>
-          <button type="button" className="quiet-button" onClick={toggleLight}>{lightMode ? bi('Normal mode', 'ডিফল্ট থিম') : bi('Light mode', 'লাইট মোড (কম ডেটা)')}</button>
+          <button type="button" className="quiet-button" onClick={toggleLight}>{lightMode ? bi('Normal mode', 'ডিফল্ট থিম') : bi('Light mode', 'লাইট মোড')}</button>
           {installPrompt && <button type="button" className="quiet-button" onClick={install}>{bi('Install app', 'অ্যাপ ইনস্টল করুন')}</button>}
         </div>
         {session ? (
@@ -289,14 +289,14 @@ export default function App() {
               className="header-auth-btn header-signin-btn"
               onClick={() => setAuthModal({ isOpen: true, mode: 'signin', tab: 'citizen' })}
             >
-              {bi('Sign in', 'প্রবেশ / সাইন ইন')}
+              {bi('Sign in', 'সাইন ইন')}
             </button>
             <button
               type="button"
               className="header-auth-btn header-signup-btn"
               onClick={() => setAuthModal({ isOpen: true, mode: 'signup', tab: 'citizen' })}
             >
-              {bi('Sign up', 'নতুন নিবন্ধন')}
+              {bi('Sign up', 'নিবন্ধন')}
             </button>
           </div>
         )}

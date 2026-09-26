@@ -1,10 +1,12 @@
+import { bi } from './Bi.jsx'
+
 export default function PhaseTracker({ application = null, caseRecord = null, lawyer = null, mediation = null, pathway = null }) {
   const hasApplication = Boolean(application && application.applicationId)
   const status = application?.status || null
   const reviewState = application?.reviewState || null
   const channel = application?.channel || application?.intakeChannel || null
   const isAccepted = status === 'ACCEPTED'
-  const isTerminated = status === 'TERMINATED' || status === 'REJECTED' || caseRecord?.status === 'CLOSED'
+  const isTerminated = status === 'TERMINATED' || status === 'REJECTED' || status === 'CANCELLED' || caseRecord?.status === 'CLOSED'
   const hasLawyer = Boolean(lawyer?.lawyerName || lawyer?.assignmentStatus === 'ACCEPTED' || lawyer?.active)
   const hasMediation = Boolean(mediation?.stage)
   const isSettled = mediation?.outcome === 'AGREEMENT_REACHED' || caseRecord?.status === 'SETTLED' || caseRecord?.outcome
@@ -28,62 +30,99 @@ export default function PhaseTracker({ application = null, caseRecord = null, la
   }
 
   const channelLabel = !hasApplication
-    ? 'Awaiting Submission'
+    ? bi('Awaiting Submission', 'আবেদনের অপেক্ষায়')
     : channel === 'VOICE_SIM'
-      ? '16699 IVR Voice'
+      ? bi('16699 IVR Voice', '১৬৬৯৯ ভয়েস হেল্পলাইন')
       : channel === 'UDC'
-        ? 'UDC Center'
-        : 'Web Portal'
+        ? bi('UDC Center', 'ইউনিয়ন ডিজিটাল সেন্টার')
+        : bi('Web Portal', 'অনলাইন ওয়েব পোর্টাল')
 
   const steps = [
     {
       num: 1,
-      title: '1. Access & Application',
+      title: bi('1. Access & Application', '১. আবেদন ও প্রবেশাধিকার'),
       subtitle: channelLabel,
-      detail: hasApplication ? 'Submission received & Application ID generated' : 'Web, mobile app, 16699 IVR, or UDC',
+      detail: hasApplication
+        ? bi('Submission received & Application ID generated', 'আবেদন গৃহীত হয়েছে এবং আবেদন নম্বর বরাদ্দ করা হয়েছে')
+        : bi('Web, mobile app, 16699 IVR, or UDC', 'ওয়েব, মোবাইল, ১৬৬৯৯ বা ইউডিসি থেকে আবেদন'),
     },
     {
       num: 2,
-      title: '2. Verification & Eligibility',
-      subtitle: !hasApplication ? 'Pending' : reviewState === 'READY_FOR_DECISION' ? 'Eligibility Verified' : 'Under Officer Review',
-      detail: !hasApplication ? 'Awaiting submission' : reviewState === 'READY_FOR_DECISION' ? 'Identity & DBLA criteria checked' : 'Verifying identity, documents & eligibility',
+      title: bi('2. Verification & Eligibility', '২. প্রাথমিক যাচাই ও যোগ্যতা'),
+      subtitle: !hasApplication
+        ? bi('Pending', 'অপেক্ষমাণ')
+        : reviewState === 'READY_FOR_DECISION'
+          ? bi('Eligibility Verified', 'যোগ্যতা যাচাই সম্পন্ন')
+          : bi('Under Officer Review', 'কর্মকর্তা পর্যায়ে যাচাইাধীন'),
+      detail: !hasApplication
+        ? bi('Awaiting submission', 'আবেদনের অপেক্ষায়')
+        : reviewState === 'READY_FOR_DECISION'
+          ? bi('Identity & DBLA criteria checked', 'পরিচয় ও আইনগত মাপকাঠি যাচাইকৃত')
+          : bi('Verifying identity, documents & eligibility', 'পরিচয়, নথিপত্র ও যোগ্যতা যাচাই'),
     },
     {
       num: 3,
-      title: '3. Jurisdiction & Routing',
-      subtitle: !hasApplication ? 'Pending' : isAccepted ? 'Jurisdiction Accepted' : status === 'REJECTED' ? 'Not Approved' : 'Assessment',
-      detail: isAccepted ? `Case ID: ${application.caseId || 'Assigned'}` : 'Appropriate office jurisdiction verification',
+      title: bi('3. Jurisdiction & Routing', '৩. অধিক্ষেত্র ও নথি গ্রহণ'),
+      subtitle: !hasApplication
+        ? bi('Pending', 'অপেক্ষমাণ')
+        : isAccepted
+          ? bi('Jurisdiction Accepted', 'অধিক্ষেত্র নিশ্চিত ও গৃহীত')
+          : status === 'REJECTED'
+            ? bi('Not Approved', 'নামঞ্জুর')
+            : bi('Assessment', 'অধিক্ষেত্র মূল্যায়ন'),
+      detail: isAccepted
+        ? bi(`Case ID: ${application.caseId || 'Assigned'}`, `মামলা নম্বর: ${application.caseId || 'বরাদ্দকৃত'}`)
+        : bi('Appropriate office jurisdiction verification', 'উপযুক্ত জেলা কার্যালয় নির্ধারণ'),
     },
     {
       num: 4,
-      title: '4. Service Pathways',
-      subtitle: hasMediation ? 'Mediation / ADR' : pathway === 'ADVICE' ? 'Legal Advice' : isAccepted ? 'Pathway Routing' : 'Pending',
-      detail: 'Advice, Mediation (ADR/ODR), or Direct Legal Aid',
+      title: bi('4. Service Pathways', '৪. সেবার মাধ্যম নির্ধারণ'),
+      subtitle: hasMediation
+        ? bi('Mediation / ADR', 'আপস-মীমাংসা / মধ্যস্থতা')
+        : pathway === 'ADVICE'
+          ? bi('Legal Advice', 'আইনি পরামর্শ')
+          : isAccepted
+            ? bi('Pathway Routing', 'সেবার পথ নির্ধারণ')
+            : bi('Pending', 'অপেক্ষমাণ'),
+      detail: bi('Advice, Mediation (ADR/ODR), or Direct Legal Aid', 'আইনি পরামর্শ, মধ্যস্থতা (এডিআর/ওডিআর), বা মামলা পরিচালনা'),
     },
     {
       num: 5,
-      title: '5. Panel Lawyer Process',
-      subtitle: hasLawyer ? (lawyer.lawyerName || 'Lawyer Appointed') : 'If Required',
-      detail: hasLawyer ? `Assigned counsel · Hearings & court representation` : 'Financial check & panel lawyer allocation',
+      title: bi('5. Panel Lawyer Process', '৫. প্যানেল আইনজীবী প্রক্রিয়া'),
+      subtitle: hasLawyer
+        ? (lawyer.lawyerName || bi('Lawyer Appointed', 'আইনজীবী নিযুক্ত'))
+        : bi('If Required', 'প্রয়োজনাধীন'),
+      detail: hasLawyer
+        ? bi('Assigned counsel · Hearings & court representation', 'নিয়োজিত আইনজীবী · শুনানি ও আদালতের কার্যক্রম')
+        : bi('Financial check & panel lawyer allocation', 'আর্থিক যাচাই ও প্যানেল আইনজীবী নিয়োগ'),
     },
     {
       num: 6,
-      title: '6. Case Outcome & Closure',
-      subtitle: isTerminated ? 'Case Closed' : isSettled ? 'Settled / Disposed' : 'Final Disposal',
-      detail: isTerminated ? 'Legal outcome recorded & fee disbursed' : 'Court judgment, settlement & completion audit',
+      title: bi('6. Case Outcome & Closure', '৬. মামলার নিষ্পত্তি ও সমাপ্তি'),
+      subtitle: isTerminated
+        ? bi('Case Closed', 'নথি সমাপ্ত')
+        : isSettled
+          ? bi('Settled / Disposed', 'আপসে নিষ্পত্তি')
+          : bi('Final Disposal', 'চূড়ান্ত নিষ্পত্তি'),
+      detail: isTerminated
+        ? bi('Legal outcome recorded & fee disbursed', 'ফলাফল নথিভুক্ত ও ফি পরিশোধ সম্পন্ন')
+        : bi('Court judgment, settlement & completion audit', 'রায়, আপসনামা বা সমাপ্তি নিরীক্ষা'),
     },
   ]
 
   const summaryText = currentStep === 0
-    ? 'Phase 0 of 6 \u2022 Awaiting initial submission'
-    : `Phase ${Math.min(currentStep, 6)} of 6 \u2022 ${steps[currentStep - 1]?.title}`
+    ? bi('Phase 0 of 6 • Awaiting initial submission', 'পর্যায় ০ / ৬ • প্রাথমিক আবেদনের অপেক্ষায়')
+    : bi(
+        `Phase ${Math.min(currentStep, 6)} of 6 • ${steps[currentStep - 1]?.title}`,
+        `ধাপ ${Math.min(currentStep, 6)} / ৬ • ${steps[currentStep - 1]?.title}`
+      )
 
   return (
-    <div className="phase-tracker-card" aria-label="DLAS Comprehensive End-to-End Workflow">
+    <div className="phase-tracker-card" aria-label={bi('DLAS Comprehensive End-to-End Workflow', 'ডিএলএএস সমন্বিত আইনি সহায়তা প্রক্রিয়া')}>
       <div className="phase-tracker-header">
-        <div>
-          <span className="phase-tracker-badge">DLAS Comprehensive End-to-End Workflow</span>
-          <h3 className="phase-tracker-title">From Application to Access to Justice</h3>
+        <div className="phase-tracker-header-info">
+          <span className="phase-tracker-badge">{bi('DLAS Comprehensive End-to-End Workflow', 'ডিএলএএস সমন্বিত আইনি সহায়তা প্রক্রিয়া')}</span>
+          <h3 className="phase-tracker-title">{bi('From Application to Access to Justice', 'আবেদন দাখিল থেকে ন্যায়বিচার প্রাপ্তি পর্যন্ত')}</h3>
         </div>
         <div className={`phase-tracker-summary ${currentStep === 0 ? 'step-zero-summary' : ''}`}>
           {summaryText}

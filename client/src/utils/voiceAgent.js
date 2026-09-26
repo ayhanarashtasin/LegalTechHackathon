@@ -45,10 +45,12 @@ const digitOfWord = new Map(DIGIT_WORDS.flatMap((words, digit) => words.map((wor
 // like "ছই" (six), and "দয়া" (please) like "দুয়" (two).
 const notDigits = new Set(['নেই', 'চাই', 'দয়া'].map((word) => word.normalize('NFD')))
 // English digit words as Whisper writes them in Bangla script ("ফোর এইট টু"), since numbers are often read out in
-// English. Matched by exact spelling, not by outline: "থ্রি" shares its outline with "তার" (his), "ফোর" with "পরে".
-const englishDigits = new Map([['ওয়ান', 1], ['টু', 2], ['থ্রি', 3], ['থ্রী', 3], ['ফোর', 4], ['ফাইভ', 5],
-  ['সিক্স', 6], ['সেভেন', 7], ['এইট', 8], ['নাইন', 9]].map(([word, digit]) => [word.normalize('NFD'), String(digit)]))
-const repeats = new Map([['ডাবল', 2], ['double', 2], ['ট্রিপল', 3], ['triple', 3]].map(([word, times]) => [outline(word), times]))
+// English. Matched by exact spelling, not by outline: "থ্রি" shares its outline with "তার" (his), "ফোর" with "পরে",
+// and "সিরো" with "সরি" (sorry). সিরো, সেমেন, তু, and দোবল are how Whisper wrote English "zero", "seven", "two", and
+// "double" in a Bangla call (Groq, 2026-09-26).
+const englishDigits = new Map([['সিরো', 0], ['ওয়ান', 1], ['টু', 2], ['তু', 2], ['থ্রি', 3], ['থ্রী', 3], ['ফোর', 4], ['ফাইভ', 5],
+  ['সিক্স', 6], ['সেভেন', 7], ['সেমেন', 7], ['এইট', 8], ['নাইন', 9]].map(([word, digit]) => [word.normalize('NFD'), String(digit)]))
+const repeats = new Map([['ডাবল', 2], ['দোবল', 2], ['double', 2], ['ট্রিপল', 3], ['triple', 3]].map(([word, times]) => [outline(word), times]))
 
 // "আমার নম্বর এক, দুই, শুন্ন" → "120", "ডাবল জিরো" → "00". Other words ("আমার নম্বর হলো") are skipped rather than
 // failing the number; the caller then hears the digits read back and confirms them, so nothing is taken unheard.
@@ -67,9 +69,12 @@ export function digitsFromWords(text) {
 
 // A yes or no said aloud, matched here like a key press so it never waits on the model. A reply with both ("ঠিক
 // হয়নি", "না না, ঠিক আছে") or neither is left to the model, which sees the whole sentence.
-// A lone "না" can come back from Whisper as "ন".
-const YES_WORDS = new Set(['হ্যাঁ', 'হ্যা', 'হাঁ', 'হা', 'হুম', 'হুঁ', 'জি', 'জ্বি', 'জী', 'ঠিক', 'সঠিক', 'আছে', 'হয়েছে', 'জমা', 'ওকে', 'yes', 'ok', 'okay'].map((word) => word.normalize('NFD')))
-const NO_WORDS = new Set(['না', 'ন', 'নাহ', 'নাই', 'নেই', 'ভুল', 'হয়নি', 'নয়', 'no'].map((word) => word.normalize('NFD')))
+// A lone "না" can come back from Whisper as "ন", and English "yes" in a Bangla call as "যেস" or "যেশ". In English,
+// "not" counts as a no, so "not okay" is asked again rather than taken as a yes; "right", "correct", and "sure" are
+// left out, since "not right" and "not sure" would be read the same way.
+const YES_WORDS = new Set(['হ্যাঁ', 'হ্যা', 'হাঁ', 'হা', 'হুম', 'হুঁ', 'জি', 'জ্বি', 'জী', 'ঠিক', 'সঠিক', 'আছে', 'হয়েছে', 'জমা', 'ওকে', 'যেস', 'যেশ', 'ইয়েস',
+  'yes', 'yeah', 'yep', 'yup', 'ok', 'okay'].map((word) => word.normalize('NFD')))
+const NO_WORDS = new Set(['না', 'ন', 'নাহ', 'নাই', 'নেই', 'ভুল', 'হয়নি', 'নয়', 'নো', 'no', 'nope', 'not', 'wrong', 'incorrect'].map((word) => word.normalize('NFD')))
 // A lone "হ্যাঁ" can come back with one stray consonant ("হ্যাদ", "হ্যাক্"); "হ্যালো" and longer words are not a yes.
 const CLIPPED_YES = /^হ্যাঁ?[ক-হ]্?$/
 export function spokenYesNo(text) {
@@ -82,7 +87,7 @@ export function spokenYesNo(text) {
 // "আমার কেসের অবস্থা জানতে চাই": asking how a case stands, matched by its words like a key press, never by the model.
 // "অবস্থা" is compared by consonant outline, since Whisper writes it অবস্তা, অভোস্থা, or ওবোস্থা. An unmatched reply
 // is asked about again.
-const STATUS_WORDS = /খবর|আপডেট|স্ট্যাটাস|অগ্রগতি|শুনানি|কতদূর|কদ্দূর|status|update|progress|obosth/i
+const STATUS_WORDS = /খবর|আপডেট|স্ট্যাটাস|অগ্রগতি|শুনানি|কতদূর|কদ্দূর|status|update|progress|hearing|news|obosth/i
 const STATUS_STEMS = ['অবস্থা', 'ওবস্থা'].map((word) => outline(word))
 export function spokenStatusRequest(text) {
   const tokens = (text ?? '').split(/[\s,।.;:!?'"()-]+/).filter(Boolean)
