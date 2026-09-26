@@ -597,7 +597,7 @@ export default function RecordPage({ session }) {
               <Bi en="1. Review, then 2. accept. Review is not proof of identity." bn="১. প্রথমে তথ্য যাচাই, তারপর ২. আবেদন গ্রহণ। পর্যালোচনা পরিচয়ের চূড়ান্ত প্রমাণ নয়।" />
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1.5rem' }}>
               {/* Column 1: 1. Review */}
               <form onSubmit={submitReview} className="form-stack">
                 <h3><Bi en="1. Review" bn="১. প্রাথমিক যাচাই" /></h3>
@@ -680,7 +680,7 @@ export default function RecordPage({ session }) {
               </div>
 
               {/* 3 Pathway Cards (Single choice) */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '0.75rem', marginBottom: '1.5rem' }}>
                 <div
                   role="button"
                   tabIndex={0}

@@ -31,7 +31,7 @@ function PartiesEditForm({ applicationId, token, petitioner, respondent, onSaved
   return <form onSubmit={save} className="form-stack" aria-labelledby="parties-edit-title" style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #EAEAEA', borderRadius: '6px', backgroundColor: '#FFFFFF' }}>
     <h3 id="parties-edit-title" style={{ margin: 0, fontSize: '1rem' }}><Bi en="Edit parties" bn="পক্ষের তথ্য সংশোধন" /></h3>
     {error && <p role="alert" className="error">{error}</p>}
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
+    <div className="parties-grid">
       {[['petitioner', 'Petitioner / Complainant (বাদী)', 'বাদী (আবেদনকারী)'], ['respondent', 'Respondent / Opposing Party (বিবাদী)', 'বিবাদী (প্রতিপক্ষ)']].map(([party, en, bn]) => <fieldset key={party} className="form-stack">
         <legend><Bi en={en} bn={bn} /></legend>
         {partyFields[party].map(([key, label, labelBn, max]) => <div key={key} className="form-stack">
@@ -197,7 +197,7 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
       {error && <p role="alert" className="error" style={{ marginBottom: '1rem' }}>{error}</p>}
 
       {/* Grid of Petitioner & Respondent */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.25rem' }}>
+      <div className="parties-grid">
         {/* Complainant / Petitioner */}
         <div style={{ border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FAFAFA' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
@@ -285,7 +285,7 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
             />
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div className="form-grid-2col">
             <div style={{ padding: '0.75rem', border: '1px solid #EAEAEA', borderRadius: '4px', backgroundColor: '#FFF' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
                 <input
@@ -323,7 +323,7 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1rem', marginTop: '0.75rem' }}>
+          <div className="form-grid-split" style={{ marginTop: '0.75rem' }}>
             <div>
               <label htmlFor="verify-status"><Bi en="Verification Status" bn="যাচাইকরণের সার্বিক অবস্থা" /></label>
               <select id="verify-status" value={verifyStatus} onChange={(e) => setVerifyStatus(e.target.value)}>
@@ -367,7 +367,7 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
             />
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.85rem' }}>
+          <div className="form-grid-3col">
             <div>
               <label htmlFor="notice-recipient"><Bi en="Recipient Party" bn="প্রাপক পক্ষ" /></label>
               <select id="notice-recipient" value={noticeRecipient} onChange={(e) => setNoticeRecipient(e.target.value)}>

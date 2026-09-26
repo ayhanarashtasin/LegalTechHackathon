@@ -263,7 +263,7 @@ function LawyerCase({ session, caseId }) {
           </div>
         </div>
 
-        <ol className="phase-steps-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+        <ol className="phase-steps-grid lawyer-phase-steps">
           {lawyerSteps.map((step) => {
             const isCompleted = accepted && (step.num < lawyerStage || (step.num === 5 && outcomeRecord))
             const isCurrent = (pending && step.num === 1) || (accepted && step.num === lawyerStage)
@@ -481,7 +481,7 @@ function LawyerCase({ session, caseId }) {
               <div style={{ background: '#fdfbf7', border: '1px solid #e8e2d2', borderRadius: '6px', padding: '1rem', margin: '0.75rem 0' }}>
                 <h3 style={{ margin: '0 0 0.5rem 0' }}><Bi en="Court & Filing Reference" bn="আদালত ও মামলার বিবরণী" /></h3>
                 <form onSubmit={saveCourtFiling} className="form-stack inline-form">
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '0.75rem' }}>
                     <div>
                       <label htmlFor="court-name"><Bi en="Court / Tribunal Name" bn="আদালত / ট্রাইব্যুনালের নাম" /></label>
                       <input id="court-name" value={courtName} onChange={(e) => setCourtName(e.target.value)} required />

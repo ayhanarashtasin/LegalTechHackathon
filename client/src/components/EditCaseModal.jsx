@@ -134,7 +134,7 @@ export function EditCaseModal({ record, token, onClose, onUpdated }) {
               <Bi en="Petitioner / Complainant (বাদী)" bn="বাদীর বিবরণ (বাদী)" />
             </legend>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+            <div className="form-grid-2col">
               <div>
                 <label htmlFor="petitioner-name"><Bi en="Petitioner Full Name" bn="বাদীর পূর্ণ নাম" /></label>
                 <input
@@ -157,7 +157,7 @@ export function EditCaseModal({ record, token, onClose, onUpdated }) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.85rem', marginTop: '0.85rem' }}>
+            <div className="form-grid-split" style={{ marginTop: '0.85rem' }}>
               <div>
                 <label htmlFor="petitioner-address"><Bi en="Address / Village / Thana" bn="ঠিকানা / গ্রাম / থানা" /></label>
                 <input
@@ -183,7 +183,7 @@ export function EditCaseModal({ record, token, onClose, onUpdated }) {
               <Bi en="Respondent / Opposing Party (বিবাদী)" bn="বিবাদীর বিবরণ (বিবাদী)" />
             </legend>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem' }}>
+            <div className="form-grid-2col">
               <div>
                 <label htmlFor="respondent-name"><Bi en="Respondent Full Name" bn="বিবাদীর পূর্ণ নাম" /></label>
                 <input
@@ -204,7 +204,7 @@ export function EditCaseModal({ record, token, onClose, onUpdated }) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.85rem', marginTop: '0.85rem' }}>
+            <div className="form-grid-split" style={{ marginTop: '0.85rem' }}>
               <div>
                 <label htmlFor="respondent-address"><Bi en="Address / Location" bn="বিবাদীর ঠিকানা" /></label>
                 <input
@@ -241,7 +241,7 @@ export function EditCaseModal({ record, token, onClose, onUpdated }) {
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.85rem', marginTop: '0.85rem' }}>
+            <div className="form-grid-2col" style={{ marginTop: '0.85rem' }}>
               <div>
                 <label htmlFor="incident-when"><Bi en="When occurred" bn="কখন সংঘটিত হয়েছে" /></label>
                 <input id="incident-when" value={incidentWhen} onChange={(e) => setIncidentWhen(e.target.value)} />

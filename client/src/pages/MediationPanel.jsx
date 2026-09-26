@@ -505,7 +505,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
           <Bi en="Select how you wish to conduct this mediation case:" bn="এই মামলায় মধ্যস্থতা পরিচালনার পদ্ধতি নির্বাচন করুন:" />
         </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1rem' }}>
           {/* Option 1: Mediation by DLAO */}
           <div style={{ border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FBFBFA', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div>
@@ -632,7 +632,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
         {!isUnsafe && !safetyConfirmed && <p role="status" className="muted"><Bi en="Scheduling and the later steps open after a person confirms safety and consent." bn="নিরাপত্তা ও সম্মতি নিশ্চিত হলে সময়সূচি ও পরের ধাপগুলো খুলবে।" /></p>}
         {canRecordSafety && (
           <div className="form-stack">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.6rem', padding: '0.75rem', backgroundColor: '#F9F9F8', borderRadius: '4px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '0.6rem', padding: '0.75rem', backgroundColor: '#F9F9F8', borderRadius: '4px' }}>
               <label className="checkbox-label" htmlFor="chk-is-safe" style={{ margin: 0 }}>
                 <input id="chk-is-safe" type="checkbox" checked={isSafe} onChange={(e) => setIsSafe(e.target.checked)} />
                 <Bi en="1. Is mediation safe for the applicant?" bn="১. আবেদনকারীর জন্য মধ্যস্থতা কি নিরাপদ?" />
@@ -722,7 +722,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
             <Bi en="Select appointment parameters and record safe-contact notice dispatch." bn="বৈঠকের বিস্তারিত তথ্য নির্ধারণ করুন এবং নিরাপদ যোগাযোগে নোটিশ প্রেরণের তথ্য লিপিবদ্ধ করুন।" />
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '0.75rem' }}>
             <div>
               <label htmlFor="mediation-time"><Bi en="Date and Time" bn="তারিখ ও সময়" /></label>
               <input id="mediation-time" type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} required />
@@ -793,7 +793,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem', marginTop: '0.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '0.75rem', marginTop: '0.5rem' }}>
             {['PARTY_A', 'PARTY_B'].map((party) => (
               <fieldset key={party} style={{ border: '1px solid #EAEAEA', borderRadius: '4px', padding: '0.75rem' }}>
                 <legend style={{ fontWeight: 600, fontSize: '0.85rem' }}><Term code={party} /> · <Bi en="Notice via Safe Contact" bn="নিরাপদ মাধ্যমে নোটিশ" /></legend>
@@ -851,7 +851,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
               <Bi en="Comparative dual-perspective view: Review both sides' claims and record mediator observations." bn="উভয় পক্ষের দাবিসমূহ পাশাপাশি পর্যালোচনা করুন এবং মধ্যস্থতাকারীর পর্যবেক্ষণ লিপিবদ্ধ করুন।" />
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1rem' }}>
               {/* Applicant's Side */}
               <div style={{ border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FBFBFA', borderTop: '4px solid #1f6c9f' }}>
                 <h4 style={{ margin: '0 0 0.5rem', color: '#1f6c9f', fontSize: '0.95rem' }}>
@@ -936,7 +936,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
                 <Bi en="Mediator's Record & Discussion Notes" bn="মধ্যস্থতাকারীর নোট ও আলোচনার বিষয়সমূহ" />
               </h4>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '0.75rem' }}>
                 <div>
                   <label htmlFor="med-issues" style={{ fontSize: '0.82rem' }}><Bi en="Issues Discussed" bn="আলোচিত মূল বিষয়সমূহ" /></label>
                   <textarea
@@ -1004,7 +1004,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
                           {term.status === 'AGREED' ? bi('Agreed', 'সম্মত') : term.status === 'DISAGREED' ? bi('Disagreed', 'অসম্মত') : bi('Under Negotiation', 'আলোচনাধীন')}
                         </span>
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.5rem', fontSize: '0.85rem', color: '#555' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '0.5rem', fontSize: '0.85rem', color: '#555' }}>
                         <div><strong><Bi en="Applicant Asks:" bn="বাদীর দাবি:" /></strong> {term.applicantDemand || '—'}</div>
                         <div><strong><Bi en="Opposite Offers:" bn="বিবাদীর প্রস্তাব:" /></strong> {term.oppositePartyOffer || '—'}</div>
                         <div><strong><Bi en="Agreed Term:" bn="চূড়ান্ত নিষ্পত্তি:" /></strong> {term.agreedTerm || '—'}</div>
@@ -1030,7 +1030,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
                 <Bi en="+ Add Proposed Settlement Term" bn="+ নতুন আপস শর্ত বা ইস্যু যোগ করুন" />
               </strong>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.6rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '0.6rem' }}>
                 <div>
                   <label htmlFor="new-term-issue" style={{ fontSize: '0.8rem' }}><Bi en="Issue" bn="আলোচিত বিষয়/ইস্যু" /></label>
                   <input
@@ -1097,7 +1097,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
               <Bi en="At the conclusion of the session, select one of the three statutory outcomes:" bn="বৈঠকের সমাপ্তিতে ৩টি নির্ধারিত ফলাফলের যেকোনো একটি গ্রহণ করুন:" />
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '1rem' }}>
               {/* Option A: Settlement Reached */}
               <div style={{ border: outcome === 'AGREEMENT_REACHED' ? '2px solid #2E7D32' : '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FBFBFA', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                 <div>
@@ -1219,7 +1219,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
                 <p className="muted" style={{ margin: '0.2rem 0', fontSize: '0.82rem' }}>
                   <Bi en="Anonymised notes only; personal identifiers removed." bn="ব্যক্তিগত তথ্যবর্জিত খসড়া নোট।" />
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
+                <div className="form-grid-split">
                   <div>
                     <label htmlFor="settlement-template"><Bi en="Template" bn="নমুনা ফর্ম" /></label>
                     <select id="settlement-template" value={template} onChange={(event) => setTemplate(event.target.value)}>
@@ -1337,7 +1337,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
                 send('/draft/review', { ...acknowledgements, warningsReviewed, reason: reviewReason }, bi('Review confirmed. Proceeding to signatures.', 'পর্যালোচনা সংরক্ষিত হয়েছে। উভয় পক্ষ সম্মত থাকায় স্বাক্ষরের ধাপে অগ্রসর হওয়া হলো।'))
               }}>
                 <h4><Bi en="Did both parties understand and agree to the draft?" bn="উভয় পক্ষ কি খসড়া শর্তাবলি বুঝেছেন ও সম্মত হয়েছেন?" /></h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '0.5rem' }}>
                   {Object.entries({
                     partyAUnderstands: ['Party A understood', 'প্রথম পক্ষ (পক্ষ ক) শর্তাবলি বুঝেছেন'],
                     partyAConsents: ['Party A agrees to sign', 'প্রথম পক্ষ (পক্ষ ক) স্বাক্ষরে সম্মত'],
@@ -1400,7 +1400,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
           <p><Link to="/mediation/sign" style={{ fontWeight: 600 }}><Bi en="Open the party signing portal (পক্ষের স্বাক্ষর পৃষ্ঠা)" bn="পক্ষের স্বাক্ষরের পোর্টাল খুলুন ↗" /></Link></p>
 
           {/* Party A and Party B Signature Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '0.75rem', margin: '0.5rem 0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '0.75rem', margin: '0.5rem 0' }}>
             {['PARTY_A', 'PARTY_B'].map((partyRole) => {
               const invite = mediation.signingInvitations?.find((entry) => entry.signerRole === partyRole)
               const isSigned = signedRoles.has(partyRole)
@@ -1604,7 +1604,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '1rem' }}>
             {/* 1. Final Settlement Summary */}
             <div style={{ border: '1px solid #EAEAEA', borderRadius: '6px', padding: '0.85rem', backgroundColor: '#FAFAFA' }}>
               <strong style={{ fontSize: '0.92rem' }}><Bi en="1. Final Settlement Agreement" bn="১. চূড়ান্ত মীমাংসাপত্র" /></strong>
@@ -1674,7 +1674,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
           </p>
 
           <div className="form-stack">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem', padding: '0.75rem', backgroundColor: '#F9F9F8', borderRadius: '6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '0.75rem', padding: '0.75rem', backgroundColor: '#F9F9F8', borderRadius: '6px' }}>
               <label className="checkbox-label" htmlFor="fu-settlement-followed" style={{ margin: 0 }}>
                 <input id="fu-settlement-followed" type="checkbox" checked={fuSettlementFollowed} onChange={(e) => setFuSettlementFollowed(e.target.checked)} />
                 <Bi en="Settlement being followed (শর্তাবলি মানা হচ্ছে)" bn="মীমাংসার শর্তাবলি পালন করা হচ্ছে" />
@@ -1779,7 +1779,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
               <Bi en="Record Mediation Session Outcome & Next Date" bn="বৈঠকের ফলাফল ও পরবর্তী তারিখ নির্ধারণ" />
             </h4>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '0.75rem' }}>
               <div>
                 <label htmlFor="session-date"><Bi en="Session Date & Time" bn="বৈঠকের তারিখ ও সময়" /></label>
                 <input
@@ -1809,7 +1809,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <div className="form-grid-2col" style={{ marginTop: '0.5rem' }}>
               <div>
                 <label htmlFor="session-party-a"><Bi en="Party A (Applicant / Petitioner)" bn="পক্ষ ক (বাদী)" /></label>
                 <select id="session-party-a" value={sessionPartyA} onChange={(e) => setSessionPartyA(e.target.value)}>
@@ -1840,7 +1840,7 @@ export default function MediationPanel({ applicationId, session, role, applicati
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <div className="form-grid-2col" style={{ marginTop: '0.5rem' }}>
               <div>
                 <label htmlFor="session-outcome"><Bi en="Session Outcome" bn="বৈঠকের ফলাফল" /></label>
                 <select id="session-outcome" value={sessionOutcome} onChange={(e) => setSessionOutcome(e.target.value)}>

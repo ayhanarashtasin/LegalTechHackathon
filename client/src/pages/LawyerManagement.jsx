@@ -417,7 +417,7 @@ export default function LawyerManagement({ applicationId, token, onChanged }) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '0.65rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 230px), 1fr))', gap: '0.65rem' }}>
               {filteredLawyers.map((person) => {
                 const isAccepting = person.acceptingCases !== false
                 const isSelected = lawyerUserId === String(person.id)
