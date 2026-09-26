@@ -39,6 +39,13 @@ export function validateScheduling(request, _response, next) {
   next()
 }
 
+export function validateMediatorAppointment(request, _response, next) {
+  const value = body(request, ['mediatorUserId', 'reason'], [])
+  if (value.mediatorUserId !== undefined && value.mediatorUserId !== null && (typeof value.mediatorUserId !== 'string' || !/^[a-f0-9]{24}$/i.test(value.mediatorUserId))) fail('Choose a mediator.')
+  request.body = { mediatorUserId: value.mediatorUserId || null, ...(typeof value.reason === 'string' && value.reason.trim() ? { reason: text(value.reason, 'Reason', 5, 500) } : {}) }
+  next()
+}
+
 export function validateReason(request, _response, next) {
   request.body = { reason: text(body(request, ['reason']).reason, 'Reason', 10, 500) }
   next()

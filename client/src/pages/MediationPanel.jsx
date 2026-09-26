@@ -9,6 +9,59 @@ import { Badge, Bi, Panel, Term, bi, num, say, when } from '../components/Bi.jsx
 const pathFor = (applicationId, suffix = '') => `/api/applications/${applicationId}/mediation${suffix}`
 const signerBn = { PARTY_A: 'প্রথম পক্ষ (পক্ষ ক)', PARTY_B: 'দ্বিতীয় পক্ষ (পক্ষ খ)', MEDIATOR: 'মধ্যস্থতাকারী' }
 const stages = ['REGISTRATION', 'SCHEDULING_NOTICES', 'DOCUMENT_REVIEW', 'ATTENDANCE', 'MEDIATION', 'DRAFT_OUTCOME', 'SIGNATURES', 'PENDING_CLAO_CERTIFICATION', 'CERTIFIED_FINAL']
+const filledSteps = [
+  ['SCHEDULE', 'Schedule and notices', 'সময় ও নোটিশ'], ['DOCUMENT_REVIEW', 'Document review', 'নথিপত্র যাচাই'],
+  ['ATTENDANCE', 'Attendance', 'উপস্থিতি'], ['OUTCOME', 'Outcome', 'ফলাফল'], ['DRAFT', 'Settlement draft', 'মীমাংসার খসড়া'],
+  ['DRAFT_REVIEW', 'Draft review', 'খসড়া পর্যালোচনা'], ['MEDIATOR_SIGNATURE', 'Mediator signature', 'মধ্যস্থতাকারীর স্বাক্ষর'],
+]
+const byWhom = (role, name) => `${role === 'MEDIATOR' ? bi('Appointed mediator', 'নিযুক্ত মধ্যস্থতাকারী') : bi('DLAO officer', 'ডিএলএও কর্মকর্তা')}${name ? ` · ${name}` : ''}`
+
+// The DLAO officer appoints, changes, or removes the optional mediator; changes need a reason and are audited.
+function MediatorAppointment({ applicationId, token, mediation, onChanged }) {
+  const [choices, setChoices] = useState(null)
+  const [choice, setChoice] = useState('')
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const current = mediation.mediator
+  const locked = ['PENDING_CLAO_CERTIFICATION', 'CERTIFIED_FINAL'].includes(mediation.stage)
+
+  async function open() {
+    setError('')
+    try { setChoices(await api(pathFor(applicationId, '/mediators'), { token })) } catch (failure) { setError(failure.message) }
+  }
+
+  async function save(event, mediatorUserId) {
+    event.preventDefault()
+    setError('')
+    setBusy(true)
+    try {
+      const updated = await api(pathFor(applicationId, '/mediator'), { token, method: 'POST', body: { mediatorUserId, ...(reason.trim() ? { reason } : {}) } })
+      onChanged(updated, mediatorUserId ? bi('Mediator appointed. You stay the case owner and see every step.', 'মধ্যস্থতাকারী নিযুক্ত হয়েছেন। আপনি মামলার দায়িত্বে থাকছেন এবং প্রতিটি ধাপ দেখতে পাবেন।') : bi('Mediator removed. You run the next steps.', 'মধ্যস্থতাকারী সরানো হয়েছে। পরবর্তী ধাপ আপনি চালাবেন।'))
+      setChoices(null); setChoice(''); setReason('')
+    } catch (failure) { setError(failure.message) } finally { setBusy(false) }
+  }
+
+  if (locked) return null
+  return <div className="form-stack">
+    {error && <p role="alert" className="error">{error}</p>}
+    {!choices ? <button type="button" className="secondary-button" onClick={open}>{current ? bi('Change or remove mediator', 'মধ্যস্থতাকারী বদলান বা সরান') : bi('Appoint a mediator (optional)', 'মধ্যস্থতাকারী নিয়োগ দিন (ঐচ্ছিক)')}</button>
+      : <form className="form-stack inline-form" onSubmit={(event) => save(event, choice)}>
+        <label htmlFor="mediator-choice"><Bi en="Mediator in this office" bn="এই অফিসের মধ্যস্থতাকারী" /></label>
+        <select id="mediator-choice" value={choice} onChange={(event) => setChoice(event.target.value)} required>
+          <option value="">{bi('Choose', 'বাছাই করুন')}</option>
+          {choices.filter(({ id }) => id !== current?.id).map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        {current && <><label htmlFor="mediator-reason"><Bi en="Reason for the change" bn="পরিবর্তনের কারণ" /></label><input id="mediator-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="5" maxLength="500" required /></>}
+        <div className="choice-row">
+          <button type="submit" disabled={busy}>{current ? bi('Appoint this mediator instead', 'এই মধ্যস্থতাকারীকে নিয়োগ দিন') : bi('Appoint mediator', 'নিয়োগ দিন')}</button>
+          {current && <button type="button" className="secondary-button" disabled={busy || reason.trim().length < 5} onClick={(event) => save(event, null)}>{bi('Remove mediator; I will run it', 'মধ্যস্থতাকারী সরান; আমি চালাব')}</button>}
+          <button type="button" className="secondary-button" onClick={() => setChoices(null)}>{bi('Cancel', 'বাতিল')}</button>
+        </div>
+      </form>}
+  </div>
+}
+
 const initialLocalDateTime = () => {
   const value = new Date(Date.now() + 60 * 60 * 1000)
   value.setMinutes(value.getMinutes() - value.getTimezoneOffset())
@@ -240,7 +293,8 @@ export default function MediationPanel({ applicationId, session, role }) {
 
 
   const assignedToMe = mediation?.mediatorUserId === ownerId
-  const mediatorCanAct = role === 'MEDIATOR' && assignedToMe
+  // The appointed mediator runs the steps; with no mediator appointed, the DLAO officer does.
+  const mediatorCanAct = (role === 'MEDIATOR' && assignedToMe) || (role === 'DLAO_OFFICER' && Boolean(mediation) && !mediation.mediatorUserId)
   const signatures = mediation?.signatures ?? []
   const signedRoles = new Set(signatures.map(({ signerRole }) => signerRole))
   const missingPartySignatures = !signedRoles.has('PARTY_A') || !signedRoles.has('PARTY_B')
@@ -255,7 +309,7 @@ export default function MediationPanel({ applicationId, session, role }) {
     {notice && <p role="status" className="success">{notice}</p>}
     {loaded && <p className="muted"><Bi en="Records what people do. Sends no notices and decides no legal outcome." bn="এখানে কর্মীদের কাজ নথিভুক্ত হয়। এখান থেকে নোটিশ পাঠানো বা মামলার আইনি ফল নির্ধারণ করা হয় না।" /></p>}
     {loaded && role === 'CLAO' && !mediation && !error && <p className="muted"><Bi en="No mediation is recorded on this case." bn="এই মামলায় কোনো মধ্যস্থতা নথিভুক্ত নেই।" /></p>}
-    {loaded && role === 'DLAO_OFFICER' && !mediation && <button type="button" disabled={busy} onClick={() => send('', {}, bi('Mediation registered. A mediator in this office can now claim it.', 'মধ্যস্থতা নিবন্ধিত। এই অফিসের একজন মধ্যস্থতাকারী দায়িত্ব নিতে পারবেন।'))}><Bi en="Start mediation" bn="মধ্যস্থতা শুরু করুন" /></button>}
+    {loaded && role === 'DLAO_OFFICER' && !mediation && <button type="button" disabled={busy} onClick={() => send('', {}, bi('Mediation registered. Run it yourself or appoint a mediator.', 'মধ্যস্থতা নিবন্ধিত। নিজে চালান অথবা একজন মধ্যস্থতাকারী নিয়োগ দিন।'))}><Bi en="Start mediation" bn="মধ্যস্থতা শুরু করুন" /></button>}
     {mediation && <>
       <ol className="journey stages" aria-label={bi('Mediation stages', 'মধ্যস্থতার ধাপ')}>{stages.map((stage, index) => <li key={stage} className={index < stageIndex ? 'done' : undefined} aria-current={index === stageIndex ? 'step' : undefined}><Term code={stage} /></li>)}</ol>
       <dl className="details compact">
@@ -265,7 +319,13 @@ export default function MediationPanel({ applicationId, session, role }) {
         {mediation.mode === 'IN_PERSON' && <div><dt><Bi en="Venue" bn="স্থান" /></dt><dd>{mediation.venue}</dd></div>}
         {mediation.inPersonFallback && <div><dt><Bi en="Backup plan" bn="বিকল্প পরিকল্পনা" /></dt><dd>{mediation.inPersonFallback}</dd></div>}
         <div><dt><Bi en="Legal effect" bn="আইনি কার্যকারিতা" /></dt><dd><Term code={mediation.legalEffectState} /></dd></div>
+        <div><dt><Bi en="Mediator" bn="মধ্যস্থতাকারী" /></dt><dd>{mediation.mediator
+          ? <>{mediation.mediator.name} · <Bi en="appointed by the DLAO officer" bn="ডিএলএও কর্মকর্তা নিযুক্ত" /> {when(mediation.mediator.appointedAt)}</>
+          : <Bi en="None appointed; the DLAO officer runs the mediation" bn="কেউ নিযুক্ত নন; ডিএলএও কর্মকর্তা মধ্যস্থতা চালাচ্ছেন" />}</dd></div>
+        {filledSteps.filter(([key]) => mediation.filledBy?.[key]).map(([key, en, bn]) => <div key={key}><dt>{bi(en, bn)}</dt><dd><span className="record-badge is-filled">{byWhom(mediation.filledBy[key].role, mediation.filledBy[key].name)}</span> {when(mediation.filledBy[key].at)}</dd></div>)}
       </dl>
+      {role === 'DLAO_OFFICER' && <MediatorAppointment applicationId={applicationId} token={session.token} mediation={mediation} onChanged={(updated, message) => { setMediation(updated); setNotice(message) }} />}
+      {role === 'DLAO_OFFICER' && mediation.mediatorUserId && <p className="muted"><Bi en="The appointed mediator runs the steps below. You stay the case owner, see every step, and can still record sessions." bn="নিচের ধাপগুলো নিযুক্ত মধ্যস্থতাকারী চালাবেন। আপনি মামলার দায়িত্বে থাকছেন, প্রতিটি ধাপ দেখতে পাবেন এবং বৈঠক নথিভুক্ত করতে পারবেন।" /></p>}
 
       {/* Multiple Mediation Sessions History */}
       <section className="mediation-sessions-section" style={{ margin: '1.25rem 0', border: '1px solid #EAEAEA', borderRadius: '6px', padding: '1rem', backgroundColor: '#FAFAFA' }}>
@@ -437,6 +497,7 @@ export default function MediationPanel({ applicationId, session, role }) {
                     <span><strong><Bi en="Party A:" bn="বাদী:" /></strong> {say(s.attendance?.partyA || 'ATTENDED')}</span>
                     <span><strong><Bi en="Party B:" bn="বিবাদী:" /></strong> {say(s.attendance?.partyB || 'ATTENDED')}</span>
                     {s.venue && <span><strong><Bi en="Venue:" bn="স্থান:" /></strong> {s.venue}</span>}
+                    {s.recordedByRole && <span className="record-badge is-filled">{bi('Filled in by', 'লিপিবদ্ধ করেছেন')}: {byWhom(s.recordedByRole, s.recordedByName)}</span>}
                     {s.nextSessionDate && (
                       <span style={{ color: '#2f54eb', fontWeight: 600 }}>
                         <strong><Bi en="Adjourned to:" bn="পরবর্তী তারিখ:" /></strong> {when(s.nextSessionDate)}
@@ -450,8 +511,6 @@ export default function MediationPanel({ applicationId, session, role }) {
         )}
       </section>
 
-      {role === 'MEDIATOR' && !mediation.mediatorUserId && <button type="button" disabled={busy} onClick={() => send('/claim', {}, bi('Mediation claimed.', 'মধ্যস্থতার দায়িত্ব নেওয়া হয়েছে।'))}><Bi en="Claim this mediation" bn="দায়িত্ব নিন" /></button>}
-      {role === 'MEDIATOR' && mediation.mediatorUserId && !assignedToMe && <p role="alert" className="error"><Bi en="Assigned to another mediator." bn="অন্য মধ্যস্থতাকারীর দায়িত্বে।" /></p>}
 
       {mediatorCanAct && ['REGISTRATION', 'SCHEDULING_NOTICES'].includes(mediation.stage) && <form className="form-stack inline-form" onSubmit={(event) => {
         event.preventDefault()
@@ -531,11 +590,13 @@ export default function MediationPanel({ applicationId, session, role }) {
           </div>
         })}
         <button type="button" className="secondary-button" disabled={busy || !online} onClick={refreshSignatures}><Bi en="Refresh party signatures" bn="পক্ষগুলোর সর্বশেষ স্বাক্ষর দেখুন" /></button>
-        {role === 'MEDIATOR' && mediation.stage === 'SIGNATURES' && <MediatorIdentityVerification key={`${mediation.id}:${mediation.signingInvitations?.map((invite) => invite.updatedAt).join(':')}`} applicationId={applicationId} token={session.token} />}
-        <ol className="plain-list">{signatures.map((record) => <li key={record.signerRole}><strong><Term code={record.signerRole} /></strong> · {when(record.receivedAt)} · {record.documentHash.slice(0, 12)}…</li>)}</ol>
+        {mediatorCanAct && mediation.stage === 'SIGNATURES' && <MediatorIdentityVerification key={`${mediation.id}:${mediation.signingInvitations?.map((invite) => invite.updatedAt).join(':')}`} applicationId={applicationId} token={session.token} />}
+        <ol className="plain-list">{signatures.map((record) => <li key={record.signerRole}><strong><Term code={record.signerRole} /></strong>{record.signerRole === 'MEDIATOR' ? <> · <Term code={record.authorizationMethod} /></> : null} · {when(record.receivedAt)} · {record.documentHash.slice(0, 12)}…</li>)}</ol>
         <label htmlFor="signature-passphrase"><Bi en="Your local passphrase for an encrypted offline mediator signature" bn="মধ্যস্থতাকারীর অফলাইন স্বাক্ষরের জন্য আপনার পাসফ্রেজ" /></label><input id="signature-passphrase" type="password" autoComplete="off" minLength="8" value={signingPassphrase} onChange={(event) => setSigningPassphrase(event.target.value)} />
         <p className="muted"><Bi en="Your signing key is made in this browser and discarded. The offline signature packet contains no draft text." bn="আপনার স্বাক্ষরের চাবি এই ব্রাউজারে তৈরি হয় এবং পরে মুছে যায়। অফলাইন স্বাক্ষরের প্যাকেটে খসড়ার লেখা থাকে না।" /></p>
-        <button type="button" disabled={busy || signingPassphrase.length < 8 || missingPartySignatures || signedRoles.has('MEDIATOR')} onClick={sign}>{bi(`Create mediator signature${online ? ' and sync' : ' offline'}`, `মধ্যস্থতাকারীর স্বাক্ষর ${online ? 'দিন ও সিঙ্ক করুন' : 'অফলাইনে দিন'}`)}</button>
+        <button type="button" disabled={busy || signingPassphrase.length < 8 || missingPartySignatures || signedRoles.has('MEDIATOR')} onClick={sign}>{role === 'DLAO_OFFICER'
+          ? bi(`Sign in the mediator's place (DLAO officer)${online ? ' and sync' : ' offline'}`, `মধ্যস্থতাকারীর স্থলে স্বাক্ষর দিন (ডিএলএও কর্মকর্তা)${online ? ' ও সিঙ্ক করুন' : ' অফলাইনে'}`)
+          : bi(`Create mediator signature${online ? ' and sync' : ' offline'}`, `মধ্যস্থতাকারীর স্বাক্ষর ${online ? 'দিন ও সিঙ্ক করুন' : 'অফলাইনে দিন'}`)}</button>
         <p role="status">{online ? bi('Connection: online', 'সংযোগ: অনলাইন') : bi('Connection: offline', 'সংযোগ: অফলাইন')} · {bi(`encrypted signatures awaiting sync: ${queue.length}`, `সিঙ্কের অপেক্ষায়: ${num(queue.length)}`)}</p>
         {queue.length > 0 && <><button type="button" className="secondary-button" disabled={!online || signingPassphrase.length < 8 || busy} onClick={syncPending}><Bi en="Sync now" bn="এখন সিঙ্ক করুন" /></button><ul className="plain-list">{queue.map((item) => <li key={item.id}><Bi en="Encrypted signature" bn="এনক্রিপ্ট করা স্বাক্ষর" /> · {when(item.updatedAt)}</li>)}</ul></>}
         {verifier}
@@ -556,7 +617,7 @@ export default function MediationPanel({ applicationId, session, role }) {
         <ul className="plain-list">{['PARTY_A', 'PARTY_B', 'MEDIATOR'].map((signerRole) => {
           const record = signatures.find((item) => item.signerRole === signerRole)
           const checked = signatureCheck?.signatures.find((item) => item.signerRole === signerRole)
-          return <li key={signerRole}><strong><Term code={signerRole} /></strong> · {record ? <>{bi('signed', 'স্বাক্ষরিত')} {when(record.receivedAt)}</> : bi('not signed', 'স্বাক্ষর নেই')}{checked ? <> · <strong>{checked.valid ? bi('verified', 'যাচাইকৃত') : bi('does not verify', 'যাচাই ব্যর্থ')}</strong></> : null}</li>
+          return <li key={signerRole}><strong><Term code={signerRole} /></strong> · {record ? <>{bi('signed', 'স্বাক্ষরিত')} {when(record.receivedAt)}{signerRole === 'MEDIATOR' ? <> · <Term code={record.authorizationMethod} /></> : null}</> : bi('not signed', 'স্বাক্ষর নেই')}{checked ? <> · <strong>{checked.valid ? bi('verified', 'যাচাইকৃত') : bi('does not verify', 'যাচাই ব্যর্থ')}</strong></> : null}</li>
         })}</ul>
         <button type="button" className="secondary-button" disabled={busy} onClick={checkSignatures}><Bi en="Check signatures now" bn="এখনই স্বাক্ষর যাচাই করুন" /></button>
         {signatureCheck && <p role="status" className={signatureCheck.allValid ? 'success' : 'error'}>{signatureCheck.allValid ? bi('All three signatures match this settlement.', 'তিনটি স্বাক্ষরই এই মীমাংসাপত্রের সঙ্গে মিলেছে।') : bi('A signature is missing or does not match. Do not certify.', 'কোনো স্বাক্ষর নেই বা মেলেনি। সনদ দেবেন না।')}</p>}

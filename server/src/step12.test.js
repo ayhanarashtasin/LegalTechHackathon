@@ -102,7 +102,12 @@ test('Step 12: one Case flows through mediator review, async signatures, integri
   assert.equal((await post(`/api/applications/${applicationId}/mediation`, officer.token)).status, 201)
   assert.equal((await request(`/api/applications/${applicationId}/mediation`, { token: outsideMediator.token })).status, 403)
 
-  assert.equal((await post(`/api/applications/${applicationId}/mediation/claim`, mediator.token)).data.mediatorUserId, String(mediator.user._id))
+  // Mediators cannot take a case themselves; the DLAO officer appoints one and remains the case owner.
+  assert.equal((await request(`/api/applications/${applicationId}/mediation`, { token: mediator.token })).status, 403)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/mediator`, mediator.token, { mediatorUserId: String(mediator.user._id) })).status, 403)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/mediator`, officer.token, { mediatorUserId: String(outsideMediator.user._id) })).status, 400)
+  assert.equal((await post(`/api/applications/${applicationId}/mediation/mediator`, officer.token, { mediatorUserId: String(mediator.user._id) })).data.mediatorUserId, String(mediator.user._id))
+  assert.equal((await request(`/api/applications/${applicationId}`, { token: mediator.token })).status, 200)
   let result = await post(`/api/applications/${applicationId}/mediation/schedule`, mediator.token, {
     mode: 'REMOTE', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     inPersonFallback: 'Meet at the fictional district legal-aid office if remote access fails.',
@@ -322,7 +327,7 @@ test('T7: property and labour drafts use their controlled examples, date warning
     const applicationId = await acceptedApplication(officer.token)
     const path = `/api/applications/${applicationId}/mediation`
     assert.equal((await post(path, officer.token)).status, 201)
-    assert.equal((await post(`${path}/claim`, mediator.token)).status, 200)
+    assert.equal((await post(`${path}/mediator`, officer.token, { mediatorUserId: String(mediator.user._id) })).status, 200)
     assert.equal((await post(`${path}/schedule`, mediator.token, {
       mode: 'IN_PERSON', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), venue: 'Fictional DLAO room',
       notices: ['PARTY_A', 'PARTY_B'].map((party) => ({ party, deliveryState: 'DELIVERED', reason: 'A human recorded fictional delivery.' })),
@@ -414,4 +419,52 @@ test('CLAO sees the DLAO office view read-only and cannot take DLAO decisions', 
   assert.equal((await post(`/api/applications/${pendingId}/review`, clao.token, { reviewState: 'READY_FOR_DECISION', reason: 'A CLAO must not record DLAO review decisions.' })).status, 403)
   assert.equal((await post(`/api/applications/${pendingId}/accept`, clao.token, { reason: 'A CLAO must not accept DLAO applications.' })).status, 403)
   assert.equal((await post(`/api/applications/${acceptedId}/mediation`, clao.token)).status, 403)
+})
+
+test('with no mediator the DLAO officer runs every step; an appointed mediator takes over, both are tagged, and the DLAO keeps seeing everything', async () => {
+  const officer = await actor('test12.opt.officer', 'DLAO_OFFICER')
+  const mediator = await actor('test12.opt.mediator', 'MEDIATOR')
+  const other = await actor('test12.opt.other', 'MEDIATOR')
+  const applicationId = await acceptedApplication(officer.token)
+  const path = `/api/applications/${applicationId}/mediation`
+  assert.equal((await post(path, officer.token)).status, 201)
+  const choices = (await request(`${path}/mediators`, { token: officer.token })).data.map(({ id }) => id)
+  assert.ok(choices.includes(String(mediator.user._id)) && choices.includes(String(other.user._id)))
+
+  // No mediator appointed: the DLAO officer schedules, and the step is tagged as the DLAO's.
+  let result = await post(`${path}/schedule`, officer.token, {
+    mode: 'IN_PERSON', scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), venue: 'Fictional DLAO room',
+    notices: ['PARTY_A', 'PARTY_B'].map((party) => ({ party, deliveryState: 'DELIVERED', reason: 'A human recorded fictional delivery.' })),
+  })
+  assert.equal(result.status, 200)
+  assert.equal(result.data.filledBy.SCHEDULE.role, 'DLAO_OFFICER')
+  assert.equal((await post(`${path}/sessions`, officer.token, { summaryNotes: 'Fictional first session by the officer.', outcome: 'ADJOURNED_NEXT_DATE' })).data.sessions[0].recordedByRole, 'DLAO_OFFICER')
+  assert.equal((await request(`/api/applications/${applicationId}`, { token: mediator.token })).status, 403)
+
+  // Appointed: the mediator runs the steps and reads the case; the DLAO officer can still record sessions and read everything.
+  assert.equal((await post(`${path}/mediator`, officer.token, { mediatorUserId: String(mediator.user._id) })).status, 200)
+  assert.equal((await post(`${path}/advance`, officer.token)).data.error.code, 'MEDIATOR_APPOINTED')
+  assert.equal((await post(`${path}/advance`, other.token)).status, 403)
+  result = await post(`${path}/advance`, mediator.token)
+  assert.equal(result.data.stage, 'DOCUMENT_REVIEW')
+  result = await post(`${path}/documents/review`, mediator.token, { reason: 'The appointed mediator reviewed the fictional documents.' })
+  assert.equal(result.data.filledBy.DOCUMENT_REVIEW.role, 'MEDIATOR')
+  assert.equal(result.data.filledBy.DOCUMENT_REVIEW.name, 'Fictional MEDIATOR')
+  const mediatorSession = await post(`${path}/sessions`, mediator.token, { summaryNotes: 'Fictional session by the mediator.', outcome: 'ADJOURNED_NEXT_DATE' })
+  assert.deepEqual(mediatorSession.data.sessions.map(({ recordedByRole }) => recordedByRole), ['DLAO_OFFICER', 'MEDIATOR'])
+  const officerView = (await request(path, { token: officer.token })).data.mediation
+  assert.equal(officerView.mediator.name, 'Fictional MEDIATOR')
+  assert.equal(officerView.filledBy.SCHEDULE.role, 'DLAO_OFFICER')
+  assert.equal(officerView.sessions.length, 2)
+  assert.equal((await request(`/api/applications/${applicationId}/documents`, { token: mediator.token })).status, 200)
+  assert.ok((await request('/api/workspace?role=MEDIATOR', { token: mediator.token })).data.records.some((item) => item.applicationId === applicationId))
+  assert.ok(!(await request('/api/workspace?role=MEDIATOR', { token: other.token })).data.records.some((item) => item.applicationId === applicationId))
+
+  // Changing or removing the mediator needs a reason and hands the steps back to the DLAO officer.
+  assert.equal((await post(`${path}/mediator`, officer.token, {})).status, 400)
+  assert.equal((await post(`${path}/mediator`, officer.token, { reason: 'Fictional: the mediator became unavailable.' })).data.mediator, null)
+  assert.equal((await post(`${path}/advance`, officer.token)).data.stage, 'ATTENDANCE')
+  assert.equal((await request(path, { token: mediator.token })).status, 403)
+  const audit = await models.AuditEvent.find({ applicationId, action: { $in: ['MEDIATOR_APPOINTED', 'MEDIATOR_REMOVED'] } }).lean()
+  assert.deepEqual(audit.map(({ action }) => action), ['MEDIATOR_APPOINTED', 'MEDIATOR_REMOVED'])
 })

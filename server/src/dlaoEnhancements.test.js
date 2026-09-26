@@ -6,7 +6,7 @@ import * as models from './models/index.js'
 import { User, RoleAssignment, AuditEvent } from './models/index.js'
 import { hashPassword } from './utils/password.js'
 import { acceptApplication, editCaseInformation, listWorkspace, preMediationVerify, recordNoticeSent, reviewApplication, submitApplication } from './services/applicationService.js'
-import { recordMediationSession, startMediation } from './services/mediationService.js'
+import { recordMediationSession, setMediator, startMediation } from './services/mediationService.js'
 import { updatePovertyCertificate } from './services/lawyerService.js'
 
 const databaseName = `dlas_dlao_test_${randomBytes(6).toString('hex')}`
@@ -143,6 +143,9 @@ test('DLAO enhancements: case edit, call verification, notices, multi-session me
 
   // 6. Register mediation on the accepted case and record multiple sessions
   await startMediation(appId, dlaoActor)
+  // A mediator records sessions only once the DLAO officer appoints them.
+  await assert.rejects(recordMediationSession(appId, { summaryNotes: 'Not appointed yet.' }, mediatorActor), { status: 403 })
+  await setMediator(appId, { mediatorUserId: String(mediatorUser._id) }, dlaoActor)
 
   // Add 1st session
   const session1 = await recordMediationSession(appId, {
@@ -157,6 +160,8 @@ test('DLAO enhancements: case edit, call verification, notices, multi-session me
   assert.equal(session1.sessions.length, 1)
   assert.equal(session1.sessions[0].sessionNumber, 1)
   assert.equal(session1.sessions[0].attendance.partyA, 'ATTENDED')
+  assert.equal(session1.sessions[0].recordedByRole, 'MEDIATOR')
+  assert.equal(session1.sessions[0].recordedByName, 'Test Mediator')
 
   // Add 2nd session
   const session2 = await recordMediationSession(appId, {

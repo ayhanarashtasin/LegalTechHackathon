@@ -4,9 +4,12 @@ import { signIn } from './support.js'
 
 test('Step 12: separate parties sign asynchronously, one offline packet syncs, and edited copy fails verification', async ({ page, request, browser, baseURL }) => {
   const actors = JSON.parse(process.env.E2E_ACTORS)
+  const ids = {}
   const headersFor = async (role) => {
     const response = await request.post('/api/auth/login', { data: actors[role] })
-    return { authorization: `Bearer ${(await response.json()).token}` }
+    const session = await response.json()
+    ids[role] = session.user.id
+    return { authorization: `Bearer ${session.token}` }
   }
   const officer = await headersFor('DLAO_OFFICER')
   const mediator = await headersFor('MEDIATOR')
@@ -18,7 +21,7 @@ test('Step 12: separate parties sign asynchronously, one offline packet syncs, a
     ['accept', { reason: 'A human DLAO officer accepted this fictional matter.' }],
   ]) expect((await request.post(`/api/applications/${applicationId}/${action}`, { headers: officer, data: body })).ok()).toBeTruthy()
   expect((await request.post(`/api/applications/${applicationId}/mediation`, { headers: officer, data: {} })).ok()).toBeTruthy()
-  expect((await request.post(`/api/applications/${applicationId}/mediation/claim`, { headers: mediator, data: {} })).ok()).toBeTruthy()
+  expect((await request.post(`/api/applications/${applicationId}/mediation/mediator`, { headers: officer, data: { mediatorUserId: ids.MEDIATOR } })).ok()).toBeTruthy()
   const mediationPath = `/api/applications/${applicationId}/mediation`
   for (const [suffix, data] of [
     ['/schedule', {

@@ -1,5 +1,5 @@
 import {
-  advanceMediation, amendSettlementDraft, certifyMediation, claimMediation, createSettlementDraft, getMediation,
+  advanceMediation, amendSettlementDraft, certifyMediation, createSettlementDraft, getMediation, listMediators, setMediator,
   recordAttendance, recordDocumentReview, recordLegalApplicability, recordMediationSession, recordOutcome, recordScheduling,
   issueSigningInvitation, openPartySigning, recordPartySignature, recordSignature,
   reviewSettlementDraft, startMediation, verifyMediation,
@@ -7,7 +7,8 @@ import {
 
 export async function read(request, response) { response.json(await getMediation(request.params.applicationId, request.auth)) }
 export async function create(request, response) { response.status(201).json(await startMediation(request.params.applicationId, request.auth)) }
-export async function claim(request, response) { response.json(await claimMediation(request.params.applicationId, request.auth)) }
+export async function mediators(request, response) { response.json(await listMediators(request.params.applicationId, request.auth)) }
+export async function appoint(request, response) { response.json(await setMediator(request.params.applicationId, request.body, request.auth)) }
 export async function schedule(request, response) { response.json(await recordScheduling(request.params.applicationId, request.body, request.auth)) }
 export async function advance(request, response) { response.json(await advanceMediation(request.params.applicationId, request.auth)) }
 export async function reviewDocuments(request, response) { response.json(await recordDocumentReview(request.params.applicationId, request.body, request.auth)) }

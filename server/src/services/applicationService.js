@@ -748,7 +748,7 @@ export async function getApplication(applicationId, actor) {
   const application = await Application.findOne({ applicationId }).lean()
   if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
   const mediationAccess = (hasOfficeRole(actor, 'MEDIATOR', application.officeCode)
-      && await Mediation.exists({ applicationId, officeCode: application.officeCode, $or: [{ mediatorUserId: actor.userId }, { mediatorUserId: null }] }))
+      && await appointedMediator(applicationId, application.officeCode, actor))
     // The CLAO sees the same office records as the DLAO, read-only; certification is the CLAO's only action.
     || hasOfficeRole(actor, 'CLAO', application.officeCode)
   if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode) && !mediationAccess) {
@@ -1027,7 +1027,8 @@ export async function listWorkspace(role, actor) {
     })) }
   }
   if (role === 'MEDIATOR') {
-    const filter = { officeCode: assignment.officeCode, stage: { $ne: 'CERTIFIED_FINAL' }, $or: [{ mediatorUserId: actor.userId }, { mediatorUserId: null }] }
+    // A mediator sees only the mediations a DLAO officer appointed them to.
+    const filter = { officeCode: assignment.officeCode, stage: { $ne: 'CERTIFIED_FINAL' }, mediatorUserId: actor.userId }
     const mediations = await Mediation.find(filter).sort({ updatedAt: -1 }).limit(50).select('applicationId caseId stage legalEffectState').lean()
     const applications = await Application.find({ applicationId: { $in: mediations.map(({ applicationId }) => applicationId) } }).select('applicationId status reviewState applicantPersonId').lean()
     const people = await Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName').lean()
@@ -1405,8 +1406,13 @@ export async function assignOfficer(applicationId, { reason }, actor) {
 const explicitlyGranted = (document, actor) => document.accessState === 'EXPLICIT_GRANT' && document.allowedUserIds.some((id) => id.equals(actor.userId))
 
 // Office roles read standard documents; restricted evidence needs a per-user grant or an active referral naming this user.
+// The mediator a DLAO officer appointed reads the case like the officer, except restricted evidence.
+const appointedMediator = (applicationId, officeCode, actor) => hasOfficeRole(actor, 'MEDIATOR', officeCode)
+  && Mediation.exists({ applicationId, officeCode, mediatorUserId: actor.userId })
+
 async function documentAccess(document, application, actor) {
   const restricted = document.sensitivity === 'RESTRICTED'
+  if (!restricted && await appointedMediator(application.applicationId, application.officeCode, actor)) return { basis: 'MEDIATOR' }
   const staff = hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)
   if (staff && (!restricted || explicitlyGranted(document, actor))) return { basis: restricted ? 'EXPLICIT_GRANT' : 'OFFICE' }
   if (!actor.assignments.some(({ role }) => role === 'RECEIVING_DLAO')) return null
@@ -1437,8 +1443,9 @@ export async function getDocument(documentId, actor) {
 export async function listDocuments(applicationId, actor) {
   const application = await Application.findOne({ applicationId }).select('officeCode').lean()
   if (!application) throw new HttpError(404, 'NOT_FOUND', 'Application not found.')
-  if (!hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) && !hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot read documents.')
-  const documents = await Document.find({ applicationId }).sort({ createdAt: -1 }).lean()
+  const office = hasOfficeRole(actor, 'DLAO_OFFICER', application.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', application.officeCode)
+  if (!office && !await appointedMediator(applicationId, application.officeCode, actor)) throw new HttpError(403, 'FORBIDDEN', 'This office cannot read documents.')
+  const documents = await Document.find({ applicationId, ...(office ? {} : { sensitivity: 'STANDARD' }) }).sort({ createdAt: -1 }).lean()
   // Ungranted staff learn only that restricted evidence exists, never its label.
   return documents.map((item) => item.sensitivity !== 'RESTRICTED' || explicitlyGranted(item, actor)
     ? { id: item._id, label: item.label, sensitivity: item.sensitivity, currentVersion: item.currentVersion }

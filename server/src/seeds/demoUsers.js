@@ -6,7 +6,7 @@ import { Application, Case, CaseFact, ContactAttempt, LawyerAssignment, LawyerUp
 import { acceptApplication, addFact, createDocumentMetadata, lookupHash, newVoicePin, overridePriority, recordContactAttempt, reviewApplication, setSafeContact, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
 import { createAssisted } from '../services/assistedService.js'
 import { assignLawyer, respondToAssignment, scheduleLawyerUpdate, updateCasePlan } from '../services/lawyerService.js'
-import { claimMediation, recordScheduling, startMediation } from '../services/mediationService.js'
+import { recordScheduling, setMediator, startMediation } from '../services/mediationService.js'
 import { ensureAdminUser } from '../services/authService.js'
 import { demoAccounts as accounts, demoPassword, ensureDemoAccounts } from '../services/demoAccounts.js'
 
@@ -256,7 +256,7 @@ try {
     const mediatorUser = await User.findOne({ username: 'demo.mediator' })
     const mediatorRole = await RoleAssignment.findOne({ userId: mediatorUser._id, role: 'MEDIATOR', active: true })
     const mediatorActor = { userId: mediatorUser._id, assignments: [mediatorRole] }
-    await claimMediation(rashida.applicationId, mediatorActor)
+    await setMediator(rashida.applicationId, { mediatorUserId: String(mediatorUser._id) }, officerActor)
     await recordScheduling(rashida.applicationId, {
       mode: 'IN_PERSON',
       scheduledAt: new Date(Date.now() + 4 * 86400000).toISOString(),

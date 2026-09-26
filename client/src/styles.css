@@ -3405,3 +3405,4 @@ thead th { font-size: .8rem; color: #4e5751; }
 .record-badge.is-draft { background: #fbf3db; color: #7a5200; }
 .udc-row { display: flex; flex-direction: column; gap: .25rem; margin: 0; padding: .85rem 1.15rem; color: inherit; text-decoration: none; }
 a.udc-row:hover, a.udc-row:focus-visible { border-color: #c9c7c0; }
+.record-badge.is-filled { background: #e1f3fe; color: #1f6c9f; text-transform: none; letter-spacing: 0; }

@@ -26,7 +26,7 @@ router.post('/:applicationId/tasks', applicationIdParam, requireRole('DLAO_OFFIC
 router.post('/:applicationId/tasks/:taskId/complete', applicationIdParam, taskIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), finishTask)
 router.get('/:applicationId/contact-attempts', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), readContactAttempts)
 router.post('/:applicationId/contact-attempts', applicationIdParam, requireRole('DLAO_OFFICER'), validateContactAttempt, addContactAttempt)
-router.get('/:applicationId/documents', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT'), readDocuments)
+router.get('/:applicationId/documents', applicationIdParam, requireRole('DLAO_OFFICER', 'CASE_SUPPORT', 'MEDIATOR'), readDocuments)
 router.post('/:applicationId/documents', applicationIdParam, requireRole('DLAO_OFFICER'), validateDocument, addDocument)
 router.get('/:applicationId/evidence-access', applicationIdParam, requireRole('DLAO_OFFICER'), readEvidenceAccess)
 router.get('/:applicationId/referrals', applicationIdParam, requireRole('DLAO_OFFICER'), readForApplication)

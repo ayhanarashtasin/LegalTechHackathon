@@ -163,7 +163,7 @@ export async function reviewerState(applicationId, actor) {
 export async function reviewVerification(applicationId, input = {}, actor) {
   if (!mongoose.isValidObjectId(input.verificationId) || !['VERIFIED', 'RETAKE_REQUIRED', 'MANUAL_REVIEW_REQUIRED'].includes(input.status) || typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000) fail(400, 'INVALID_IDENTITY_REVIEW', 'Choose a decision and provide a review reason (10–1000 characters).')
   return mongoose.connection.transaction(async (session) => {
-    const { application } = await context(applicationId, actor, session, { requireClaim: true })
+    const { application, role } = await context(applicationId, actor, session, { requireClaim: true })
     const record = await PartyVerification.findOne({ _id: input.verificationId, applicationId }).session(session)
     if (!record) fail(404, 'NOT_FOUND', 'Verification not found.')
     const invitation = await SigningInvitation.findById(record.invitationId).session(session)
@@ -187,16 +187,17 @@ export async function reviewVerification(applicationId, input = {}, actor) {
     await record.save({ session })
     invitation.updatedAt = new Date()
     await invitation.save({ session })
-    await recordMutation(application, session, actor, 'MEDIATOR', 'MEDIATION_IDENTITY_REVIEWED', previousState, { verificationId: String(record._id), signerRole: record.signerRole, status: record.status, mode: record.mode, draftVersion: record.draftVersion }, 'The assigned mediator recorded an identity review. Private evidence and review notes are held separately.')
+    await recordMutation(application, session, actor, role, 'MEDIATION_IDENTITY_REVIEWED', previousState, { verificationId: String(record._id), signerRole: record.signerRole, status: record.status, mode: record.mode, draftVersion: record.draftVersion }, 'The appointed mediator (or the DLAO officer, with none appointed) recorded an identity review. Private evidence and review notes are held separately.')
     return summary(record)
   })
 }
 
 export async function readIdentityEvidence(evidenceId, { code, applicationId, actor }) {
   const invitation = code ? await currentInvitation(code) : null
+  let reviewerRole = 'SYSTEM'
   if (!invitation) {
     if (!actor || !applicationId) fail(403, 'FORBIDDEN', 'A private signing code or assigned mediator session is required.')
-    await context(applicationId, actor, undefined, { requireClaim: true })
+    reviewerRole = (await context(applicationId, actor, undefined, { requireClaim: true })).role
   }
   if (!mongoose.isValidObjectId(evidenceId)) fail(404, 'NOT_FOUND', 'Evidence not found.')
   const evidence = await PartyEvidence.findOne({ _id: evidenceId, expiresAt: { $gt: new Date() } }).select('+ciphertext +iv +tag')
@@ -215,7 +216,7 @@ export async function readIdentityEvidence(evidenceId, { code, applicationId, ac
   await mongoose.connection.transaction(async (session) => {
     const application = await Application.findOne({ applicationId: record.applicationId }).session(session)
     if (!application) fail(404, 'NOT_FOUND', 'The case is unavailable.')
-    await recordMutation(application, session, actor ?? { userId: null }, actor ? 'MEDIATOR' : 'SYSTEM', 'MEDIATION_IDENTITY_EVIDENCE_ACCESSED', null, { verificationId: String(record._id), evidenceId: String(evidence._id), slot: evidence.slot }, 'An authorised reviewer or the private invitation holder accessed identity evidence.', actor ? 'DLAO' : 'WEB')
+    await recordMutation(application, session, actor ?? { userId: null }, actor ? reviewerRole : 'SYSTEM', 'MEDIATION_IDENTITY_EVIDENCE_ACCESSED', null, { verificationId: String(record._id), evidenceId: String(evidence._id), slot: evidence.slot }, 'An authorised reviewer or the private invitation holder accessed identity evidence.', actor ? 'DLAO' : 'WEB')
   })
   return { bytes, mime: evidence.mime }
 }
