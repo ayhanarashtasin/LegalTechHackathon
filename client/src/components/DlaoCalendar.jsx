@@ -142,7 +142,7 @@ export function DlaoCalendar({ events = [] }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                   {grouped[dateKey].map((ev) => {
                     const badge = typeBadges[ev.type] || { bg: '#F5F5F5', color: '#555', en: ev.type, bn: ev.type }
-                    const linkTarget = ev.caseId ? `/cases/${ev.caseId}` : ev.applicationId ? `/applications/${ev.applicationId}` : '#'
+                    const linkTarget = ev.applicationId ? `/applications/${ev.applicationId}` : ev.caseId ? `/cases/${ev.caseId}` : '#'
 
                     return (
                       <div

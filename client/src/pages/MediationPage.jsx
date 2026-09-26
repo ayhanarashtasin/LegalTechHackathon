@@ -48,13 +48,14 @@ function CaseSummary({ record }) {
   </section>
 }
 
-// DLAO lists link to /cases/:caseId; for the CLAO that opens the same read-only case view.
+// Resolves /cases/:caseId to the authoritative /applications/:applicationId for officers, mediators, and staff.
 export function CaseRedirect({ session }) {
   const { caseId } = useParams()
-  const [target, setTarget] = useState(null)
+  const [target, setTarget] = useState(() => (caseId?.startsWith('APP-') ? caseId : null))
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (caseId?.startsWith('APP-')) return
     const controller = new AbortController()
     api(`/api/cases/${encodeURIComponent(caseId)}`, { token: session.token, signal: controller.signal })
       .then((result) => setTarget(result.applicationId)).catch((failure) => { if (failure.name !== 'AbortError') setError(failure.message) })

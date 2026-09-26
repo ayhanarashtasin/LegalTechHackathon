@@ -819,7 +819,7 @@ export async function listWorkspace(role, actor) {
       const medApps = await Application.find({ applicationId: { $in: medAppIds } }).select('applicationId petitioner respondent').lean()
       const medAppMap = new Map(medApps.map((a) => [a.applicationId, a]))
 
-      mediationList = mediations.map((m) => {
+      mediationList = mediations.filter((m) => medAppMap.has(m.applicationId)).map((m) => {
         const app = medAppMap.get(m.applicationId)
         const rec = records.find((r) => r.applicationId === m.applicationId)
         return {
@@ -936,7 +936,7 @@ export async function listWorkspace(role, actor) {
     const people = await Person.find({ _id: { $in: applications.map(({ applicantPersonId }) => applicantPersonId) } }).select('displayName').lean()
     const names = new Map(people.map((person) => [person._id.toString(), person.displayName]))
     const records = new Map(applications.map((item) => [item.applicationId, item]))
-    return { role, officeCode: assignment.officeCode, records: mediations.map((mediation) => {
+    return { role, officeCode: assignment.officeCode, records: mediations.filter((m) => records.has(m.applicationId)).map((mediation) => {
       const item = records.get(mediation.applicationId)
       return { applicationId: mediation.applicationId, caseId: mediation.caseId, status: item?.status, reviewState: item?.reviewState, applicantName: names.get(item?.applicantPersonId?.toString()) ?? 'Unavailable', mediationStage: mediation.stage, legalEffectState: mediation.legalEffectState }
     }) }
@@ -1206,7 +1206,7 @@ export async function lawyerCaseSummaries(applicationIds) {
 export async function getCase(caseId, actor) {
   const record = await Case.findOne({ caseId }).lean()
   if (!record) throw new HttpError(404, 'NOT_FOUND', 'Case not found.')
-  const officeAccess = hasOfficeRole(actor, 'DLAO_OFFICER', record.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', record.officeCode) || hasOfficeRole(actor, 'CLAO', record.officeCode)
+  const officeAccess = hasOfficeRole(actor, 'DLAO_OFFICER', record.officeCode) || hasOfficeRole(actor, 'CASE_SUPPORT', record.officeCode) || hasOfficeRole(actor, 'CLAO', record.officeCode) || hasOfficeRole(actor, 'MEDIATOR', record.officeCode)
   if (officeAccess) return { caseId, applicationId: record.applicationId, status: record.status, nextHearingAt: record.nextHearingAt ?? null, nextAction: record.nextAction ?? null }
   const assignment = actor.assignments.some(({ role, officeCode }) => role === 'PANEL_LAWYER' && officeCode === record.officeCode)
     && await LawyerAssignment.findOne({ caseId, lawyerUserId: actor.userId, active: true, status: { $in: ['PENDING', 'ACCEPTED'] } }).lean()

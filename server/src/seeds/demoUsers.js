@@ -6,6 +6,7 @@ import { Application, Case, CaseFact, ContactAttempt, LawyerAssignment, LawyerUp
 import { acceptApplication, addFact, createDocumentMetadata, lookupHash, newVoicePin, overridePriority, recordContactAttempt, reviewApplication, setSafeContact, submitApplication, submitVoiceIntake } from '../services/applicationService.js'
 import { createAssisted } from '../services/assistedService.js'
 import { assignLawyer, respondToAssignment, scheduleLawyerUpdate, updateCasePlan } from '../services/lawyerService.js'
+import { claimMediation, recordScheduling, startMediation } from '../services/mediationService.js'
 import { ensureAdminUser } from '../services/authService.js'
 import { demoAccounts as accounts, demoPassword, ensureDemoAccounts } from '../services/demoAccounts.js'
 
@@ -224,6 +225,49 @@ try {
   if (!triageConflict.priorityDecision) await overridePriority(triageConflict.applicationId, {
     priorityDecision: 'ROUTINE', reason: 'Fictional initial routine priority recorded.',
   }, officerActor)
+
+  let rashida = await Application.findOne({ demoSeedKey: 'STEP12_RASHIDA' })
+  if (!rashida) {
+    const created = await submitApplication({ applicantName: 'Fictional Rashida Begum (demo)', demoSeedKey: 'STEP12_RASHIDA' }, officerActor)
+    rashida = await Application.findOne({ applicationId: created.applicationId })
+    await reviewApplication(rashida.applicationId, {
+      reviewState: 'READY_FOR_DECISION',
+      reason: 'Fictional Rashida Begum family dispute reviewed for mediation.',
+    }, officerActor)
+    await acceptApplication(rashida.applicationId, 'Fictional family dispute accepted by DLAO officer for mediation.', officerActor)
+    rashida = await Application.findOne({ applicationId: rashida.applicationId })
+    await addFact(rashida.applicationId, {
+      field: 'complaint.summary',
+      value: 'Fictional pre-litigation family maintenance and child support dispute; parties agree to mediate.',
+      sourceType: 'STAFF_ENTERED',
+    }, officerActor)
+    await addFact(rashida.applicationId, {
+      field: 'complaint.type',
+      value: 'FAMILY_MAINTENANCE',
+      sourceType: 'STAFF_ENTERED',
+    }, officerActor)
+    await Application.updateOne({ applicationId: rashida.applicationId }, {
+      $set: {
+        petitioner: { name: 'Rashida Begum', contactValue: '01711000001', address: 'Dhanmondi, Dhaka' },
+        respondent: { name: 'Fictional Tariqul Islam', contactValue: '01711000002', address: 'Mirpur, Dhaka' },
+      },
+    })
+    await startMediation(rashida.applicationId, officerActor)
+    const mediatorUser = await User.findOne({ username: 'demo.mediator' })
+    const mediatorRole = await RoleAssignment.findOne({ userId: mediatorUser._id, role: 'MEDIATOR', active: true })
+    const mediatorActor = { userId: mediatorUser._id, assignments: [mediatorRole] }
+    await claimMediation(rashida.applicationId, mediatorActor)
+    await recordScheduling(rashida.applicationId, {
+      mode: 'IN_PERSON',
+      scheduledAt: new Date(Date.now() + 4 * 86400000).toISOString(),
+      venue: 'DLAO Mediation Room 1, District Legal Aid Office',
+      inPersonFallback: 'District Legal Aid Office, Dhaka',
+      notices: [
+        { party: 'PARTY_A', deliveryState: 'DELIVERED', reason: 'Delivered in-person at intake.' },
+        { party: 'PARTY_B', deliveryState: 'DELIVERED', reason: 'Delivered via process server.' },
+      ],
+    }, mediatorActor)
+  }
 
   console.log('Seeded fictional provider accounts and exactly 5 distinct representative cases (Moyuri/Ripon audio intake, Nuching pending intake, Nabila urgent case, Malek accepted case, and routine case).')
 } catch (error) {

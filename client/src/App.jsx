@@ -78,8 +78,8 @@ export default function App() {
   const isCitizen = session?.user?.assignments?.some(({ role }) => role === 'CITIZEN')
   const mediationOnly = session?.user?.assignments?.some(({ role }) => role === 'MEDIATOR' || role === 'CLAO')
     && !session?.user?.assignments?.some(({ role }) => role === 'DLAO_OFFICER')
-  const claoCaseView = session?.user?.assignments?.some(({ role }) => role === 'CLAO')
-    && !session?.user?.assignments?.some(({ role }) => role === 'DLAO_OFFICER' || role === 'PANEL_LAWYER')
+  const isLawyer = session?.user?.assignments?.some(({ role }) => role === 'PANEL_LAWYER')
+    && !session?.user?.assignments?.some(({ role }) => role === 'DLAO_OFFICER')
 
   useEffect(() => {
     document.documentElement.dataset.lightMode = lightMode ? 'on' : 'off'
@@ -326,7 +326,7 @@ export default function App() {
           <Route path="/applications/:applicationId/mediation/verify" element={session ? <MediationVerifier session={session} /> : <Navigate to="/" replace />} />
           <Route path="/mediation/sign" element={<PartySigning />} />
           <Route path="/applications/:applicationId" element={session ? mediationOnly ? <MediationPage session={session} /> : <RecordPage session={session} /> : <Navigate to="/" replace />} />
-          <Route path="/cases/:caseId" element={session ? claoCaseView ? <CaseRedirect session={session} /> : <LawyerCasePage session={session} /> : <Navigate to="/" replace />} />
+          <Route path="/cases/:caseId" element={session ? isLawyer ? <LawyerCasePage session={session} /> : <CaseRedirect session={session} /> : <Navigate to="/" replace />} />
           <Route path="/referrals/:referralId" element={session?.user.assignments.some(({ role }) => role === 'RECEIVING_DLAO') ? <ReferralPage session={session} /> : <Navigate to="/" replace />} />
           <Route path="/incidents/:groupId" element={session?.user.assignments.some(({ role }) => ['DLAO_OFFICER', 'CASE_SUPPORT'].includes(role)) ? <IncidentGroupPage session={session} /> : <Navigate to="/" replace />} />
           <Route path="/voice" element={<VoiceAccess session={session} lightMode={lightMode} />} />

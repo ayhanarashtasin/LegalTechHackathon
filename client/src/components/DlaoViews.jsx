@@ -82,7 +82,7 @@ export function HearingListView({ hearings = [], hearingList = [] }) {
             const isToday = h.nextHearingAt && new Date(h.nextHearingAt).toISOString().slice(0, 10) === todayStr
             return (
               <li key={h.caseId || h.applicationId}>
-                <Link to={`/cases/${h.caseId}`} className={isToday ? 'urgent-record' : ''}>
+                <Link to={`/applications/${h.applicationId || h.caseId}`} className={isToday ? 'urgent-record' : ''}>
                   <strong>{h.caseId} · {h.court || bi('Court not specified', 'আদালত নির্ধারিত নেই')}</strong>
                   <span>
                     {h.applicantName ? <>{h.applicantName} · </> : ''}
@@ -178,7 +178,7 @@ export function MediationCaseListView({ mediations = [], mediationList = [] }) {
             const hasSessions = (m.sessionsCount || 0) > 0
             return (
               <li key={m.mediationId || m.applicationId}>
-                <Link to={`/cases/${m.caseId || m.applicationId}`}>
+                <Link to={`/applications/${m.applicationId}`}>
                   <strong>{m.caseId || m.applicationId} · {say(m.stage)}</strong>
                   <span>
                     {m.applicantName ? <>{m.applicantName} · </> : ''}
@@ -277,7 +277,7 @@ export function LawyerFeedbackView({ feedback = [], lawyerFeedback = [], token, 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
                       <strong>
-                        <Link to={`/cases/${item.caseId}`} style={{ color: '#111', textDecoration: 'none' }}>
+                        <Link to={`/applications/${item.applicationId || item.caseId}`} style={{ color: '#111', textDecoration: 'none' }}>
                           {item.caseId}
                         </Link>
                         {' · '}
