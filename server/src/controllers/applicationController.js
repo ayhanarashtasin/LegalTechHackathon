@@ -1,5 +1,5 @@
 import { extractAnswers, transcribeAnswer } from '../services/ai/groq.js'
-import { acceptApplication, addFact, recordAdviceOutcome, addRepresentation, completeTask, correctFact, createTask, editCaseInformation, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, preMediationVerify, recordConsent, recordContactAttempt, recordNoticeSent, reviewApplication, reviewCaseCancellationRequest, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake, trackApplicationStatus } from '../services/applicationService.js'
+import { acceptApplication, addFact, recordApplicantWithdrawal, verifyFact, recordAdviceOutcome, addRepresentation, completeTask, correctFact, createTask, editCaseInformation, getApplication, getApplicationAudit, getCallRecording, getCaseHistory, getFacts, getSafeContact, getTranscript, listContactAttempts, listTasks, listWorkspace, lookupHelplineStatus, overridePriority, preMediationVerify, recordConsent, recordContactAttempt, recordNoticeSent, reviewApplication, reviewCaseCancellationRequest, searchRecord, setSafeContact, storeCallRecording, submitApplication, submitVoiceIntake, trackApplicationStatus } from '../services/applicationService.js'
 
 export async function submit(request, response) {
   response.status(201).json(await submitApplication(request.body, request.auth))
@@ -89,6 +89,14 @@ export async function recordCorrection(request, response) {
 
 export async function readFacts(request, response) {
   response.json(await getFacts(request.params.applicationId, request.auth))
+}
+
+export async function recordFactVerification(request, response) {
+  response.status(201).json(await verifyFact(request.params.applicationId, request.params.factId, request.body, request.auth))
+}
+
+export async function withdraw(request, response) {
+  response.json(await recordApplicantWithdrawal(request.params.applicationId, request.body, request.auth))
 }
 
 export async function updateSafeContact(request, response) {

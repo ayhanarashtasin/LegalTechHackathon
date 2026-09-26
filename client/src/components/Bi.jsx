@@ -67,7 +67,7 @@ const words = {
   // History events
   APPLICATION_SUBMITTED: ['Application submitted', 'আবেদন জমা'], APPLICATION_REVIEWED: ['Application reviewed', 'আবেদন পর্যালোচনা হয়েছে'],
   APPLICATION_ACCEPTED: ['Application accepted', 'আবেদন গৃহীত'], APPLICANT_CORRECTION_ATTESTED: ['Applicant correction confirmed', 'আবেদনকারীর সংশোধন নিশ্চিত'],
-  APPLICATION_CANCELLED_BY_APPLICANT: ['Application cancelled by applicant', 'আবেদনকারী আবেদন বাতিল করেছেন'], APPLICANT_CASE_CANCELLATION_REQUESTED: ['Applicant requested case cancellation', 'আবেদনকারী মামলা বাতিলের অনুরোধ করেছেন'],
+  APPLICATION_CANCELLED_BY_APPLICANT: ['Application cancelled by applicant', 'আবেদনকারী আবেদন বাতিল করেছেন'], APPLICATION_WITHDRAWN_BY_APPLICANT: ['Withdrawn by the applicant', 'আবেদনকারী নিজে আবেদন প্রত্যাহার করেছেন'], FACT_VERIFIED_BY_APPLICANT: ['Fact verified with the applicant', 'আবেদনকারীর সাথে তথ্য যাচাই সম্পন্ন'], FACT_VERIFICATION_UNDONE: ['Fact verification undone', 'তথ্য যাচাই বাতিল করা হয়েছে'], WITHDRAWN: ['Withdrawn', 'প্রত্যাহার করা হয়েছে'], APPLICANT_CASE_CANCELLATION_REQUESTED: ['Applicant requested case cancellation', 'আবেদনকারী মামলা বাতিলের অনুরোধ করেছেন'],
   CASE_CANCELLATION_DECLINED: ['Cancellation request declined', 'বাতিলের অনুরোধ প্রত্যাখ্যাত'], CASE_CANCELLED: ['Case cancelled', 'মামলা বাতিল'],
   ASSISTANCE_RECORDED: ['Assistance recorded', 'সহায়তার তথ্য নথিভুক্ত হয়েছে'], CALL_RECORDING_STORED: ['Call recording saved', 'কল রেকর্ড সংরক্ষিত'],
   CONSENT_RECORDED: ['Consent recorded', 'সম্মতি নথিভুক্ত হয়েছে'], CONTACT_ATTEMPT_LOGGED: ['Contact attempt logged', 'যোগাযোগের চেষ্টা নথিভুক্ত হয়েছে'],

@@ -37,9 +37,12 @@ export function validateSubmission(request, _response, next) {
   next()
 }
 
+// Accepting needs no justification from the officer (only a rejection does); the audit still records who accepted and when.
 export function validateAcceptance(request, _response, next) {
-  const value = body(request, ['reason'])
-  value.reason = text(value.reason, 'Human decision reason', 10, 1000)
+  const value = body(request, ['reason'], [])
+  value.reason = typeof value.reason === 'string' && value.reason.trim()
+    ? text(value.reason, 'Acceptance note', 1, 1000)
+    : 'Accepted by the DLAO officer.'
   next()
 }
 
@@ -220,6 +223,23 @@ export function validateCorrection(request, _response, next) {
   const value = body(request, ['value', 'attestation'])
   value.value = text(value.value, 'Correction', 1, 4000)
   value.attestation = text(value.attestation, 'Applicant confirmation attestation', 10, 500)
+  next()
+}
+
+// Verifying needs a logged contact where the applicant herself was reached; undoing needs only the officer's reason.
+export function validateFactVerification(request, _response, next) {
+  const value = body(request, ['verified', 'contactAttemptId', 'note'], ['verified', 'note'])
+  if (typeof value.verified !== 'boolean') fail('Say whether the fact is verified.')
+  if (value.verified) objectId(value.contactAttemptId, 'Contact log entry')
+  else if (value.contactAttemptId !== undefined) fail('A contact log entry applies only when verifying.')
+  value.note = text(value.note, value.verified ? 'What the applicant confirmed' : 'Reason for undoing verification', 10, 500)
+  next()
+}
+
+export function validateApplicantWithdrawal(request, _response, next) {
+  const value = body(request, ['contactAttemptId', 'statement'])
+  objectId(value.contactAttemptId, 'Contact log entry')
+  value.statement = text(value.statement, "The applicant's own reason", 10, 1000)
   next()
 }
 

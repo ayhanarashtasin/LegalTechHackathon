@@ -192,7 +192,9 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
           </div>
 
           <dl className="details compact" style={{ margin: 0 }}>
-            <div><dt><Bi en="Name" bn="নাম" /></dt><dd><strong>{respondent.name || <span className="muted" style={{ fontStyle: 'italic' }}>{bi('Not entered yet', 'এখনো যোগ করা হয়নি')}</span>}</strong></dd></div>
+            <div><dt><Bi en="Name" bn="নাম" /></dt><dd>{respondent.name ? <strong>{respondent.name}</strong>
+              : targetRecord.respondentFromCaseFile ? <><strong>{targetRecord.respondentFromCaseFile}</strong> <small className="muted">({bi('from the case file, not verified', 'মামলার বিবরণ থেকে, যাচাই হয়নি')})</small></>
+                : <span className="muted" style={{ fontStyle: 'italic' }}>{bi('Not entered yet', 'এখনো যোগ করা হয়নি')}</span>}</dd></div>
             <div><dt><Bi en="Phone (Number)" bn="মোবাইল নম্বর" /></dt><dd>{respondent.phone || <span className="muted">{bi('Not recorded', 'নথিভুক্ত নেই')}</span>}</dd></div>
             <div><dt><Bi en="Address" bn="ঠিকানা" /></dt><dd>{respondent.address || <span className="muted">{bi('Not specified', 'উল্লেখ নেই')}</span>}</dd></div>
             <div><dt><Bi en="Relationship" bn="সম্পর্ক" /></dt><dd>{respondent.relationship || <span className="muted">{bi('Not specified', 'উল্লেখ নেই')}</span>}</dd></div>

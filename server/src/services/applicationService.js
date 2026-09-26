@@ -599,6 +599,90 @@ export async function correctFact(applicationId, factId, { value, attestation },
   })
 }
 
+// The applicant herself, reached on a logged call, is the only one who can move a fact to verified; a representative's
+// word never does. Each change is a new revision, so the earlier value, its source and the undo all stay on record.
+async function applicantReachedAttempt(applicationId, contactAttemptId, session) {
+  const attempt = await ContactAttempt.findOne({ _id: contactAttemptId, applicationId }).session(session)
+  if (!attempt) throw new HttpError(404, 'NOT_FOUND', 'Contact log entry not found.')
+  if (attempt.outcome !== 'APPLICANT_REACHED') throw new HttpError(409, 'APPLICANT_NOT_REACHED', 'Only a logged contact in which the applicant herself was reached can be used.')
+  return attempt
+}
+
+export async function verifyFact(applicationId, factId, { verified, contactAttemptId, note }, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const application = await officeApplication(applicationId, actor, session)
+    const previous = await CaseFact.findOne({ _id: factId, applicationId }).session(session)
+    if (!previous) throw new HttpError(404, 'NOT_FOUND', 'Fact not found.')
+    const latest = await CaseFact.findOne({ applicationId, field: previous.field }).sort({ revision: -1 }).session(session)
+    if (!latest._id.equals(previous._id)) throw new HttpError(409, 'CONFLICT', 'This fact has a newer revision.')
+    if (previous.field === 'identity.nid') throw new HttpError(409, 'DOCUMENT_CHECK_REQUIRED', 'An NID is verified against the document, not by phone.')
+    if (previous.applicantConfirmed === verified) throw new HttpError(409, 'NO_CHANGE', verified ? 'This fact is already verified.' : 'This fact is not verified.')
+    // Only a verification made here can be undone; a fact the applicant gave or confirmed herself stays as she gave it.
+    if (!verified && !previous.confirmationContactAttemptId) throw new HttpError(409, 'NOT_UNDOABLE', 'Only a verification recorded from a contact log entry can be undone.')
+    const attempt = verified ? await applicantReachedAttempt(applicationId, contactAttemptId, session) : null
+    // Undoing returns the fact to the source it had before it was confirmed.
+    const before = verified ? null : previous.supersedesFactId && await CaseFact.findById(previous.supersedesFactId).session(session)
+    const updated = await advance(application, session)
+    const [fact] = await CaseFact.create([{
+      applicationId, caseId: application.caseId, field: previous.field, value: previous.value,
+      sourceType: verified ? 'APPLICANT_CONFIRMED' : before?.sourceType ?? 'UNKNOWN_OR_UNVERIFIED',
+      sourcePersonId: verified ? application.applicantPersonId : before?.sourcePersonId,
+      captureMethod: 'STAFF', callerConfirmed: previous.callerConfirmed, aiInferred: verified ? false : previous.aiInferred || Boolean(before?.aiInferred),
+      applicantConfirmed: verified, confirmedByPersonId: verified ? application.applicantPersonId : undefined,
+      confirmationAttestation: note, confirmationContactAttemptId: attempt?._id,
+      supersedesFactId: previous._id, revision: previous.revision + 1, recordedByUserId: actor.userId,
+    }], { session })
+    await appendAudit({
+      applicationId, caseId: application.caseId, sequence: updated.auditSequence,
+      action: verified ? 'FACT_VERIFIED_BY_APPLICANT' : 'FACT_VERIFICATION_UNDONE',
+      actorUserId: actor.userId, actorRole: 'DLAO_OFFICER',
+      previousState: { factId: previous.id, sourceType: previous.sourceType, applicantConfirmed: previous.applicantConfirmed },
+      newState: { factId: fact.id, sourceType: fact.sourceType, applicantConfirmed: verified, contactAttemptId: attempt?.id ?? null },
+      reason: note,
+    }, session)
+    return fact
+  })
+}
+
+// A withdrawal is the applicant's own decision, confirmed with her on a logged call; the reason recorded is her
+// statement, never the representative's. It closes the record the same way an approved cancellation does.
+export async function recordApplicantWithdrawal(applicationId, { contactAttemptId, statement }, actor) {
+  return mongoose.connection.transaction(async (session) => {
+    const application = await officeApplication(applicationId, actor, session)
+    if (application.status === 'CANCELLED') throw new HttpError(409, 'ALREADY_CLOSED', 'This record is already closed.')
+    const attempt = await applicantReachedAttempt(applicationId, contactAttemptId, session)
+    if (application.caseId) {
+      await requireOpenCase(applicationId, session)
+      if (await Referral.exists({ applicationId, status: { $in: ['SENT', 'ACKNOWLEDGED'] } }).session(session)) {
+        throw new HttpError(409, 'REFERRAL_ACTIVE', 'Resolve the pending referral before closing this case.')
+      }
+      if (await Mediation.exists({ applicationId, stage: { $ne: 'REGISTRATION' } }).session(session)) {
+        throw new HttpError(409, 'MEDIATION_IN_PROGRESS', 'Wind down the active mediation before closing this case.')
+      }
+    }
+    const previousStatus = application.status
+    const updated = await advance(application, session, {
+      status: 'CANCELLED',
+      withdrawal: { contactAttemptId: attempt._id, statement, recordedByUserId: actor.userId, recordedAt: new Date() },
+    })
+    if (application.caseId) {
+      await Case.updateOne({ caseId: application.caseId }, { $set: { status: 'CANCELLED' } }, { session })
+      await LawyerAssignment.updateMany({ applicationId, active: true }, { $set: { active: false } }, { session })
+      await LawyerUpdate.updateMany({ applicationId, status: 'PENDING' }, { $set: { status: 'CANCELLED' } }, { session })
+    }
+    await Task.updateMany({ applicationId, status: 'OPEN' }, { $set: { status: 'DONE', completedAt: new Date(), completedByUserId: actor.userId } }, { session })
+    await CancellationRequest.updateMany({ applicationId, status: 'OPEN' }, { $set: { status: 'APPROVED', reviewedByUserId: actor.userId, reviewedAt: new Date(), reviewReason: statement } }, { session })
+    await appendAudit({
+      applicationId, caseId: updated.caseId, sequence: updated.auditSequence,
+      action: 'APPLICATION_WITHDRAWN_BY_APPLICANT', actorUserId: actor.userId, actorRole: 'DLAO_OFFICER', channel: 'DLAO',
+      previousState: { status: previousStatus },
+      newState: { status: 'CANCELLED', withdrawnBy: 'APPLICANT', applicantPersonId: String(application.applicantPersonId), contactAttemptId: attempt.id },
+      reason: statement,
+    }, session)
+    return { applicationId, status: updated.status, version: updated.version }
+  })
+}
+
 export async function setSafeContact(applicationId, input, actor) {
   return mongoose.connection.transaction(async (session) => {
     const application = await officeApplication(applicationId, actor, session)
@@ -722,6 +806,9 @@ export async function getApplication(applicationId, actor) {
     } : null,
     petitioner: application.petitioner ?? null,
     respondent: application.respondent ?? null,
+    // Until an officer records the Bibadi, the person the case file names as involved stands in, marked unverified.
+    respondentFromCaseFile: application.respondent?.name ? null : summary['incident.who'] ?? null,
+    withdrawal: application.withdrawal?.recordedAt ? { statement: application.withdrawal.statement, recordedAt: application.withdrawal.recordedAt } : null,
     meansTest: application.meansTest ?? null,
     preMediationVerification: application.preMediationVerification ?? null,
     notices: application.notices ?? [],

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, apiUrl } from '../services/api.js'
 import { AddForm, Badge, Bi, Panel, Term, bi, num, overdueText, say, tr, when } from '../components/Bi.jsx'
@@ -87,7 +87,6 @@ export default function RecordPage({ session }) {
   const [priorityDecision, setPriorityDecision] = useState('URGENT')
   const [priorityReason, setPriorityReason] = useState('')
   const [cancellationReviewReason, setCancellationReviewReason] = useState('')
-  const [acceptReason, setAcceptReason] = useState('')
   const [taskTitle, setTaskTitle] = useState('')
   const [taskAction, setTaskAction] = useState('')
   const [taskRole, setTaskRole] = useState('DLAO_OFFICER')
@@ -100,6 +99,13 @@ export default function RecordPage({ session }) {
   const [contactChannel, setContactChannel] = useState('PHONE')
   const [contactOutcome, setContactOutcome] = useState('BLOCKED_UNSAFE')
   const [contactReason, setContactReason] = useState('')
+  const [safeNumber, setSafeNumber] = useState('')
+  const [safeNumberTime, setSafeNumberTime] = useState('')
+  const [verifyingFactId, setVerifyingFactId] = useState(null)
+  const [verifyAttemptId, setVerifyAttemptId] = useState('')
+  const [verifyNote, setVerifyNote] = useState('')
+  const [withdrawAttemptId, setWithdrawAttemptId] = useState('')
+  const [withdrawStatement, setWithdrawStatement] = useState('')
   const [answeredByNote, setAnsweredByNote] = useState('')
   const [disclosed, setDisclosed] = useState('') // the officer's answer, never a default: 'NO' or 'YES'
   const [statusExplained, setStatusExplained] = useState('')
@@ -185,8 +191,7 @@ export default function RecordPage({ session }) {
 
   async function submitAcceptance(event) {
     event.preventDefault()
-    const result = await change(`/api/applications/${applicationId}/accept`, { reason: acceptReason }, bi('Application accepted. Case ID created.', 'আবেদন সফলভাবে গৃহীত হয়েছে এবং মামলা নম্বর প্রদান করা হয়েছে।'))
-    if (result) setAcceptReason('')
+    await change(`/api/applications/${applicationId}/accept`, {}, bi('Application accepted. Case ID created.', 'আবেদন সফলভাবে গৃহীত হয়েছে এবং মামলা নম্বর প্রদান করা হয়েছে।'))
   }
 
   async function submitPriority(event) {
@@ -234,6 +239,38 @@ export default function RecordPage({ session }) {
       setSelectedDocument(document)
       setDocLabel(document.label)
     } catch (failure) { setError(failure.message) }
+  }
+
+  // A new number becomes a new safe-contact version: the earlier plan stays on record, and phone calls are now allowed
+  // (SMS stays as it was). The time is kept unless the officer gives a new one.
+  async function submitSafeNumber(event) {
+    event.preventDefault()
+    const current = data.safeContact
+    const result = await change(`/api/applications/${applicationId}/safe-contact`, {
+      allowedChannels: [...new Set([...(current?.allowedChannels ?? []), 'PHONE'])],
+      prohibitedChannels: (current?.prohibitedChannels ?? ['SMS']).filter((code) => code !== 'PHONE'),
+      contactValue: safeNumber.trim(),
+      ...((safeNumberTime.trim() || current?.safeTimeWindow) ? { safeTimeWindow: safeNumberTime.trim() || current.safeTimeWindow } : {}),
+      smsSafe: Boolean(current?.smsSafe), neutralWordingRequired: current?.neutralWordingRequired ?? true,
+    }, bi('Safe number saved.', 'নিরাপদ নম্বর সংরক্ষিত হয়েছে।'))
+    if (result) { setSafeNumber(''); setSafeNumberTime('') }
+  }
+
+  // Verified only on a call where the applicant herself was reached; undo only what was verified this way.
+  async function submitFactVerification(event, fact) {
+    event.preventDefault()
+    const verified = !fact.applicantConfirmed
+    const result = await change(`/api/applications/${applicationId}/facts/${fact._id}/verification`,
+      { verified, ...(verified ? { contactAttemptId: verifyAttemptId } : {}), note: verifyNote },
+      verified ? bi('Fact marked verified.', 'তথ্য যাচাইকৃত হিসেবে চিহ্নিত হয়েছে।') : bi('Verification undone.', 'তথ্য যাচাই বাতিল করা হয়েছে।'))
+    if (result) { setVerifyingFactId(null); setVerifyAttemptId(''); setVerifyNote('') }
+  }
+
+  async function submitWithdrawal(event) {
+    event.preventDefault()
+    const result = await change(`/api/applications/${applicationId}/withdrawal`, { contactAttemptId: withdrawAttemptId, statement: withdrawStatement },
+      bi('Withdrawal recorded. The record is closed.', 'প্রত্যাহার নথিভুক্ত হয়েছে। নথিটি বন্ধ করা হয়েছে।'))
+    if (result) { setWithdrawAttemptId(''); setWithdrawStatement('') }
   }
 
   async function submitContact(event) {
@@ -349,6 +386,12 @@ export default function RecordPage({ session }) {
   const openTasks = data?.tasks.filter(({ status }) => status === 'OPEN').length ?? 0
   const events = officer ? data?.audit?.events : data?.history.events
   const integrity = officer ? data?.audit?.valid : data?.history.valid
+  // Only the newest revision of each fact can change, and only a call that reached the applicant herself can verify it.
+  const latestFactIds = new Set(Object.values((data?.facts ?? []).reduce((latest, fact) => {
+    if (!latest[fact.field] || latest[fact.field].revision < fact.revision) latest[fact.field] = fact
+    return latest
+  }, {})).map(({ _id }) => _id))
+  const applicantCalls = (data?.contacts ?? []).filter(({ outcome }) => outcome === 'APPLICANT_REACHED')
 
   return (
     <section aria-labelledby="record-title">
@@ -370,7 +413,7 @@ export default function RecordPage({ session }) {
               <Bi en="Edit Case Info" bn="মামলার তথ্য সংশোধন" />
             </button>
           )}
-          {ready && <Badge code={record.status} />}
+          {ready && <Badge code={record.withdrawal ? 'WITHDRAWN' : record.status} />}
         </div>
       </div>
       {showEditModal && (
@@ -429,7 +472,7 @@ export default function RecordPage({ session }) {
                   )}
                 </dd>
               </div>
-              {record.representation && <div className="wide"><dt><Bi en="Reported by" bn="প্রতিনিধি / আবেদনকারী" /></dt><dd>{record.representation.representativeName} · {record.representation.relationship} · <Bi en="authority" bn="প্রতিনিধিত্বের ক্ষমতা" /> <Term code={record.representation.authorityStatus} /></dd></div>}
+              {record.representation && <div className="wide"><dt><Bi en="Representative (not the Badi)" bn="প্রতিনিধি (বাদী নন)" /></dt><dd>{record.representation.representativeName} · {record.representation.relationship} · <Bi en="authority" bn="প্রতিনিধিত্বের ক্ষমতা" /> <Term code={record.representation.authorityStatus} /></dd></div>}
               {record.complaintSummary && (
                 <div className="wide">
                   <dt><Bi en="Application / Incident Description" bn="আবেদন / ঘটনার বিবরণ" /></dt>
@@ -460,7 +503,7 @@ export default function RecordPage({ session }) {
             <h2 id="safe-title"><Bi en="Safe contact" bn="নিরাপদ যোগাযোগের নিয়মাবলী" /></h2>
             {!data.safeContact && !record.safeContactPhone ? <p><Bi en="No safe route recorded. Do not contact or share details." bn="নিরাপদ যোগাযোগের কোনো নির্দিষ্ট মাধ্যম নথিতে সংরক্ষিত নেই। নিশ্চিত না হয়ে যোগাযোগ বা মামলার তথ্য প্রকাশ করবেন না।" /></p> : <dl className="details compact">
               <div style={{ background: '#ffffff', padding: '0.45rem 0.65rem', borderRadius: '4px', border: '1px solid #d4c494' }}>
-                <dt><Bi en="Safe phone number" bn="নিরাপদ ফোন নম্বর" /></dt>
+                <dt><Bi en="Safe number and time" bn="নিরাপদ ফোন নম্বর ও সময়" /></dt>
                 <dd>
                   {(data.safeContact?.contactValue || record.safeContactPhone) ? (
                     <strong style={{ fontSize: '1.05rem', letterSpacing: '0.04em', color: '#1f4523' }}>
@@ -468,18 +511,27 @@ export default function RecordPage({ session }) {
                     </strong>
                   ) : (
                     <span className="muted" style={{ fontStyle: 'italic', fontSize: '0.9rem' }}>
-                      <Bi en="Not provided during intake" bn="ইনটেকে নম্বর দেওয়া হয়নি" />
+                      <Bi en="No number" bn="নম্বর নেই" />
                     </span>
                   )}
+                  {' · '}{data.safeContact?.safeTimeWindow || bi('Any time, with care', 'আবেদনকারীর সুবিধাজনক সময়')}
                 </dd>
               </div>
               {data.safeContact?.trustedContactName && <div><dt><Bi en="Trusted contact name" bn="বিশ্বস্ত ব্যক্তির নাম" /></dt><dd>{data.safeContact.trustedContactName}</dd></div>}
               {data.safeContact?.safeCallReason && <div><dt><Bi en="Safety context" bn="নিরাপত্তা সতর্কতা" /></dt><dd className="warn-text">{data.safeContact.safeCallReason}</dd></div>}
               <div><dt><Bi en="Use" bn="অনুমোদিত মাধ্যম" /></dt><dd>{data.safeContact?.allowedChannels?.map(say).join(', ') || bi('PHONE', 'ফোন')}</dd></div>
               <div><dt><Bi en="Never use" bn="নিষিদ্ধ মাধ্যম" /></dt><dd>{data.safeContact?.prohibitedChannels?.map(say).join(', ') || none()}</dd></div>
-              <div><dt><Bi en="Safe time" bn="যোগাযোগের উপযুক্ত সময়" /></dt><dd>{data.safeContact?.safeTimeWindow || data.safeContact?.callingWindow || bi('Anytime with caller discretion', 'আবেদনকারীর সুবিধাজনক সময়')}</dd></div>
               <div><dt><Bi en="If someone else answers" bn="অন্য ব্যক্তি কল রিসিভ করলে করণীয়" /></dt><dd><Term code={data.safeContact?.unknownAnswerAction || 'DISCLOSE_NOTHING'} /></dd></div>
             </dl>}
+            <AddForm en="Record a new safe number" bn="নতুন নিরাপদ নম্বর যুক্ত করুন">
+              <form onSubmit={submitSafeNumber} className="form-stack inline-form">
+                <label htmlFor="safe-number"><Bi en="Number" bn="ফোন নম্বর" /></label>
+                <input id="safe-number" type="tel" inputMode="tel" autoComplete="off" value={safeNumber} onChange={(event) => setSafeNumber(event.target.value)} minLength="3" maxLength="100" required />
+                <label htmlFor="safe-number-time"><Bi en="Safe time" bn="যোগাযোগের উপযুক্ত সময়" /></label>
+                <input id="safe-number-time" value={safeNumberTime} onChange={(event) => setSafeNumberTime(event.target.value)} placeholder={data.safeContact?.safeTimeWindow || ''} maxLength="100" />
+                <button type="submit" className="secondary-button"><Bi en="Save number" bn="নম্বর সংরক্ষণ করুন" /></button>
+              </form>
+            </AddForm>
             {(data.safeContact?.allowedChannels?.includes('PHONE') || record.safeContactPhone) && <button type="button" className="secondary-button" onClick={simulateUnknownAnswer}><Bi en="Simulate call: unknown person answers" bn="মহড়া: অপরিচিত ব্যক্তি কল রিসিভ করলে" /></button>}
           </section>}
         </div>
@@ -549,8 +601,6 @@ export default function RecordPage({ session }) {
                 <h3><Bi en="2. Accept" bn="২. আবেদন গ্রহণ" /></h3>
                 {!showRejectForm ? (
                   <form onSubmit={submitAcceptance} className="form-stack">
-                    <label htmlFor="accept-reason"><Bi en="Decision reason" bn="গ্রহণের কারণ / যৌক্তিকতা" /></label>
-                    <textarea id="accept-reason" value={acceptReason} onChange={(event) => setAcceptReason(event.target.value)} minLength="10" maxLength="1000" required />
                     <button type="submit" disabled={record.reviewState !== 'READY_FOR_DECISION'}>
                       <Bi en="Accept application" bn="আবেদন গ্রহণ করুন" />
                     </button>
@@ -1064,6 +1114,21 @@ export default function RecordPage({ session }) {
 
           {(officer || caseSupport) && data.record.assistance && <DocumentReview applicationId={applicationId} caseType={record.assistance.caseType} documents={data.documents} token={session.token} readOnly={!officer} onChanged={() => setRefresh((value) => value + 1)} />}
 
+          {record.withdrawal && <p className="safety-note"><strong><Bi en="Withdrawn by the applicant:" bn="আবেদনকারী নিজে প্রত্যাহার করেছেন:" /></strong> {tr(record.withdrawal.statement)} <small>· {when(record.withdrawal.recordedAt)}</small></p>}
+          {officer && record.status !== 'CANCELLED' && <Panel id="withdrawal-title" en="Applicant withdrawal" bn="আবেদনকারীর প্রত্যাহার" hint={bi('Only on her own word', 'শুধু আবেদনকারীর নিজের কথায়')}>
+            <p className="muted"><Bi en="Record only what the applicant herself said on a logged call. A representative cannot withdraw for her." bn="কেবল লগ করা কলে আবেদনকারী নিজে যা বলেছেন তা লিপিবদ্ধ করুন। প্রতিনিধি তাঁর পক্ষে প্রত্যাহার করতে পারেন না।" /></p>
+            {applicantCalls.length === 0 ? <p className="warn-text"><Bi en="First log a call where the applicant herself was reached." bn="প্রথমে এমন একটি কল লিপিবদ্ধ করুন যেখানে আবেদনকারী নিজে কথা বলেছেন।" /></p> : <form onSubmit={submitWithdrawal} className="form-stack">
+              <label htmlFor="withdraw-call"><Bi en="Call where she withdrew" bn="যে কলে তিনি প্রত্যাহার করেছেন" /></label>
+              <select id="withdraw-call" value={withdrawAttemptId} onChange={(event) => setWithdrawAttemptId(event.target.value)} required>
+                <option value="">{bi('Choose a call', 'কল নির্বাচন করুন')}</option>
+                {applicantCalls.map((attempt) => <option key={attempt._id} value={attempt._id}>{when(attempt.createdAt)} · {attempt.reason.slice(0, 60)}</option>)}
+              </select>
+              <label htmlFor="withdraw-statement"><Bi en="Her reason, in her words" bn="তাঁর নিজের ভাষায় কারণ" /></label>
+              <textarea id="withdraw-statement" value={withdrawStatement} onChange={(event) => setWithdrawStatement(event.target.value)} minLength="10" maxLength="1000" required />
+              <button type="submit" style={{ background: '#c9302c', borderColor: '#ac2925', color: '#fff' }}><Bi en="Record withdrawal and close" bn="প্রত্যাহার নথিভুক্ত করে বন্ধ করুন" /></button>
+            </form>}
+          </Panel>}
+
           <Panel id="contact-title" en="Contact log" bn="যোগাযোগের বিবরণী ও লগ" open={Boolean(contactFormOpen)} hint={data.contacts.length ? bi(`${data.contacts.length} attempts`, `${num(data.contacts.length)}টি যোগাযোগ লগ`) : none()}>
             <p className="muted"><Bi en="A log only. Nothing is sent from here." bn="এখানে কেবলমাত্র যোগাযোগের প্রচেষ্টা নথিভুক্ত করা হয়; কোনো স্বয়ংক্রিয় বার্তা প্রেরিত হয় না।" /></p>
             {data.contacts.length === 0 && <p>{none()}</p>}
@@ -1112,13 +1177,38 @@ export default function RecordPage({ session }) {
             {data.facts.length === 0 ? <p>{none()}</p> : <div className="table-wrap"><table>
               <caption className="visually-hidden">{bi('Recorded facts and where each came from', 'নথিভুক্ত তথ্য এবং তথ্যের উৎস')}</caption>
               <thead><tr><th scope="col"><Bi en="Fact" bn="তথ্যের বিষয়" /></th><th scope="col"><Bi en="Value" bn="তথ্যমান" /></th><th scope="col"><Bi en="Source" bn="উৎস" /></th><th scope="col"><Bi en="Confirmed by" bn="যাচাইকারী" /></th><th scope="col"><Bi en="Status" bn="স্থিতি" /></th></tr></thead>
-              <tbody>{data.facts.map((fact) => <tr key={fact._id}>
+              <tbody>{data.facts.map((fact) => <Fragment key={fact._id}><tr>
                 <th scope="row"><Term code={fact.field} /></th>
                 <td>{tr(say(fact.value))}</td>
                 <td><Term code={fact.sourceType} /><small className="muted"> · <Term code={fact.captureMethod} /> · {bi('r', 'সং')}{num(fact.revision)}{fact.aiInferred ? ` · ${bi('AI', 'এআই')}` : ''}</small></td>
                 <td><Bi en="Caller" bn="কলার" /> {yesNo(fact.callerConfirmed)}<br /><Bi en="Applicant" bn="আবেদনকারী" /> {yesNo(fact.applicantConfirmed)}</td>
-                <td>{factStatus(fact) && <Badge code={factStatus(fact)} />}</td>
-              </tr>)}</tbody>
+                <td>
+                  {factStatus(fact) && <Badge code={factStatus(fact)} />}
+                  {latestFactIds.has(fact._id) && fact.field !== 'identity.nid' && (!fact.applicantConfirmed || fact.confirmationContactAttemptId) && verifyingFactId !== fact._id && (
+                    <button type="button" className="link-button" onClick={() => { setVerifyingFactId(fact._id); setVerifyAttemptId(''); setVerifyNote('') }}>
+                      {fact.applicantConfirmed ? <Bi en="Undo" bn="বাতিল করুন" /> : <Bi en="Mark verified" bn="যাচাইকৃত চিহ্নিত করুন" />}
+                    </button>
+                  )}
+                </td>
+              </tr>
+              {verifyingFactId === fact._id && <tr><td colSpan="5">
+                <form onSubmit={(event) => submitFactVerification(event, fact)} className="form-stack inline-form">
+                  {!fact.applicantConfirmed && (applicantCalls.length ? <>
+                    <label htmlFor={`verify-call-${fact._id}`}><Bi en="Call where the applicant confirmed" bn="যে কলে আবেদনকারী নিশ্চিত করেছেন" /></label>
+                    <select id={`verify-call-${fact._id}`} value={verifyAttemptId} onChange={(event) => setVerifyAttemptId(event.target.value)} required>
+                      <option value="">{bi('Choose a call', 'কল নির্বাচন করুন')}</option>
+                      {applicantCalls.map((attempt) => <option key={attempt._id} value={attempt._id}>{when(attempt.createdAt)} · {attempt.reason.slice(0, 60)}</option>)}
+                    </select>
+                  </> : <p className="warn-text"><Bi en="First log a call where the applicant herself was reached." bn="প্রথমে এমন একটি কল লিপিবদ্ধ করুন যেখানে আবেদনকারী নিজে কথা বলেছেন।" /></p>)}
+                  <label htmlFor={`verify-note-${fact._id}`}>{fact.applicantConfirmed ? <Bi en="Why undo" bn="বাতিলের কারণ" /> : <Bi en="What she confirmed" bn="তিনি কী নিশ্চিত করেছেন" />}</label>
+                  <textarea id={`verify-note-${fact._id}`} value={verifyNote} onChange={(event) => setVerifyNote(event.target.value)} minLength="10" maxLength="500" required />
+                  <div className="button-row">
+                    <button type="submit" className="secondary-button" disabled={!fact.applicantConfirmed && !applicantCalls.length}>{fact.applicantConfirmed ? <Bi en="Undo verification" bn="যাচাই বাতিল করুন" /> : <Bi en="Mark verified" bn="যাচাইকৃত চিহ্নিত করুন" />}</button>
+                    <button type="button" className="secondary-button" onClick={() => setVerifyingFactId(null)}><Bi en="Cancel" bn="বাতিল" /></button>
+                  </div>
+                </form>
+              </td></tr>}
+              </Fragment>)}</tbody>
             </table></div>}
           </Panel>}
 

@@ -1,10 +1,10 @@
 import { Router } from 'express'
-import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, review, reviewCancellation, search, sendNotice, submit, trackStatus, updateCaseInfo, updateSafeContact, verifyPreMediation } from '../controllers/applicationController.js'
+import { accept, adviceOutcome, addConsent, addContactAttempt, addRepresentative, addTask, finishTask, helplineStatus, overrideReview, priorityOverride, read, readAudit, readContactAttempts, readFacts, readHistory, readRecording, readSafeContact, readTasks, readTranscript, recordCorrection, recordFact, recordFactVerification, withdraw, review, reviewCancellation, search, sendNotice, submit, trackStatus, updateCaseInfo, updateSafeContact, verifyPreMediation } from '../controllers/applicationController.js'
 import { addDocument, approveDocumentBriefing, generateBriefing, readBriefing, readDocuments, readEvidenceAccess } from '../controllers/documentController.js'
 import { readForApplication, routingDecision, send } from '../controllers/referralController.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 import { limitStatusLookup } from '../middleware/rateLimit.js'
-import { applicationIdParam, factIdParam, taskIdParam, validateAcceptance, validateAdviceOutcome, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEditCaseInfo, validateEmptyBody, validateFact, validateNoticeDispatch, validatePreMediationVerify, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask, validateTrackLookup } from '../validators/requests.js'
+import { applicationIdParam, factIdParam, taskIdParam, validateAcceptance, validateAdviceOutcome, validateApplicantWithdrawal, validateFactVerification, validateBriefingApproval, validateConsent, validateContactAttempt, validateCorrection, validateDocument, validateEditCaseInfo, validateEmptyBody, validateFact, validateNoticeDispatch, validatePreMediationVerify, validatePriorityOverride, validateReferral, validateRepresentation, validateReview, validateReviewOverride, validateRoutingDecision, validateSafeContact, validateSearch, validateStatusLookup, validateSubmission, validateTask, validateTrackLookup } from '../validators/requests.js'
 import { cancellationRequestParam, validateCancellationReview } from '../validators/cancellation.js'
 
 const router = Router()
@@ -38,6 +38,8 @@ router.post('/:applicationId/representations', applicationIdParam, requireRole('
 router.get('/:applicationId/facts', applicationIdParam, requireRole('DLAO_OFFICER'), readFacts)
 router.post('/:applicationId/facts', applicationIdParam, requireRole('DLAO_OFFICER'), validateFact, recordFact)
 router.post('/:applicationId/facts/:factId/corrections', applicationIdParam, factIdParam, requireRole('DLAO_OFFICER'), validateCorrection, recordCorrection)
+router.post('/:applicationId/facts/:factId/verification', applicationIdParam, factIdParam, requireRole('DLAO_OFFICER'), validateFactVerification, recordFactVerification)
+router.post('/:applicationId/withdrawal', applicationIdParam, requireRole('DLAO_OFFICER'), validateApplicantWithdrawal, withdraw)
 router.post('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER'), validateSafeContact, updateSafeContact)
 router.get('/:applicationId/safe-contact', applicationIdParam, requireRole('DLAO_OFFICER', 'PANEL_LAWYER'), readSafeContact)
 router.post('/:applicationId/consents', applicationIdParam, requireRole('DLAO_OFFICER'), validateConsent, addConsent)

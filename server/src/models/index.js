@@ -100,6 +100,13 @@ const applicationSchema = new Schema({
     status: { type: String, enum: ['NOT_STARTED', 'IN_PROGRESS', 'VERIFIED', 'UNREACHABLE'], default: 'NOT_STARTED' },
     verifiedAt: Date,
   },
+  // Set only when the applicant herself withdrew, confirmed in a logged contact; never on a representative's word.
+  withdrawal: {
+    contactAttemptId: ref('ContactAttempt', false),
+    statement: String,
+    recordedByUserId: ref('User', false),
+    recordedAt: Date,
+  },
   notices: [{
     recipient: { type: String, enum: ['PETITIONER', 'RESPONDENT'] },
     memoNo: String,
@@ -155,6 +162,8 @@ const factSchema = new Schema({
   applicantConfirmed: { type: Boolean, default: false },
   confirmedByPersonId: ref('Person', false),
   confirmationAttestation: String,
+  // The logged call in which the applicant herself confirmed (or the officer undid) this fact.
+  confirmationContactAttemptId: ref('ContactAttempt', false),
   aiInferred: { type: Boolean, default: false },
   supersedesFactId: ref('CaseFact', false),
   revision: { type: Number, required: true },

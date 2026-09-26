@@ -3392,3 +3392,9 @@ thead th { font-size: .8rem; color: #4e5751; }
   @page { size: A4 landscape; margin: 12mm; }
 }
 .identity-video, .identity-image { display: block; width: min(100%, 480px); max-height: 360px; object-fit: contain; border-radius: 8px; background: var(--surface, #f5f3ef); }
+
+/* Small inline actions in tables (fact verification) keep a 44px target without looking like a primary button. */
+.link-button { display: block; margin-top: .35rem; min-height: 44px; padding: .25rem 0; color: #1f6c9f; background: none; border: 0; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.link-button:hover { background: none; color: #174f75; }
+.button-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+.warn-text { color: #9f2f2d; }
