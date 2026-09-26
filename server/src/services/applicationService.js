@@ -1789,26 +1789,28 @@ export async function editCaseInformation(applicationId, input, actor) {
       await person.save({ session })
     }
 
+    // A field sent as text replaces the stored value, so an officer can also clear a wrong phone or address;
+    // a field left out keeps its value. Names are never blanked.
+    const pick = (source, key, previous) => typeof source?.[key] === 'string' ? source[key].trim() : (previous ?? '')
     if (input.petitioner) {
+      const previous = application.petitioner ?? {}
       application.petitioner = {
-        name: input.petitioner.name?.trim() || application.petitioner?.name || input.applicantName?.trim() || person?.displayName || '',
-        phone: input.petitioner.phone?.trim() || application.petitioner?.phone || '',
-        address: input.petitioner.address?.trim() || application.petitioner?.address || '',
+        name: pick(input.petitioner, 'name', previous.name) || previous.name || input.applicantName?.trim() || person?.displayName || '',
+        phone: pick(input.petitioner, 'phone', previous.phone),
+        address: pick(input.petitioner, 'address', previous.address),
+        nid: pick(input.petitioner, 'nid', previous.nid),
       }
     } else if (input.applicantName?.trim()) {
-      application.petitioner = {
-        name: input.applicantName.trim(),
-        phone: application.petitioner?.phone || '',
-        address: application.petitioner?.address || '',
-      }
+      application.petitioner = { ...(application.petitioner?.toObject?.() ?? application.petitioner ?? {}), name: input.applicantName.trim() }
     }
 
     if (input.respondent) {
+      const previous = application.respondent ?? {}
       application.respondent = {
-        name: input.respondent.name?.trim() || application.respondent?.name || '',
-        phone: input.respondent.phone?.trim() || application.respondent?.phone || '',
-        address: input.respondent.address?.trim() || application.respondent?.address || '',
-        relationship: input.respondent.relationship?.trim() || application.respondent?.relationship || '',
+        name: pick(input.respondent, 'name', previous.name) || previous.name || '',
+        phone: pick(input.respondent, 'phone', previous.phone),
+        address: pick(input.respondent, 'address', previous.address),
+        relationship: pick(input.respondent, 'relationship', previous.relationship),
       }
     }
 

@@ -11,6 +11,9 @@ export const demoAccounts = [
   ['demo3.lawyer', 'Adv. Farhana Yasmin', 'PANEL_LAWYER', 'lawyer'],
   ['demo4.lawyer', 'Adv. Kamrul Hasan', 'PANEL_LAWYER', 'lawyer'],
   ['demo5.lawyer', 'Adv. Nasreen Akhter', 'PANEL_LAWYER', 'lawyer'],
+  ['demo6.lawyer', 'Adv. Sharmin Sultana', 'PANEL_LAWYER', 'lawyer'],
+  ['demo7.lawyer', 'Adv. Mahbubur Rahman', 'PANEL_LAWYER', 'lawyer'],
+  ['demo8.lawyer', 'Adv. Dilruba Khanam', 'PANEL_LAWYER', 'lawyer'],
   ['demo.receiving', 'Demo Receiving DLAO', 'RECEIVING_DLAO', 'receiving_dlao', 'JHENAIDAH-DEMO'],
   ['demo.support', 'Demo Case Support', 'CASE_SUPPORT', 'case_support'],
   ['demo.clao', 'Demo CLAO', 'CLAO', 'clao'],
@@ -18,12 +21,16 @@ export const demoAccounts = [
 ]
 export const demoPassword = (username) => username.endsWith('.lawyer') ? '123' : '1234'
 
+// One example lawyer per domain, so each domain filter shows exactly one lawyer and "All Domains" shows all eight.
 const specializations = {
-  'demo.lawyer': ['FAMILY_LAW', 'GENDER_BASED_VIOLENCE', 'CHILD_RIGHTS'],
-  'demo2.lawyer': ['LAND_PROPERTY', 'CIVIL_LAW'],
-  'demo3.lawyer': ['CHILD_RIGHTS', 'HUMAN_RIGHTS', 'FAMILY_LAW'],
-  'demo4.lawyer': ['CRIMINAL_LAW', 'HUMAN_RIGHTS'],
-  'demo5.lawyer': ['LABOUR_LAW', 'CIVIL_LAW'],
+  'demo.lawyer': ['FAMILY_LAW'],
+  'demo2.lawyer': ['LAND_PROPERTY'],
+  'demo3.lawyer': ['CHILD_RIGHTS'],
+  'demo4.lawyer': ['CRIMINAL_LAW'],
+  'demo5.lawyer': ['LABOUR_LAW'],
+  'demo6.lawyer': ['GENDER_BASED_VIOLENCE'],
+  'demo7.lawyer': ['CIVIL_LAW'],
+  'demo8.lawyer': ['HUMAN_RIGHTS'],
 }
 
 // Development demo identities are fixed; production seeding must supply private credentials explicitly.

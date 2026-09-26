@@ -74,6 +74,7 @@ const applicationSchema = new Schema({
     name: { type: String, trim: true },
     phone: { type: String, trim: true },
     address: { type: String, trim: true },
+    nid: { type: String, trim: true },
   },
   respondent: {
     name: { type: String, trim: true },

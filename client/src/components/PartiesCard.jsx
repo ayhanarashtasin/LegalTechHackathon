@@ -2,10 +2,59 @@ import { useState } from 'react'
 import { api } from '../services/api.js'
 import { Bi, bi, num, when, say } from './Bi.jsx'
 
+const partyFields = {
+  petitioner: [['name', 'Name', 'নাম', 120], ['phone', 'Phone (Number)', 'মোবাইল নম্বর', 20], ['address', 'Address', 'ঠিকানা', 300], ['nid', 'NID', 'এনআইডি', 17]],
+  respondent: [['name', 'Name', 'নাম', 120], ['phone', 'Phone (Number)', 'মোবাইল নম্বর', 20], ['address', 'Address', 'ঠিকানা', 300], ['relationship', 'Relationship', 'সম্পর্ক', 120]],
+}
+
+// The DLAO officer edits both parties in place; a reason is required and the change is kept in the audit history.
+function PartiesEditForm({ applicationId, token, petitioner, respondent, onSaved, onCancel }) {
+  const [values, setValues] = useState(() => ({
+    petitioner: Object.fromEntries(partyFields.petitioner.map(([key]) => [key, petitioner[key] ?? ''])),
+    respondent: Object.fromEntries(partyFields.respondent.map(([key]) => [key, respondent[key] ?? ''])),
+  }))
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const change = (party, key, value) => setValues((current) => ({ ...current, [party]: { ...current[party], [key]: value } }))
+
+  async function save(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      await api(`/api/applications/${applicationId}/case-info`, { token, method: 'PUT', body: { ...values, reason: reason.trim() } })
+      onSaved()
+    } catch (failure) { setError(failure.message) } finally { setSaving(false) }
+  }
+
+  return <form onSubmit={save} className="form-stack" aria-labelledby="parties-edit-title" style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #EAEAEA', borderRadius: '6px', backgroundColor: '#FFFFFF' }}>
+    <h3 id="parties-edit-title" style={{ margin: 0, fontSize: '1rem' }}><Bi en="Edit parties" bn="পক্ষের তথ্য সংশোধন" /></h3>
+    {error && <p role="alert" className="error">{error}</p>}
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
+      {[['petitioner', 'Petitioner / Complainant (বাদী)', 'বাদী (আবেদনকারী)'], ['respondent', 'Respondent / Opposing Party (বিবাদী)', 'বিবাদী (প্রতিপক্ষ)']].map(([party, en, bn]) => <fieldset key={party} className="form-stack">
+        <legend><Bi en={en} bn={bn} /></legend>
+        {partyFields[party].map(([key, label, labelBn, max]) => <div key={key} className="form-stack">
+          <label htmlFor={`edit-${party}-${key}`}>{bi(label, labelBn)}</label>
+          <input id={`edit-${party}-${key}`} value={values[party][key]} onChange={(event) => change(party, key, event.target.value)} maxLength={max}
+            type={key === 'phone' ? 'tel' : 'text'} inputMode={key === 'nid' ? 'numeric' : undefined} autoComplete="off" required={key === 'name'} minLength={key === 'name' ? 2 : undefined} />
+        </div>)}
+      </fieldset>)}
+    </div>
+    <label htmlFor="parties-edit-reason"><Bi en="Reason for the change" bn="সংশোধনের কারণ" /></label>
+    <input id="parties-edit-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength="5" maxLength="500" required />
+    <div className="choice-row">
+      <button type="submit" disabled={saving}>{saving ? bi('Saving…', 'সংরক্ষণ হচ্ছে…') : bi('Save parties', 'সংরক্ষণ করুন')}</button>
+      <button type="button" className="secondary-button" onClick={onCancel}>{bi('Cancel', 'বাতিল')}</button>
+    </div>
+  </form>
+}
+
 export function PartiesCard({ record, application, token, officer, onUpdated }) {
   const targetRecord = record || application || {}
   const [showVerificationForm, setShowVerificationForm] = useState(false)
   const [showNoticeForm, setShowNoticeForm] = useState(false)
+  const [showEditForm, setShowEditForm] = useState(false)
 
   // Verification state
   const prevVerify = targetRecord.preMediationVerification || {}
@@ -114,12 +163,21 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
         </div>
 
         {officer && (
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="secondary-button"
               style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
-              onClick={() => { setShowVerificationForm(!showVerificationForm); setShowNoticeForm(false) }}
+              aria-expanded={showEditForm}
+              onClick={() => { setShowEditForm(!showEditForm); setShowVerificationForm(false); setShowNoticeForm(false) }}
+            >
+              {showEditForm ? bi('Close editing', 'সংশোধন বন্ধ') : bi('Edit parties', 'পক্ষের তথ্য সংশোধন')}
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
+              onClick={() => { setShowVerificationForm(!showVerificationForm); setShowNoticeForm(false); setShowEditForm(false) }}
             >
               {showVerificationForm ? bi('Hide Verification', 'যাচাই ফর্ম বন্ধ') : bi('Call Verification', 'ফোন যাচাইকরণ')}
             </button>
@@ -127,7 +185,7 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
               type="button"
               className="secondary-button"
               style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
-              onClick={() => { setShowNoticeForm(!showNoticeForm); setShowVerificationForm(false) }}
+              onClick={() => { setShowNoticeForm(!showNoticeForm); setShowVerificationForm(false); setShowEditForm(false) }}
             >
               {showNoticeForm ? bi('Hide Notice', 'নোটিশ ফর্ম বন্ধ') : bi('Send Notice (নোটিশ প্রেরণ)', 'নোটিশ প্রেরণ')}
             </button>
@@ -204,6 +262,15 @@ export function PartiesCard({ record, application, token, officer, onUpdated }) 
           </dl>
         </div>
       </div>
+
+      {officer && showEditForm && <PartiesEditForm
+        applicationId={targetRecord.applicationId}
+        token={token}
+        petitioner={{ ...petitioner, name: petitioner.name || targetRecord.applicantName || '', phone: petitioner.phone || targetRecord.safeContactPhone || '' }}
+        respondent={{ ...respondent, name: respondent.name || targetRecord.respondentFromCaseFile || '' }}
+        onCancel={() => setShowEditForm(false)}
+        onSaved={() => { setShowEditForm(false); setLocalNotice(bi('Party details saved. The change is recorded in the case history.', 'পক্ষের তথ্য সংরক্ষিত হয়েছে। পরিবর্তনটি মামলার ইতিহাসে নথিভুক্ত।')); onUpdated?.() }}
+      />}
 
       {/* Pre-Mediation Call Verification Form */}
       {showVerificationForm && (

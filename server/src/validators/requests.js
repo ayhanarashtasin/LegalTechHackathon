@@ -440,6 +440,19 @@ export function documentVersionParam(request, _response, next) {
 export function validateEditCaseInfo(request, _response, next) {
   if (!request.body || typeof request.body !== 'object') fail('A JSON object is required.')
   if (typeof request.body.reason !== 'string' || !request.body.reason.trim()) fail('A valid reason is required for case information edits.')
+  const parties = { petitioner: ['name', 'phone', 'address', 'nid'], respondent: ['name', 'phone', 'address', 'relationship'] }
+  for (const [party, fields] of Object.entries(parties)) {
+    const value = request.body[party]
+    if (value === undefined) continue
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((key) => !fields.includes(key))) fail('Party details are invalid.')
+    for (const key of fields) {
+      if (value[key] === undefined) continue
+      if (typeof value[key] !== 'string' || value[key].trim().length > (key === 'address' ? 300 : 120)) fail(`The ${party} ${key} is too long or invalid.`)
+      const text = value[key].trim()
+      if (key === 'phone' && text && !/^\+?[0-9][0-9 -]{5,19}$/.test(text)) fail(`The ${party} phone number is invalid.`)
+      if (key === 'nid' && text && !/^\d{10,17}$/.test(text)) fail('The NID must be 10 to 17 digits.')
+    }
+  }
   next()
 }
 
